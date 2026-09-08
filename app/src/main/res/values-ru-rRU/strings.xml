@@ -58,10 +58,4 @@
 		<item>@string/rule_action_proxy</item>
 		<item>@string/rule_action_direct</item>
 	</string-array>
-	<string name="connections">Соединения</string>
-	<string name="conn_clear">Очистить записи</string>
-	<string name="conn_empty">Нет соединений (сначала запустите туннель)</string>
-	<string name="conn_now">Сейчас  TCP %1$d · UDP %2$d · всего %3$d</string>
-	<string name="conn_total">Записано соединений: %1$d</string>
-	<string name="conn_hint">Читается из /proc/net во время работы туннеля, только для приложений через прокси; число пакетов движок не выдаёт.</string>
 </resources>

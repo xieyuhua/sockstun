@@ -12,7 +12,7 @@ A simple and lightweight VPN over socks5 proxy for Android. It is based on a hig
 * IPv4/IPv6 dual stack.
 * Global/per-App modes.
 * Traffic statistics (live rate, session and total usage, per-app usage).
-* Connection view (TCP/UDP sockets of the proxied apps, with records).
+* Clash subscription: import a remote clash.yml, pick a SOCKS5 node, test latency.
 * Routing rules by domain / IP / CIDR: proxy or direct.
 * Multiple profiles (up to 13), Quick Settings tile, start on boot.
 

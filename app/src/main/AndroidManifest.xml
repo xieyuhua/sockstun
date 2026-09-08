@@ -46,6 +46,8 @@
 		<activity android:name=".AppListActivity" android:label="@string/app_name"/>
 		<activity android:name=".ServerActivity" android:label="@string/section_server"
 			android:exported="false" android:parentActivityName=".MainActivity"/>
+		<activity android:name=".SubscribeActivity" android:label="@string/subscribe"
+			android:exported="false" android:parentActivityName=".MainActivity"/>
 		<activity android:name=".DnsActivity" android:label="@string/section_dns"
 			android:exported="false" android:parentActivityName=".MainActivity"/>
 		<activity android:name=".RoutingActivity" android:label="@string/section_routing"
@@ -53,8 +55,6 @@
 		<activity android:name=".LogActivity" android:label="@string/log"
 			android:exported="false" android:parentActivityName=".MainActivity"/>
 		<activity android:name=".RulesActivity" android:label="@string/rules"
-			android:exported="false" android:parentActivityName=".MainActivity"/>
-		<activity android:name=".ConnActivity" android:label="@string/connections"
 			android:exported="false" android:parentActivityName=".MainActivity"/>
 	</application>
 	<uses-permission android:name="android.permission.INTERNET"/>

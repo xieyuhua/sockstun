@@ -90,18 +90,26 @@
 		<item>@string/rule_action_direct</item>
 	</string-array>
 
-	<string name="connections">Connections</string>
-	<string name="conn_clear">Clear records</string>
-	<string name="conn_empty">No connections (start the tunnel first)</string>
-	<string name="conn_now">Now  TCP %1$d · UDP %2$d · total %3$d</string>
-	<string name="conn_total">%1$d connections recorded</string>
-	<string name="conn_hint">Read from /proc/net while the tunnel runs, for the proxied apps only. Packet counts are not exposed by the tunnel engine.</string>
-	<string name="conn_blocked">本机系统禁止读取 /proc/net（Android 10+ 隐私限制），无法列出连接明细。隧道与流量统计不受影响。</string>
-
 	<string name="theme">Theme</string>
 	<string name="theme_neon">Neon Green</string>
 	<string name="theme_cyan">Cyber Cyan</string>
 	<string name="theme_purple">Midnight Purple</string>
 	<string name="theme_amber">Amber</string>
 	<string name="theme_light">Paper Light</string>
+
+	<string name="subscribe">订阅</string>
+	<string name="sub_url_hint">clash.yml 订阅地址</string>
+	<string name="sub_fetch">拉取订阅</string>
+	<string name="sub_fetching">拉取中…</string>
+	<string name="sub_test_all">测速全部</string>
+	<string name="sub_test">测速</string>
+	<string name="sub_use">使用</string>
+	<string name="sub_empty">暂无节点，先拉取订阅</string>
+	<string name="sub_latency_untested">未测速</string>
+	<string name="sub_latency_failed">失败</string>
+	<string name="sub_fetched">已拉取 %d 个节点</string>
+	<string name="sub_no_socks5">该订阅没有可用的 SOCKS5 节点</string>
+	<string name="sub_fetch_failed">拉取失败：%s</string>
+	<string name="sub_applied">已应用：%s</string>
+	<string name="sub_invalid_url">请输入有效的订阅地址</string>
 </resources>

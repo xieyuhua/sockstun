@@ -29,6 +29,9 @@ public class Preferences
 	public static final String SOCKS_PORT = "SocksPort";
 	public static final String SOCKS_USER = "SocksUser";
 	public static final String SOCKS_PASS = "SocksPass";
+	public static final String SUB_URL = "SubUrl";
+	public static final String SUB_NODES = "SubNodes";
+	public static final String SUB_SELECTED = "SubSelected";
 	public static final String DNS_IPV4 = "DnsIpv4";
 	public static final String DNS_IPV6 = "DnsIpv6";
 	public static final String IPV4 = "Ipv4";
@@ -52,12 +55,6 @@ public class Preferences
 	public static final String STATS_RATE_RX = "StatsRateRx";
 	public static final String STATS_APP_BASE = "StatsAppBase";
 	public static final String STATS_APP_TOTAL = "StatsAppTotal";
-	public static final String CONN_TCP = "ConnTcp";
-	public static final String CONN_UDP = "ConnUdp";
-	public static final String CONN_TOTAL = "ConnTotal";
-	public static final String CONN_APP_TOTAL = "ConnAppTotal";
-	public static final String CONN_LIST = "ConnList";
-	public static final String CONN_UNREADABLE = "ConnUnreadable";
 	public static final String THEME = "Theme";
 
 	public static final int MAX_PROFILES = 13;
@@ -181,6 +178,9 @@ public class Preferences
 		editor.putStringSet(key(dst, APPS), new HashSet<String>(prefs.getStringSet(key(src, APPS), new HashSet<String>())));
 		editor.putString(key(dst, RULES), prefs.getString(key(src, RULES), ""));
 		editor.putBoolean(key(dst, RULES_DEFAULT_PROXY), prefs.getBoolean(key(src, RULES_DEFAULT_PROXY), true));
+		editor.putString(key(dst, SUB_URL), prefs.getString(key(src, SUB_URL), ""));
+		editor.putString(key(dst, SUB_NODES), prefs.getString(key(src, SUB_NODES), ""));
+		editor.putString(key(dst, SUB_SELECTED), prefs.getString(key(src, SUB_SELECTED), ""));
 	}
 
 	private void removeProfile(SharedPreferences.Editor editor, int profile) {
@@ -200,6 +200,9 @@ public class Preferences
 		editor.remove(key(profile, APPS));
 		editor.remove(key(profile, RULES));
 		editor.remove(key(profile, RULES_DEFAULT_PROXY));
+		editor.remove(key(profile, SUB_URL));
+		editor.remove(key(profile, SUB_NODES));
+		editor.remove(key(profile, SUB_SELECTED));
 	}
 
 	public int getProfileCount() {
@@ -306,6 +309,37 @@ public class Preferences
 	public void setSocksPassword(String pass) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(SOCKS_PASS), pass);
+		editor.commit();
+	}
+
+	/* Remote clash.yml subscription (per profile). */
+	public String getSubUrl() {
+		return prefs.getString(key(SUB_URL), "");
+	}
+
+	public void setSubUrl(String url) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SUB_URL), url);
+		editor.commit();
+	}
+
+	public String getSubNodes() {
+		return prefs.getString(key(SUB_NODES), "");
+	}
+
+	public void setSubNodes(String json) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SUB_NODES), json);
+		editor.commit();
+	}
+
+	public String getSubSelected() {
+		return prefs.getString(key(SUB_SELECTED), "");
+	}
+
+	public void setSubSelected(String name) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SUB_SELECTED), name);
 		editor.commit();
 	}
 
@@ -555,56 +589,6 @@ public class Preferences
 			sb.append(e.getKey()).append(':').append(v[0]).append(':').append(v[1]);
 		}
 		return sb.toString();
-	}
-
-	/* Connection snapshot taken from /proc/net, refreshed once a second by
-	   the tunnel service. ConnList holds "proto|local|remote|state|pkg;...". */
-	public int getConnTcp() {
-		return prefs.getInt(CONN_TCP, 0);
-	}
-
-	public int getConnUdp() {
-		return prefs.getInt(CONN_UDP, 0);
-	}
-
-	public long getConnTotal() {
-		return prefs.getLong(CONN_TOTAL, 0);
-	}
-
-	public String getConnAppTotal() {
-		return prefs.getString(CONN_APP_TOTAL, "");
-	}
-
-	public String getConnList() {
-		return prefs.getString(CONN_LIST, "");
-	}
-
-	public void setConnections(int tcp, int udp, long total, String appTotal, String list) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putInt(CONN_TCP, tcp);
-		editor.putInt(CONN_UDP, udp);
-		editor.putLong(CONN_TOTAL, total);
-		editor.putString(CONN_APP_TOTAL, appTotal);
-		editor.putString(CONN_LIST, list);
-		editor.commit();
-	}
-
-	public void resetConnections() {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putLong(CONN_TOTAL, 0);
-		editor.putString(CONN_APP_TOTAL, "");
-		editor.commit();
-	}
-
-	/* True when /proc/net could not be read on this device (Android 10+). */
-	public boolean getConnUnreadable() {
-		return prefs.getBoolean(CONN_UNREADABLE, false);
-	}
-
-	public void setConnUnreadable(boolean v) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putBoolean(CONN_UNREADABLE, v);
-		editor.commit();
 	}
 
 	/* The set of packages whose traffic goes through the tunnel:

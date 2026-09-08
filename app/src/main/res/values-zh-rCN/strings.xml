@@ -90,10 +90,4 @@
 		<item>@string/rule_action_direct</item>
 	</string-array>
 
-	<string name="connections">连接</string>
-	<string name="conn_clear">清空记录</string>
-	<string name="conn_empty">暂无连接（请先连接隧道）</string>
-	<string name="conn_now">当前 TCP %1$d · UDP %2$d · 合计 %3$d</string>
-	<string name="conn_total">累计记录 %1$d 条连接</string>
-	<string name="conn_hint">隧道运行时从 /proc/net 读取，仅统计走代理的应用；隧道引擎不提供包数量。</string>
 </resources>

@@ -10,6 +10,10 @@
 			android:icon="@drawable/ic_server"
 			android:title="@string/section_server"/>
 		<item
+			android:id="@+id/nav_subscribe"
+			android:icon="@drawable/ic_subscribe"
+			android:title="@string/subscribe"/>
+		<item
 			android:id="@+id/nav_dns"
 			android:icon="@drawable/ic_dns"
 			android:title="@string/section_dns"/>
@@ -25,10 +29,6 @@
 			android:id="@+id/nav_rules"
 			android:icon="@drawable/ic_rules"
 			android:title="@string/rules"/>
-		<item
-			android:id="@+id/nav_conn"
-			android:icon="@drawable/ic_connections"
-			android:title="@string/connections"/>
 		<item
 			android:id="@+id/nav_log"
 			android:icon="@drawable/ic_log"

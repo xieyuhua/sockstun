@@ -103,6 +103,8 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 					Intent intent = null;
 					if (id == R.id.nav_server)
 					  intent = new Intent(MainActivity.this, ServerActivity.class);
+					else if (id == R.id.nav_subscribe)
+					  intent = new Intent(MainActivity.this, SubscribeActivity.class);
 					else if (id == R.id.nav_dns)
 					  intent = new Intent(MainActivity.this, DnsActivity.class);
 					else if (id == R.id.nav_routing)
@@ -113,8 +115,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 					  intent = new Intent(MainActivity.this, LogActivity.class);
 					else if (id == R.id.nav_rules)
 					  intent = new Intent(MainActivity.this, RulesActivity.class);
-					else if (id == R.id.nav_conn)
-					  intent = new Intent(MainActivity.this, ConnActivity.class);
 					else if (id == R.id.nav_theme) {
 					  showThemeDialog();
 					  drawer.closeDrawers();
