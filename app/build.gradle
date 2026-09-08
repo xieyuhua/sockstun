@@ -1,0 +1,95 @@
+apply plugin: 'com.android.application'
+
+/* Auto increment version on each package build (versionName += 0.01, versionCode += 1) */
+def versionPropsFile = file('version.properties')
+def versionProps = new Properties()
+if (versionPropsFile.exists()) {
+	versionProps.load(new FileInputStream(versionPropsFile))
+} else {
+	versionProps['VERSION_CODE'] = '12'
+	versionProps['VERSION_NAME'] = '8.0'
+}
+
+def buildTaskNames = gradle.startParameter.taskNames
+def isPackageBuild = buildTaskNames.any { name ->
+	def n = name.toLowerCase()
+	n.contains('assemble') || n.contains('bundle') || n.contains('build') || n.contains('install')
+}
+
+def pkgVersionCode = versionProps['VERSION_CODE'].toInteger()
+def pkgVersionName = versionProps['VERSION_NAME'].toString()
+
+if (isPackageBuild) {
+	pkgVersionCode += 1
+	pkgVersionName = new BigDecimal(pkgVersionName)
+		.add(new BigDecimal('0.01')).setScale(2, java.math.RoundingMode.HALF_UP).toString()
+	versionProps['VERSION_CODE'] = pkgVersionCode.toString()
+	versionProps['VERSION_NAME'] = pkgVersionName
+	versionProps.store(new FileOutputStream(versionPropsFile), 'Auto-managed version')
+}
+
+android {
+	namespace "hev.sockstun"
+	compileSdkVersion 34
+
+	defaultConfig {
+		applicationId "hev.sockstun"
+		minSdkVersion 24
+		targetSdkVersion 34
+		versionCode pkgVersionCode
+		versionName pkgVersionName
+		setProperty("archivesBaseName", "$applicationId-$versionName")
+		ndk {
+			abiFilters "armeabi-v7a", "arm64-v8a",'x86','x86_64'
+		}
+	}
+
+	signingConfigs {
+		release {
+		}
+	}
+
+	buildTypes {
+		release {
+			minifyEnabled false
+			signingConfig signingConfigs.release
+		}
+		debug {
+			minifyEnabled false
+			signingConfig signingConfigs.release
+		}
+	}
+
+	def propsFile = rootProject.file('store.properties')
+	def configName = 'release'
+
+	if (propsFile.exists() && android.signingConfigs.hasProperty(configName)) {
+		def props = new Properties()
+		props.load(new FileInputStream(propsFile))
+		if (props!=null && props.containsKey('storeFile')) {
+			android.signingConfigs[configName].storeFile = rootProject.file(props['storeFile'])
+			android.signingConfigs[configName].storePassword = props['storePassword']
+			android.signingConfigs[configName].keyAlias = props['keyAlias']
+			android.signingConfigs[configName].keyPassword = props['keyPassword']
+		}
+	}
+
+	lintOptions {
+		checkReleaseBuilds false
+		// Or, if you prefer, you can continue to check for errors in release builds,
+		// but continue the build even when errors are found:
+		abortOnError false
+	}
+
+	dependenciesInfo {
+		// Disables dependency metadata when building APKs.
+		includeInApk = false
+		// Disables dependency metadata when building Android App Bundles.
+		includeInBundle = false
+	}
+}
+
+dependencies {
+	implementation 'androidx.appcompat:appcompat:1.7.0'
+	implementation 'com.google.android.material:material:1.12.0'
+}
