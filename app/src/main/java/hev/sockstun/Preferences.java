@@ -31,6 +31,7 @@ public class Preferences
 	public static final String SOCKS_PASS = "SocksPass";
 	public static final String SUB_URL = "SubUrl";
 	public static final String SUB_NODES = "SubNodes";
+	public static final String SUB_RAW = "SubRaw";
 	public static final String SUB_SELECTED = "SubSelected";
 	public static final String DNS_IPV4 = "DnsIpv4";
 	public static final String DNS_IPV6 = "DnsIpv6";
@@ -180,6 +181,7 @@ public class Preferences
 		editor.putBoolean(key(dst, RULES_DEFAULT_PROXY), prefs.getBoolean(key(src, RULES_DEFAULT_PROXY), true));
 		editor.putString(key(dst, SUB_URL), prefs.getString(key(src, SUB_URL), ""));
 		editor.putString(key(dst, SUB_NODES), prefs.getString(key(src, SUB_NODES), ""));
+		editor.putString(key(dst, SUB_RAW), prefs.getString(key(src, SUB_RAW), ""));
 		editor.putString(key(dst, SUB_SELECTED), prefs.getString(key(src, SUB_SELECTED), ""));
 	}
 
@@ -202,6 +204,7 @@ public class Preferences
 		editor.remove(key(profile, RULES_DEFAULT_PROXY));
 		editor.remove(key(profile, SUB_URL));
 		editor.remove(key(profile, SUB_NODES));
+		editor.remove(key(profile, SUB_RAW));
 		editor.remove(key(profile, SUB_SELECTED));
 	}
 
@@ -340,6 +343,18 @@ public class Preferences
 	public void setSubSelected(String name) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(SUB_SELECTED), name);
+		editor.commit();
+	}
+
+	/* Raw clash.yml text of the subscription (already base64-decoded if the
+	   provider shipped it that way). Fed verbatim to mihomo. */
+	public String getSubRaw() {
+		return prefs.getString(key(SUB_RAW), "");
+	}
+
+	public void setSubRaw(String yaml) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SUB_RAW), yaml);
 		editor.commit();
 	}
 

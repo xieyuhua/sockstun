@@ -3,7 +3,7 @@
  Name        : TProxyService.java
  Author      : hev <r@hev.cc>
  Copyright   : Copyright (c) 2024 xyz
- Description : TProxy Service
+ Description : TProxy Service (mihomo / clash.meta core)
  ============================================================================
  */
 
@@ -26,8 +26,6 @@ import android.app.Notification.Builder;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.net.VpnService;
-import android.net.TrafficStats;
-import android.net.IpPrefix;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.ServiceInfo;
@@ -48,22 +46,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import android.widget.Toast;
 
-public class TProxyService extends VpnService {
-	/* These signatures must match exactly what the prebuilt
-	   libhev-socks5-tunnel.so registers in JNI_OnLoad:
-	     class  hev/sockstun/TProxyService
-	     TProxyStartService (Ljava/lang/String;I)V   -> void
-	     TProxyStopService  ()V                      -> void
-	     TProxyGetStats     ()[J                     -> long[]
-	   A return-type mismatch (e.g. boolean instead of void) makes
-	   RegisterNatives() fail silently, and the call then dies with
-	   UnsatisfiedLinkError "No implementation found for ...". */
-	private static native void TProxyStartService(String config_path, int fd);
-	private static native void TProxyStopService();
-	private static native long[] TProxyGetStats();
+import io.github.oviron.libmihomo.Clash;
+import io.github.oviron.libmihomo.TunInterface;
+import io.github.oviron.libmihomo.InvokeInterface;
 
+public class TProxyService extends VpnService {
 	public static final String ACTION_CONNECT = "hev.sockstun.CONNECT";
 	public static final String ACTION_DISCONNECT = "hev.sockstun.DISCONNECT";
 
@@ -71,13 +62,6 @@ public class TProxyService extends VpnService {
 	private static final int NOTIFY_ID = 1;
 	private static final String NOTIFY_CHANNEL = "socks5";
 	private static final long STATS_INTERVAL = 1000;
-
-	/* Layout of the long[] returned by TProxyGetStats():
-	   [0] = bytes sent (tx / up), [1] = bytes received (rx / down).
-	   Swap these two constants if a future build of the native library
-	   reports them the other way round. */
-	private static final int STATS_TX = 0;
-	private static final int STATS_RX = 1;
 
 	private Handler statsHandler = null;
 	private Runnable statsTask = null;
@@ -186,55 +170,56 @@ public class TProxyService extends VpnService {
 			redirectStdioToLog(tproxy_log);
 		}
 
-		/* Load the native tunnel library (JNI). If it fails to load, or the
-		   .so has no JNI entry points, record the reason so it shows up in the
-		   log viewer instead of failing silently with no proxy and no logs. */
+		/* Load the embedded mihomo core (libclash.so + libmihomo-jni.so). */
 		try {
-			System.loadLibrary("hev-socks5-tunnel");
-			appendLog("library libhev-socks5-tunnel.so loaded OK");
+			Clash.load(getApplicationInfo().nativeLibraryDir);
+			appendLog("mihomo core loaded OK (bridge ABI " + Clash.bridgeABI() + ")");
 		} catch (Throwable e) {
-			appendLog("FATAL: failed to load libhev-socks5-tunnel.so: " + e);
-			Toast.makeText(this, "隧道库加载失败，请查看日志", Toast.LENGTH_LONG).show();
+			appendLog("FATAL: failed to load mihomo core: " + e);
+			Toast.makeText(this, "内核加载失败，请查看日志", Toast.LENGTH_LONG).show();
 			stopSelf();
 			return;
 		}
 
-		/* VPN */
-		String session = new String();
-		VpnService.Builder builder = new VpnService.Builder();
+		/* Build the clash config from the stored subscription + TUN sections. */
+		File configFile;
+		try {
+			configFile = MihomoConfig.build(this, prefs);
+			appendLog("config: " + configFile.getAbsolutePath());
+		} catch (Throwable e) {
+			appendLog("FATAL: build config failed: " + e);
+			Toast.makeText(this, "生成配置失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+			stopSelf();
+			return;
+		}
+
+		/* VPN interface. mihomo owns all routing, so we send every packet into
+		   the tunnel and let its rule engine decide proxy vs direct. */
 		boolean ipv4 = prefs.getIpv4();
 		boolean ipv6 = prefs.getIpv6();
+		String tunAddr = "198.18.0.1";
+		String tunAddr6 = "fc00::1";
+		int tunPrefix = 24;
+
+		VpnService.Builder builder = new VpnService.Builder();
 		builder.setBlocking(false);
 		builder.setMtu(prefs.getTunnelMtu());
 		if (ipv4) {
-			String addr = prefs.getTunnelIpv4Address();
-			int prefix = prefs.getTunnelIpv4Prefix();
-			String dns = prefs.getDnsIpv4();
-			builder.addAddress(addr, prefix);
-			if (!prefs.getRemoteDns() && !dns.isEmpty())
-			  builder.addDnsServer(dns);
-			session += "IPv4";
+			builder.addAddress(tunAddr, tunPrefix);
+			builder.addDnsServer("223.5.5.5");
+			builder.addRoute("0.0.0.0", 0);
 		}
 		if (ipv6) {
-			String addr = prefs.getTunnelIpv6Address();
-			int prefix = prefs.getTunnelIpv6Prefix();
-			String dns = prefs.getDnsIpv6();
-			builder.addAddress(addr, prefix);
-			if (!prefs.getRemoteDns() && !dns.isEmpty())
-			  builder.addDnsServer(dns);
-			if (!session.isEmpty())
-			  session += " + ";
-			session += "IPv6";
+			builder.addAddress(tunAddr6, 64);
+			builder.addDnsServer("2400:3200::1");
+			builder.addRoute("::", 0);
 		}
-		if (prefs.getRemoteDns()) {
-			builder.addDnsServer(prefs.getMappedDns());
-		}
-		if (applyRoutes(builder, prefs, ipv4, ipv6))
-		  session += "/Rules";
 
+		/* Per-app routing stays at the VpnService level: only the selected
+		   apps (or everything but us) have their traffic routed into the VPN. */
 		boolean disallowSelf = true;
 		if (prefs.getGlobal()) {
-			session += "/Global";
+			/* Default: all apps through the tunnel. */
 		} else {
 			for (String appName : prefs.getApps()) {
 				try {
@@ -243,78 +228,109 @@ public class TProxyService extends VpnService {
 				} catch (NameNotFoundException e) {
 				}
 			}
-			session += "/per-App";
 		}
 		if (disallowSelf) {
-			String selfName = getApplicationContext().getPackageName();
 			try {
-				builder.addDisallowedApplication(selfName);
+				builder.addDisallowedApplication(getApplicationContext().getPackageName());
 			} catch (NameNotFoundException e) {
 			}
 		}
-		builder.setSession(session);
+		builder.setSession("SocksTun/mihomo");
 		tunFd = builder.establish();
 		if (tunFd == null) {
 			stopSelf();
 			return;
 		}
 
-		/* TProxy */
-		File tproxy_file = new File(getCacheDir(), "tproxy.conf");
+		/* Initialise mihomo with our generated profile. */
+		String homeDir = getFilesDir().getAbsolutePath();
+		String initParams = "{\"homeDir\":\"" + homeDir + "\"}";
+		String setupParams = "{\"profile\":\"" + configFile.getAbsolutePath() + "\"}";
 		try {
-			tproxy_file.createNewFile();
-			FileOutputStream fos = new FileOutputStream(tproxy_file, false);
-
-			String tproxy_conf = "misc:\n" +
-				"  task-stack-size: " + prefs.getTaskStackSize() + "\n" +
-				"tunnel:\n" +
-				"  mtu: " + prefs.getTunnelMtu() + "\n" +
-				"  icmp: 'reply'\n";
-
-			tproxy_conf += "socks5:\n" +
-				"  port: " + prefs.getSocksPort() + "\n" +
-				"  address: '" + prefs.getSocksAddress() + "'\n" +
-				"  udp: '" + (prefs.getUdpInTcp() ? "tcp" : "udp") + "'\n";
-
-			if (!prefs.getSocksUdpAddress().isEmpty()) {
-				tproxy_conf += "  udp-address: '" + prefs.getSocksUdpAddress() + "'\n";
-			}
-
-			if (!prefs.getSocksUsername().isEmpty() &&
-				!prefs.getSocksPassword().isEmpty()) {
-				tproxy_conf += "  username: '" + prefs.getSocksUsername() + "'\n";
-				tproxy_conf += "  password: '" + prefs.getSocksPassword() + "'\n";
-			}
-
-			if (prefs.getRemoteDns()) {
-				tproxy_conf += "mapdns:\n" +
-					"  address: " + prefs.getMappedDns() + "\n" +
-					"  port: 53\n" +
-					"  network: 240.0.0.0\n" +
-					"  netmask: 240.0.0.0\n" +
-					"  cache-size: 10000\n";
-			}
-
-			fos.write(tproxy_conf.getBytes());
-			fos.close();
-		} catch (IOException e) {
-			return;
-		}
-		try {
-			TProxyStartService(tproxy_file.getAbsolutePath(), tunFd.getFd());
-			appendLog("TProxyStartService OK");
+			Clash.quickSetup(initParams, setupParams, new InvokeInterface() {
+				@Override
+				public void onResult(String result) {
+					if (result == null || result.isEmpty())
+					  appendLog("mihomo quickSetup OK");
+					else
+					  appendLog("mihomo quickSetup: " + result);
+				}
+			});
 		} catch (Throwable e) {
-			appendLog("FATAL: TProxyStartService failed: " + e);
-			Toast.makeText(this, "启动隧道失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+			appendLog("FATAL: quickSetup failed: " + e);
+			Toast.makeText(this, "启动内核失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
 			stopSelf();
 			return;
 		}
+
+		/* Forward mihomo's log/event stream into our log file. */
+		try {
+			Clash.setEventListener(new InvokeInterface() {
+				@Override
+				public void onResult(String result) {
+					if (result != null && !result.isEmpty())
+					  appendLog("mihomo: " + result);
+				}
+			});
+		} catch (Throwable e) {
+		}
+
+		/* Bring the TUN up on the VPN fd we just established. The TunInterface
+		   forwards socket protection to VpnService.protect() so the core's
+		   outbound traffic never loops back into the VPN. */
+		String stack = "system";
+		String address = (ipv4 ? tunAddr + "/" + tunPrefix : "") +
+			(ipv6 ? (ipv4 ? "," : "") + tunAddr6 + "/64" : "");
+		String dns = "223.5.5.5,119.29.29.29";
+		try {
+			Clash.startTUN(tunFd.getFd(), new TunInterface() {
+				@Override
+				public void protect(int fd) {
+					TProxyService.this.protect(fd);
+				}
+				@Override
+				public String resolverProcess(int protocol, String source, String target, int uid) {
+					return "";
+				}
+			}, "sockstun", stack, address, dns, prefs.getTunnelMtu());
+			appendLog("Clash.startTUN OK (fd=" + tunFd.getFd() + ")");
+		} catch (Throwable e) {
+			appendLog("FATAL: startTUN failed: " + e);
+			Toast.makeText(this, "启动 TUN 失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+			stopSelf();
+			return;
+		}
+
+		/* Best-effort: apply the node the user picked in the subscription. */
+		applySelectedNode(prefs);
+
 		prefs.setEnable(true);
 		QSTileService.requestUpdate(this);
 
 		initNotificationChannel(NOTIFY_CHANNEL);
 		createNotification();
 		startStats(prefs);
+	}
+
+	/* Ask mihomo to select the chosen proxy inside its "GLOBAL" group. The
+	   exact group name varies between subscriptions; this is best-effort and
+	   failures are non-fatal (the subscription's own default stays in effect). */
+	private void applySelectedNode(Preferences prefs) {
+		String sel = prefs.getSubSelected();
+		if (sel == null || sel.isEmpty())
+		  return;
+		try {
+			String action = "{\"type\":\"selector\",\"action\":\"set\"," +
+				"\"name\":\"GLOBAL\",\"value\":\"" + sel + "\"}";
+			Clash.invokeAction(action, new InvokeInterface() {
+				@Override
+				public void onResult(String result) {
+					appendLog("selector set: " + (result == null ? "ok" : result));
+				}
+			});
+		} catch (Throwable e) {
+			appendLog("selector set skipped: " + e);
+		}
 	}
 
 	public void stopService() {
@@ -329,17 +345,19 @@ public class TProxyService extends VpnService {
 
 		stopForeground(true);
 
-		/* TProxy */
-		TProxyStopService();
+		/* Tear the tunnel down before releasing the fd. */
+		try {
+			Clash.stopTun();
+		} catch (Throwable e) {
+		}
 
-		/* VPN */
 		try {
 			tunFd.close();
 		} catch (IOException e) {
 		}
 		tunFd = null;
 
-		System.exit(0);
+		stopSelf();
 	}
 
 	private void createNotification() {
@@ -382,8 +400,7 @@ public class TProxyService extends VpnService {
 		return getString(R.string.stats_line, getString(labelId), up, down);
 	}
 
-	/* Sample TProxyGetStats() once a second: the notification shows the live
-	   rate, the usage of this session and the usage of all sessions. */
+	/* Poll mihomo's traffic counters once a second. */
 	private void startStats(Preferences prefs) {
 		statsPrefs = prefs;
 		baseTx = prefs.getTotalTx();
@@ -396,8 +413,6 @@ public class TProxyService extends VpnService {
 		lastTime = SystemClock.elapsedRealtime();
 		lastNotifyText = null;
 
-		/* Baseline of the per-app counters, so the traffic screen can show
-		   what each app used during this session. */
 		prefs.setStats(totalTx, totalRx, 0, 0, 0, 0);
 		prefs.setAppStats(snapshotApps(this, prefs), prefs.getAppTotal());
 
@@ -417,14 +432,18 @@ public class TProxyService extends VpnService {
 		long dt = now - lastTime;
 		lastTime = now;
 
-		long[] stats = null;
+		long tx = -1, rx = -1;
 		try {
-			stats = TProxyGetStats();
+			String s = Clash.getTraffic();
+			if (s != null) {
+				tx = jsonLong(s, "up");
+				if (tx < 0) tx = jsonLong(s, "Upload");
+				rx = jsonLong(s, "down");
+				if (rx < 0) rx = jsonLong(s, "Download");
+			}
 		} catch (Throwable e) {
 		}
-		if (stats != null && stats.length > STATS_RX) {
-			long tx = Math.max(stats[STATS_TX], 0);
-			long rx = Math.max(stats[STATS_RX], 0);
+		if (tx >= 0 && rx >= 0) {
 			if (dt > 0) {
 				txRate = Math.max((tx - lastTx) * 1000 / dt, 0);
 				rxRate = Math.max((rx - lastRx) * 1000 / dt, 0);
@@ -441,6 +460,17 @@ public class TProxyService extends VpnService {
 		  updateNotification();
 
 		saveStats();
+	}
+
+	private static long jsonLong(String json, String key) {
+		try {
+			Pattern p = Pattern.compile("\"" + key + "\"\\s*:\\s*(\\d+)");
+			Matcher m = p.matcher(json);
+			if (m.find())
+			  return Long.parseLong(m.group(1));
+		} catch (Exception e) {
+		}
+		return -1;
 	}
 
 	/* Only re-post the notification when the shown text really changed. */
@@ -481,8 +511,8 @@ public class TProxyService extends VpnService {
 			int uid = uidOf(pm, pkg);
 			if (uid < 0)
 			  continue;
-			long tx = TrafficStats.getUidTxBytes(uid);
-			long rx = TrafficStats.getUidRxBytes(uid);
+			long tx = android.net.TrafficStats.getUidTxBytes(uid);
+			long rx = android.net.TrafficStats.getUidRxBytes(uid);
 			map.put(pkg, new long[] { Math.max(tx, 0), Math.max(rx, 0) });
 		}
 		return Preferences.formatAppStats(map);
@@ -533,187 +563,6 @@ public class TProxyService extends VpnService {
 			unit++;
 		}
 		return String.format(Locale.US, value < 10 ? "%.2f %s" : "%.1f %s", value, units[unit]);
-	}
-
-	/* ------------------------------------------------------------------
-	   Routing rules
-
-	   The native engine is a plain tun2socks: it has no rule engine, so
-	   "proxy vs direct" is decided by the VPN routing table:
-	     * default proxy  -> route everything, excludeRoute() the direct
-	                         targets (needs Android 13 / API 33)
-	     * default direct -> only addRoute() the proxy targets, everything
-	                         else never enters the tunnel (all versions)
-	   Domain rules are resolved to addresses when the tunnel is started.
-	   ------------------------------------------------------------------ */
-	private static class Route {
-		public String addr;
-		public int prefix;
-		public boolean v6;
-
-		public Route(String addr, int prefix, boolean v6) {
-			this.addr = addr;
-			this.prefix = prefix;
-			this.v6 = v6;
-		}
-	}
-
-	private void addRoute(VpnService.Builder builder, String addr, int prefix) {
-		try {
-			builder.addRoute(addr, prefix);
-		} catch (IllegalArgumentException e) {
-			appendLog("invalid route " + addr + "/" + prefix);
-		}
-	}
-
-	private void excludeRoute(VpnService.Builder builder, Route route) {
-		try {
-			builder.excludeRoute(new IpPrefix(InetAddress.getByName(route.addr), route.prefix));
-		} catch (Exception e) {
-			appendLog("invalid excluded route " + route.addr + "/" + route.prefix);
-		}
-	}
-
-	private boolean applyRoutes(VpnService.Builder builder, Preferences prefs,
-			boolean ipv4, boolean ipv6) {
-		List<Preferences.Rule> rules = prefs.getRules();
-		if (rules.isEmpty()) {
-			if (ipv4)
-			  addRoute(builder, "0.0.0.0", 0);
-			if (ipv6)
-			  addRoute(builder, "::", 0);
-			return false;
-		}
-
-		Map<String, List<String>> hosts = resolveHosts(rules);
-		List<Route> proxy = new ArrayList<Route>();
-		List<Route> direct = new ArrayList<Route>();
-
-		for (Preferences.Rule rule : rules) {
-			List<Route> target = rule.proxy ? proxy : direct;
-			if (rule.type == Preferences.Rule.TYPE_DOMAIN) {
-				List<String> addrs = hosts.get(rule.value);
-				if (addrs == null)
-				  continue;
-				for (String addr : addrs)
-				  addTarget(target, addr, -1);
-			} else if (rule.type == Preferences.Rule.TYPE_CIDR) {
-				int slash = rule.value.lastIndexOf('/');
-				if (slash > 0) {
-					try {
-						addTarget(target, rule.value.substring(0, slash),
-							Integer.parseInt(rule.value.substring(slash + 1)));
-						} catch (NumberFormatException e) {
-						}
-						} else {
-						addTarget(target, rule.value, -1);
-						}
-						} else {
-						addTarget(target, rule.value, -1);
-						}
-		}
-
-		boolean defaultProxy = prefs.getRulesDefaultProxy();
-		boolean canExclude = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU;
-		boolean excluded = false;
-		int added = 0;
-
-		if (defaultProxy && !direct.isEmpty() && canExclude) {
-			if (ipv4) {
-				addRoute(builder, "0.0.0.0", 0);
-				added++;
-			}
-			if (ipv6) {
-				addRoute(builder, "::", 0);
-				added++;
-			}
-			for (Route route : direct) {
-				if ((route.v6 && !ipv6) || (!route.v6 && !ipv4))
-				  continue;
-				excludeRoute(builder, route);
-			}
-			excluded = true;
-		} else {
-			if (defaultProxy && !direct.isEmpty())
-			  appendLog("WARN: direct rules need Android 13+, they were ignored");
-			for (Route route : proxy) {
-				if ((route.v6 && !ipv6) || (!route.v6 && !ipv4))
-				  continue;
-				addRoute(builder, route.addr, route.prefix);
-				added++;
-			}
-			if (added == 0) {
-				/* Nothing left to route: fall back to the default routes so
-				   the tunnel still comes up. */
-				if (ipv4) {
-					addRoute(builder, "0.0.0.0", 0);
-					added++;
-				}
-				if (ipv6) {
-					addRoute(builder, "::", 0);
-					added++;
-				}
-			}
-		}
-
-		appendLog("routes: " + proxy.size() + " proxy, " + direct.size() +
-			" direct, added " + added + ", excluded " + excluded);
-		return true;
-	}
-
-	private void addTarget(List<Route> routes, String addr, int prefix) {
-		InetAddress ia;
-		try {
-			ia = InetAddress.getByName(addr);
-		} catch (Exception e) {
-			appendLog("invalid rule target: " + addr);
-			return;
-		}
-		boolean v6 = ia instanceof Inet6Address;
-		int length = prefix < 0 ? (v6 ? 128 : 32) : prefix;
-		routes.add(new Route(addr, length, v6));
-	}
-
-	
-
-private Map<String, List<String>> resolveHosts(List<Preferences.Rule> rules) {
-		final List<String> hosts = new ArrayList<String>();
-		final Map<String, List<String>> result = new HashMap<String, List<String>>();
-
-		for (Preferences.Rule rule : rules) {
-			if (rule.type == Preferences.Rule.TYPE_DOMAIN && !hosts.contains(rule.value))
-			  hosts.add(rule.value);
-		}
-		if (hosts.isEmpty())
-		  return result;
-
-		Thread thread = new Thread(new Runnable() {
-			@Override
-			public void run() {
-				for (String host : hosts) {
-					try {
-						InetAddress[] addrs = InetAddress.getAllByName(host);
-						List<String> list = new ArrayList<String>();
-						for (InetAddress addr : addrs)
-						  list.add(addr.getHostAddress());
-						synchronized (result) {
-							result.put(host, list);
-						}
-					} catch (Exception e) {
-						appendLog("cannot resolve " + host);
-					}
-				}
-			}
-		});
-		thread.setDaemon(true);
-		thread.start();
-		try {
-			thread.join(10000);
-		} catch (InterruptedException e) {
-		}
-		synchronized (result) {
-			return new HashMap<String, List<String>>(result);
-		}
 	}
 
 	// create NotificationChannel

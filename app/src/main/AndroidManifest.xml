@@ -3,7 +3,9 @@
 		package="hev.sockstun"
 		xmlns:tools="http://schemas.android.com/tools">
 	<application android:label="@string/app_name" android:icon="@mipmap/sockstun"
-		android:theme="@style/Theme.SocksTun">
+		android:theme="@style/Theme.SocksTun"
+		android:extractNativeLibs="true"
+		tools:replace="android:extractNativeLibs">
 		<service android:name=".TProxyService" android:process=":native"
 				android:permission="android.permission.BIND_VPN_SERVICE"
 				android:exported="true"

@@ -40,7 +40,9 @@ android {
 		versionName pkgVersionName
 		setProperty("archivesBaseName", "$applicationId-$versionName")
 		ndk {
-			abiFilters "armeabi-v7a", "arm64-v8a",'x86','x86_64'
+			/* libmihomo ships arm64-v8a + armeabi-v7a; keep the APK aligned to
+			   what the core actually provides so Clash.load() never misses a .so. */
+			abiFilters "arm64-v8a", "armeabi-v7a"
 		}
 	}
 
@@ -89,7 +91,61 @@ android {
 	}
 }
 
+/* ---------------------------------------------------------------------------
+   libmihomo (clash.meta) embedded core.
+
+   The library is published as a GitHub Release .aar (not on Maven Central), so
+   we download it once into app/build/libs (git-ignored) and consume it through
+   a flatDir repository. Pin the exact version: v0.3.3 bundles mihomo v1.19.30.
+   A network connection is required on the first build (or after a clean).
+   License: GPL-3.0 (the embedded core is statically linked Go code).
+
+   We use a flatDir repo + `name/ext` (instead of `files(.aar)`) because AGP
+   reliably extracts the AAR's classes.jar / jniLibs only via repository
+   resolution, and defers lookup to execution time so the task-produced file
+   is present when the classpath is computed.
+--------------------------------------------------------------------------- */
+def mihomoVersion = "0.3.3"
+def mihomoAarName = "libmihomo-android-v${mihomoVersion}.aar"
+def mihomoAar = file("$buildDir/libs/${mihomoAarName}")
+
+task downloadMihomo {
+	outputs.file(mihomoAar)
+	doLast {
+		/* Re-download if missing or suspiciously small (e.g. a stale/bad file
+		   left over from a previous failed attempt). */
+		def need = !mihomoAar.exists() || mihomoAar.length() < 1024 * 1024
+		if (need) {
+			if (mihomoAar.exists()) mihomoAar.delete()
+			mihomoAar.parentFile.mkdirs()
+			def url = "https://github.com/oviron/libmihomo-android/releases/download/v${mihomoVersion}/${mihomoAarName}"
+			def conn = new URL(url).openConnection()
+			conn.instanceFollowRedirects = true
+			conn.connect()
+			def code = conn.responseCode
+			if (code != 200) {
+				throw new GradleException("Download mihomo AAR failed: HTTP ${code} from ${url}")
+			}
+			mihomoAar.withOutputStream { os -> os << conn.inputStream }
+			if (mihomoAar.length() < 1024 * 1024) {
+				mihomoAar.delete()
+				throw new GradleException("Downloaded mihomo AAR is suspiciously small " +
+					"(${mihomoAar.length()} bytes); the release asset/URL may have changed.")
+			}
+			println "Downloaded ${mihomoAarName} (${mihomoAar.length()} bytes)"
+		}
+	}
+}
+
+repositories {
+	flatDir { dirs mihomoAar.parentFile }
+}
+
 dependencies {
 	implementation 'androidx.appcompat:appcompat:1.7.0'
 	implementation 'com.google.android.material:material:1.12.0'
+	implementation(name: mihomoAarName.replace('.aar', ''), ext: 'aar') { builtBy downloadMihomo }
 }
+
+/* Make sure the AAR exists before the build's pre-build phase. */
+preBuild.dependsOn downloadMihomo

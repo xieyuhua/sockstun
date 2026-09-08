@@ -107,13 +107,17 @@ public class SubscribeActivity extends BaseActivity {
 			public void run() {
 				try {
 					final String content = download(url);
-					final List<ClashNode> parsed = ClashParser.parse(content);
+					/* Keep the raw clash.yml (base64-decoded) for the mihomo
+					   core, and also list every proxy for display + testing. */
+					final String yaml = ClashParser.decodeRaw(content);
+					final List<ClashNode> parsed = ClashParser.parseAll(yaml);
 					ui.post(new Runnable() {
 						@Override
 						public void run() {
 							nodes.clear();
 							nodes.addAll(parsed);
 							adapter.notifyDataSetChanged();
+							prefs.setSubRaw(yaml);
 							prefs.setSubNodes(ClashNode.encode(nodes));
 							if (parsed.isEmpty())
 								Toast.makeText(SubscribeActivity.this,
@@ -202,10 +206,9 @@ public class SubscribeActivity extends BaseActivity {
 	}
 
 	private void useNode(final ClashNode n) {
-		prefs.setSocksAddress(n.server);
-		prefs.setSocksPort(n.port);
-		prefs.setSocksUsername(n.username);
-		prefs.setSocksPassword(n.password);
+		/* The mihomo core consumes the whole subscription, so "use" just
+		   remembers which node the user picked; TProxyService asks mihomo to
+		   select it in its proxy group when the tunnel starts. */
 		prefs.setSubSelected(n.name);
 		Toast.makeText(this, getString(R.string.sub_applied, n.name),
 			Toast.LENGTH_SHORT).show();

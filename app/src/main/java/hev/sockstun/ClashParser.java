@@ -1,8 +1,11 @@
 /*
  ============================================================================
  Name        : ClashParser.java
- Description : Minimal clash.yml parser: extracts SOCKS5 nodes from the
-               top-level "proxies:" list. No external YAML dependency.
+ Description : Minimal clash.yml parser. Decodes base64 subscriptions and
+               extracts proxy nodes. We take every proxy (vmess / trojan /
+               ss / socks5 / vless / hysteria2 / tuic / ...) so the UI can
+               list and latency-test the whole multi-protocol subscription;
+               the embedded mihomo core does the actual protocol handling.
  ============================================================================
  */
 
@@ -17,14 +20,36 @@ import java.util.Map;
 
 public class ClashParser {
 
-	/* Parse raw subscription text and return only SOCKS5-capable nodes. */
+	/* Decode a subscription body to clash YAML. Providers may ship the YAML as
+	   a base64 blob; return the decoded form, or the original if it already
+	   looks like clash config. */
+	public static String decodeRaw(String raw) {
+		if (raw == null || raw.isEmpty())
+		  return raw;
+		if (containsProxies(raw))
+		  return raw;
+		String dec = tryBase64(raw);
+		if (dec != null && containsProxies(dec))
+		  return dec;
+		return raw;
+	}
+
+	/* Every proxy node, regardless of protocol. */
+	public static List<ClashNode> parseAll(String raw) {
+		return collect(raw, false);
+	}
+
+	/* Backward-compatible: SOCKS5-capable nodes only. */
 	public static List<ClashNode> parse(String raw) {
+		return collect(raw, true);
+	}
+
+	private static List<ClashNode> collect(String raw, boolean socksOnly) {
 		List<ClashNode> result = new ArrayList<ClashNode>();
 		if (raw == null || raw.isEmpty())
 		  return result;
 
 		String text = raw;
-		/* Some providers ship the YAML as a base64 blob. */
 		if (!containsProxies(text)) {
 			String dec = tryBase64(text);
 			if (dec != null && containsProxies(dec))
@@ -71,7 +96,7 @@ public class ClashParser {
 					putKV(m, l2.trim());
 					i++;
 				}
-				addIfSocks(m, result);
+				addIfMatch(m, result, socksOnly);
 			} else {
 				i++;
 			}
@@ -79,11 +104,11 @@ public class ClashParser {
 		return result;
 	}
 
-	private static void addIfSocks(Map<String, String> m, List<ClashNode> out) {
+	private static void addIfMatch(Map<String, String> m, List<ClashNode> out, boolean socksOnly) {
 		String type = m.get("type");
 		if (type == null)
 		  return;
-		if (!type.equalsIgnoreCase("socks5") && !type.equalsIgnoreCase("socks"))
+		if (socksOnly && !type.equalsIgnoreCase("socks5") && !type.equalsIgnoreCase("socks"))
 		  return;
 		String name = m.get("name");
 		String server = m.get("server");
