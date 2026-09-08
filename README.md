@@ -11,6 +11,15 @@ A simple and lightweight VPN over socks5 proxy for Android. It is based on a hig
 * Specifying DNS addresses.
 * IPv4/IPv6 dual stack.
 * Global/per-App modes.
+* Traffic statistics (live rate, session and total usage, per-app usage).
+* Connection view (TCP/UDP sockets of the proxied apps, with records).
+* Routing rules by domain / IP / CIDR: proxy or direct.
+* Multiple profiles (up to 13), Quick Settings tile, start on boot.
+
+## Documents
+
+* [使用教程 (Usage guide, 中文)](docs/使用教程.md)
+* [启动与架构说明 (Startup & architecture, 中文)](docs/启动与架构说明.md)
 
 ## How to Build
 

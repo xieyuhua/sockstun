@@ -27,6 +27,7 @@ import android.app.PendingIntent;
 import android.content.Intent;
 import android.net.VpnService;
 import android.net.TrafficStats;
+import android.net.IpPrefix;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.ServiceInfo;
@@ -38,11 +39,19 @@ import android.system.OsConstants;
 import java.lang.reflect.Method;
 
 import java.io.FileDescriptor;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.net.Inet6Address;
+import java.net.InetAddress;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import android.widget.Toast;
 
 public class TProxyService extends VpnService {
@@ -82,6 +91,7 @@ public class TProxyService extends VpnService {
 	private long baseTx, baseRx, totalTx, totalRx;
 	private long txRate, rxRate;
 	private String lastNotifyText = null;
+	private final Set<String> seenConns = new HashSet<String>();
 
 	/* Append a line to the log file directly (bypassing the fd-1/2
 	   redirection), so startup diagnostics are always captured even if the
@@ -197,24 +207,24 @@ public class TProxyService extends VpnService {
 		/* VPN */
 		String session = new String();
 		VpnService.Builder builder = new VpnService.Builder();
+		boolean ipv4 = prefs.getIpv4();
+		boolean ipv6 = prefs.getIpv6();
 		builder.setBlocking(false);
 		builder.setMtu(prefs.getTunnelMtu());
-		if (prefs.getIpv4()) {
+		if (ipv4) {
 			String addr = prefs.getTunnelIpv4Address();
 			int prefix = prefs.getTunnelIpv4Prefix();
 			String dns = prefs.getDnsIpv4();
 			builder.addAddress(addr, prefix);
-			builder.addRoute("0.0.0.0", 0);
 			if (!prefs.getRemoteDns() && !dns.isEmpty())
 			  builder.addDnsServer(dns);
 			session += "IPv4";
 		}
-		if (prefs.getIpv6()) {
+		if (ipv6) {
 			String addr = prefs.getTunnelIpv6Address();
 			int prefix = prefs.getTunnelIpv6Prefix();
 			String dns = prefs.getDnsIpv6();
 			builder.addAddress(addr, prefix);
-			builder.addRoute("::", 0);
 			if (!prefs.getRemoteDns() && !dns.isEmpty())
 			  builder.addDnsServer(dns);
 			if (!session.isEmpty())
@@ -224,6 +234,9 @@ public class TProxyService extends VpnService {
 		if (prefs.getRemoteDns()) {
 			builder.addDnsServer(prefs.getMappedDns());
 		}
+		if (applyRoutes(builder, prefs, ipv4, ipv6))
+		  session += "/Rules";
+
 		boolean disallowSelf = true;
 		if (prefs.getGlobal()) {
 			session += "/Global";
@@ -387,6 +400,7 @@ public class TProxyService extends VpnService {
 		totalRx = baseRx;
 		lastTime = SystemClock.elapsedRealtime();
 		lastNotifyText = null;
+		seenConns.clear();
 
 		/* Baseline of the per-app counters, so the traffic screen can show
 		   what each app used during this session. */
@@ -398,6 +412,7 @@ public class TProxyService extends VpnService {
 			@Override
 			public void run() {
 				sampleStats(true);
+				sampleConnections();
 				statsHandler.postDelayed(this, STATS_INTERVAL);
 			}
 		};
@@ -525,6 +540,324 @@ public class TProxyService extends VpnService {
 			unit++;
 		}
 		return String.format(Locale.US, value < 10 ? "%.2f %s" : "%.1f %s", value, units[unit]);
+	}
+
+	/* ------------------------------------------------------------------
+	   Routing rules
+
+	   The native engine is a plain tun2socks: it has no rule engine, so
+	   "proxy vs direct" is decided by the VPN routing table:
+	     * default proxy  -> route everything, excludeRoute() the direct
+	                         targets (needs Android 13 / API 33)
+	     * default direct -> only addRoute() the proxy targets, everything
+	                         else never enters the tunnel (all versions)
+	   Domain rules are resolved to addresses when the tunnel is started.
+	   ------------------------------------------------------------------ */
+	private static class Route {
+		public String addr;
+		public int prefix;
+		public boolean v6;
+
+		public Route(String addr, int prefix, boolean v6) {
+			this.addr = addr;
+			this.prefix = prefix;
+			this.v6 = v6;
+		}
+	}
+
+	private void addRoute(VpnService.Builder builder, String addr, int prefix) {
+		try {
+			builder.addRoute(addr, prefix);
+		} catch (IllegalArgumentException e) {
+			appendLog("invalid route " + addr + "/" + prefix);
+		}
+	}
+
+	private void excludeRoute(VpnService.Builder builder, Route route) {
+		try {
+			builder.excludeRoute(new IpPrefix(InetAddress.getByName(route.addr), route.prefix));
+		} catch (Exception e) {
+			appendLog("invalid excluded route " + route.addr + "/" + route.prefix);
+		}
+	}
+
+	private boolean applyRoutes(VpnService.Builder builder, Preferences prefs,
+			boolean ipv4, boolean ipv6) {
+		List<Preferences.Rule> rules = prefs.getRules();
+		if (rules.isEmpty()) {
+			if (ipv4)
+			  addRoute(builder, "0.0.0.0", 0);
+			if (ipv6)
+			  addRoute(builder, "::", 0);
+			return false;
+		}
+
+		Map<String, List<String>> hosts = resolveHosts(rules);
+		List<Route> proxy = new ArrayList<Route>();
+		List<Route> direct = new ArrayList<Route>();
+
+		for (Preferences.Rule rule : rules) {
+			List<Route> target = rule.proxy ? proxy : direct;
+			if (rule.type == Preferences.Rule.TYPE_DOMAIN) {
+				List<String> addrs = hosts.get(rule.value);
+				if (addrs == null)
+				  continue;
+				for (String addr : addrs)
+				  addTarget(target, addr, -1);
+			} else if (rule.type == Preferences.Rule.TYPE_CIDR) {
+				int slash = rule.value.lastIndexOf('/');
+				if (slash > 0) {
+					try {
+						addTarget(target, rule.value.substring(0, slash),
+							Integer.parseInt(rule.value.substring(slash + 1)));
+						} catch (NumberFormatException e) {
+						}
+						} else {
+						addTarget(target, rule.value, -1);
+						}
+						} else {
+						addTarget(target, rule.value, -1);
+						}
+		}
+
+		boolean defaultProxy = prefs.getRulesDefaultProxy();
+		boolean canExclude = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU;
+		boolean excluded = false;
+		int added = 0;
+
+		if (defaultProxy && !direct.isEmpty() && canExclude) {
+			if (ipv4) {
+				addRoute(builder, "0.0.0.0", 0);
+				added++;
+			}
+			if (ipv6) {
+				addRoute(builder, "::", 0);
+				added++;
+			}
+			for (Route route : direct) {
+				if ((route.v6 && !ipv6) || (!route.v6 && !ipv4))
+				  continue;
+				excludeRoute(builder, route);
+			}
+			excluded = true;
+		} else {
+			if (defaultProxy && !direct.isEmpty())
+			  appendLog("WARN: direct rules need Android 13+, they were ignored");
+			for (Route route : proxy) {
+				if ((route.v6 && !ipv6) || (!route.v6 && !ipv4))
+				  continue;
+				addRoute(builder, route.addr, route.prefix);
+				added++;
+			}
+			if (added == 0) {
+				/* Nothing left to route: fall back to the default routes so
+				   the tunnel still comes up. */
+				if (ipv4) {
+					addRoute(builder, "0.0.0.0", 0);
+					added++;
+				}
+				if (ipv6) {
+					addRoute(builder, "::", 0);
+					added++;
+				}
+			}
+		}
+
+		appendLog("routes: " + proxy.size() + " proxy, " + direct.size() +
+			" direct, added " + added + ", excluded " + excluded);
+		return true;
+	}
+
+	private void addTarget(List<Route> routes, String addr, int prefix) {
+		InetAddress ia;
+		try {
+			ia = InetAddress.getByName(addr);
+		} catch (Exception e) {
+			appendLog("invalid rule target: " + addr);
+			return;
+		}
+		boolean v6 = ia instanceof Inet6Address;
+		int length = prefix < 0 ? (v6 ? 128 : 32) : prefix;
+		routes.add(new Route(addr, length, v6));
+	}
+
+	/* ------------------------------------------------------------------
+	   Connections
+
+	   The native engine exposes no connection table, so the sockets are
+	   read from /proc/net (tcp / tcp6 / udp / udp6). Only the sockets of
+	   the apps routed through the tunnel are kept. Some Android versions
+	   hide /proc/net from apps, in which case everything stays empty.
+	   ------------------------------------------------------------------ */
+	private void sampleConnections() {
+		Preferences prefs = new Preferences(this);
+		List<String[]> rows = readConnections(prefs);
+
+		int tcp = 0;
+		int udp = 0;
+		long total = prefs.getConnTotal();
+		Map<String, long[]> appTotal = Preferences.parseAppStats(prefs.getConnAppTotal());
+		StringBuilder sb = new StringBuilder();
+
+		for (String[] row : rows) {
+			String proto = row[0];
+			if (proto.startsWith("udp"))
+			  udp++;
+			else
+			  tcp++;
+
+			String key = proto + "|" + row[1] + "|" + row[2];
+			if (seenConns.add(key)) {
+				total++;
+				long[] count = appTotal.get(row[4]);
+				if (count == null)
+				  appTotal.put(row[4], new long[] { 1, 0 });
+				else
+				  count[0]++;
+			}
+
+			if (sb.length() < 6000) {
+				if (sb.length() > 0)
+				  sb.append(';');
+				sb.append(proto).append('|').append(row[1]).append('|')
+				  .append(row[2]).append('|').append(row[3]).append('|').append(row[4]);
+			}
+		}
+
+		prefs.setConnections(tcp, udp, total, Preferences.formatAppStats(appTotal), sb.toString());
+	}
+
+	private List<String[]> readConnections(Preferences prefs) {
+		List<String[]> rows = new ArrayList<String[]>();
+		Map<Integer, String> uids = new HashMap<Integer, String>();
+		PackageManager pm = getPackageManager();
+
+		for (String pkg : prefs.getRoutedApps(this)) {
+			int uid = uidOf(pm, pkg);
+			if (uid >= 0)
+			  uids.put(uid, pkg);
+		}
+		if (uids.isEmpty())
+		  return rows;
+
+		String[] files = { "/proc/net/tcp", "/proc/net/tcp6", "/proc/net/udp", "/proc/net/udp6" };
+		for (String file : files) {
+			String proto = file.substring(file.lastIndexOf('/') + 1);
+			boolean v6 = proto.endsWith("6");
+			BufferedReader reader = null;
+			try {
+				reader = new BufferedReader(new FileReader(file));
+				reader.readLine();
+				String line;
+				while ((line = reader.readLine()) != null) {
+					String[] f = line.trim().split("\\s+");
+					if (f.length < 10)
+					  continue;
+					String pkg = uids.get(parseUid(f[7]));
+					if (pkg == null)
+					  continue;
+					if ("0A".equalsIgnoreCase(f[3]))
+					  continue;
+					String local = parseAddr(f[1], v6);
+					String remote = parseAddr(f[2], v6);
+					if (local == null || remote == null)
+					  continue;
+					rows.add(new String[] { proto, local, remote, f[3], pkg });
+				}
+			} catch (Exception e) {
+			} finally {
+				if (reader != null) {
+					try {
+						reader.close();
+					} catch (Exception e) {
+					}
+				}
+			}
+		}
+		return rows;
+	}
+
+	private static int parseUid(String text) {
+		try {
+			return Integer.parseInt(text);
+		} catch (NumberFormatException e) {
+			return -1;
+		}
+	}
+
+	private static String parseAddr(String field, boolean v6) {
+		int colon = field.lastIndexOf(':');
+		if (colon < 0)
+		  return null;
+		String addr;
+		int port;
+		try {
+			addr = v6 ? hexToIpv6(field.substring(0, colon)) : hexToIpv4(field.substring(0, colon));
+			port = Integer.parseInt(field.substring(colon + 1), 16);
+		} catch (Exception e) {
+			return null;
+		}
+		return addr + ":" + port;
+	}
+
+	private static String hexToIpv4(String hex) {
+		long v = Long.parseLong(hex, 16);
+		return (v & 0xff) + "." + ((v >> 8) & 0xff) + "." +
+			((v >> 16) & 0xff) + "." + ((v >> 24) & 0xff);
+	}
+
+	private static String hexToIpv6(String hex) {
+		StringBuilder sb = new StringBuilder();
+		for (int i = 0; i < 4; i++) {
+			long word = Long.parseLong(hex.substring(i * 8, i * 8 + 8), 16);
+			if (i > 0)
+			  sb.append(':');
+			sb.append(Long.toHexString(word & 0xffff)).append(':')
+			  .append(Long.toHexString((word >> 16) & 0xffff));
+		}
+		return sb.toString();
+	}
+
+	/* Resolve the domains of the rules on a worker thread with a bounded
+	   wait, so a slow DNS server cannot stall the connection for long. */
+	private Map<String, List<String>> resolveHosts(List<Preferences.Rule> rules) {
+		final List<String> hosts = new ArrayList<String>();
+		final Map<String, List<String>> result = new HashMap<String, List<String>>();
+
+		for (Preferences.Rule rule : rules) {
+			if (rule.type == Preferences.Rule.TYPE_DOMAIN && !hosts.contains(rule.value))
+			  hosts.add(rule.value);
+		}
+		if (hosts.isEmpty())
+		  return result;
+
+		Thread thread = new Thread(new Runnable() {
+			@Override
+			public void run() {
+				for (String host : hosts) {
+					try {
+						InetAddress[] addrs = InetAddress.getAllByName(host);
+						List<String> list = new ArrayList<String>();
+						for (InetAddress addr : addrs)
+						  list.add(addr.getHostAddress());
+						synchronized (result) {
+							result.put(host, list);
+						}
+					} catch (Exception e) {
+						appendLog("cannot resolve " + host);
+					}
+				}
+			}
+		});
+		thread.setDaemon(true);
+		thread.start();
+		try {
+			thread.join(10000);
+		} catch (InterruptedException e) {
+		}
+		synchronized (result) {
+			return new HashMap<String, List<String>>(result);
+		}
 	}
 
 	// create NotificationChannel

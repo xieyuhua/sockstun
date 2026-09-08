@@ -12,7 +12,9 @@ package hev.sockstun;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -35,6 +37,8 @@ public class Preferences
 	public static final String UDP_IN_TCP = "UdpInTcp";
 	public static final String REMOTE_DNS = "RemoteDNS";
 	public static final String APPS = "Apps";
+	public static final String RULES = "Rules";
+	public static final String RULES_DEFAULT_PROXY = "RulesDefaultProxy";
 	public static final String ENABLE = "Enable";
 	public static final String NAME = "Name";
 	public static final String PROFILE_COUNT = "ProfileCount";
@@ -48,8 +52,45 @@ public class Preferences
 	public static final String STATS_RATE_RX = "StatsRateRx";
 	public static final String STATS_APP_BASE = "StatsAppBase";
 	public static final String STATS_APP_TOTAL = "StatsAppTotal";
+	public static final String CONN_TCP = "ConnTcp";
+	public static final String CONN_UDP = "ConnUdp";
+	public static final String CONN_TOTAL = "ConnTotal";
+	public static final String CONN_APP_TOTAL = "ConnAppTotal";
+	public static final String CONN_LIST = "ConnList";
 
 	public static final int MAX_PROFILES = 13;
+
+	/* One routing rule: "value (domain / ip / cidr) -> proxy or direct". */
+	public static class Rule {
+		public static final int TYPE_DOMAIN = 0;
+		public static final int TYPE_IP = 1;
+		public static final int TYPE_CIDR = 2;
+
+		public int type;
+		public String value;
+		public boolean proxy;
+
+		public Rule(int type, String value, boolean proxy) {
+			this.type = type;
+			this.value = value;
+			this.proxy = proxy;
+		}
+
+		public String encode() {
+			return type + "|" + value + "|" + (proxy ? "1" : "0");
+		}
+
+		public static Rule decode(String text) {
+			String[] f = text.split("\\|");
+			if (f.length != 3 || f[1].isEmpty())
+			  return null;
+			try {
+				return new Rule(Integer.parseInt(f[0]), f[1], "1".equals(f[2]));
+			} catch (NumberFormatException e) {
+				return null;
+			}
+		}
+	}
 
 	private SharedPreferences prefs;
 
@@ -136,6 +177,8 @@ public class Preferences
 		editor.putBoolean(key(dst, UDP_IN_TCP), prefs.getBoolean(key(src, UDP_IN_TCP), false));
 		editor.putBoolean(key(dst, REMOTE_DNS), prefs.getBoolean(key(src, REMOTE_DNS), true));
 		editor.putStringSet(key(dst, APPS), new HashSet<String>(prefs.getStringSet(key(src, APPS), new HashSet<String>())));
+		editor.putString(key(dst, RULES), prefs.getString(key(src, RULES), ""));
+		editor.putBoolean(key(dst, RULES_DEFAULT_PROXY), prefs.getBoolean(key(src, RULES_DEFAULT_PROXY), true));
 	}
 
 	private void removeProfile(SharedPreferences.Editor editor, int profile) {
@@ -153,6 +196,8 @@ public class Preferences
 		editor.remove(key(profile, UDP_IN_TCP));
 		editor.remove(key(profile, REMOTE_DNS));
 		editor.remove(key(profile, APPS));
+		editor.remove(key(profile, RULES));
+		editor.remove(key(profile, RULES_DEFAULT_PROXY));
 	}
 
 	public int getProfileCount() {
@@ -346,6 +391,43 @@ public class Preferences
 		editor.commit();
 	}
 
+	/* Routing rules, in the order they were added (first match wins). */
+	public List<Rule> getRules() {
+		List<Rule> rules = new ArrayList<Rule>();
+		String value = prefs.getString(key(RULES), "");
+		if (value.isEmpty())
+		  return rules;
+		for (String part : value.split(";")) {
+			Rule rule = Rule.decode(part);
+			if (rule != null)
+			  rules.add(rule);
+		}
+		return rules;
+	}
+
+	public void setRules(List<Rule> rules) {
+		StringBuilder sb = new StringBuilder();
+		for (Rule rule : rules) {
+			if (sb.length() > 0)
+			  sb.append(';');
+			sb.append(rule.encode());
+		}
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(RULES), sb.toString());
+		editor.commit();
+	}
+
+	/* What happens to traffic that matches no rule. */
+	public boolean getRulesDefaultProxy() {
+		return prefs.getBoolean(key(RULES_DEFAULT_PROXY), true);
+	}
+
+	public void setRulesDefaultProxy(boolean proxy) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putBoolean(key(RULES_DEFAULT_PROXY), proxy);
+		editor.commit();
+	}
+
 	public boolean getEnable() {
 		return prefs.getBoolean(ENABLE, false);
 	}
@@ -471,6 +553,45 @@ public class Preferences
 			sb.append(e.getKey()).append(':').append(v[0]).append(':').append(v[1]);
 		}
 		return sb.toString();
+	}
+
+	/* Connection snapshot taken from /proc/net, refreshed once a second by
+	   the tunnel service. ConnList holds "proto|local|remote|state|pkg;...". */
+	public int getConnTcp() {
+		return prefs.getInt(CONN_TCP, 0);
+	}
+
+	public int getConnUdp() {
+		return prefs.getInt(CONN_UDP, 0);
+	}
+
+	public long getConnTotal() {
+		return prefs.getLong(CONN_TOTAL, 0);
+	}
+
+	public String getConnAppTotal() {
+		return prefs.getString(CONN_APP_TOTAL, "");
+	}
+
+	public String getConnList() {
+		return prefs.getString(CONN_LIST, "");
+	}
+
+	public void setConnections(int tcp, int udp, long total, String appTotal, String list) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putInt(CONN_TCP, tcp);
+		editor.putInt(CONN_UDP, udp);
+		editor.putLong(CONN_TOTAL, total);
+		editor.putString(CONN_APP_TOTAL, appTotal);
+		editor.putString(CONN_LIST, list);
+		editor.commit();
+	}
+
+	public void resetConnections() {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putLong(CONN_TOTAL, 0);
+		editor.putString(CONN_APP_TOTAL, "");
+		editor.commit();
 	}
 
 	/* The set of packages whose traffic goes through the tunnel:

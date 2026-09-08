@@ -99,6 +99,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 					  intent = new Intent(MainActivity.this, LogActivity.class);
 					else if (id == R.id.nav_traffic)
 					  intent = new Intent(MainActivity.this, TrafficActivity.class);
+					else if (id == R.id.nav_conn)
+					  intent = new Intent(MainActivity.this, ConnActivity.class);
 					if (intent != null)
 					  startActivity(intent);
 				}

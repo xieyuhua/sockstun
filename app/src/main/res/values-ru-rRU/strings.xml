@@ -35,4 +35,33 @@
 	<string name="traffic_reset">Сбросить итоги</string>
 	<string name="traffic_empty">Данных о трафике пока нет</string>
 	<string name="traffic_hint">Данные по приложениям берутся из системных счётчиков и включают трафик вне туннеля.</string>
+	<string name="rules">Правила маршрутизации</string>
+	<string name="rules_hint">Совпадение по домену, IP или диапазону IP. Домены разрешаются при запуске туннеля; правила «напрямую» требуют Android 13+.</string>
+	<string name="rules_default_proxy">Несовпавший трафик идёт через прокси</string>
+	<string name="rule_add">Добавить</string>
+	<string name="rule_delete">Удалить</string>
+	<string name="rule_value_hint">Домен / IP / CIDR (например 10.0.0.0/8)</string>
+	<string name="rule_empty">Правил нет, всё определяется переключателем выше</string>
+	<string name="rule_invalid">Введите корректное значение</string>
+	<string name="rule_exists">Такое правило уже есть</string>
+	<string name="rule_type_domain">Домен</string>
+	<string name="rule_type_ip">IP</string>
+	<string name="rule_type_cidr">CIDR</string>
+	<string name="rule_action_proxy">Прокси</string>
+	<string name="rule_action_direct">Напрямую</string>
+	<string-array name="rule_types">
+		<item>@string/rule_type_domain</item>
+		<item>@string/rule_type_ip</item>
+		<item>@string/rule_type_cidr</item>
+	</string-array>
+	<string-array name="rule_actions">
+		<item>@string/rule_action_proxy</item>
+		<item>@string/rule_action_direct</item>
+	</string-array>
+	<string name="connections">Соединения</string>
+	<string name="conn_clear">Очистить записи</string>
+	<string name="conn_empty">Нет соединений (сначала запустите туннель)</string>
+	<string name="conn_now">Сейчас  TCP %1$d · UDP %2$d · всего %3$d</string>
+	<string name="conn_total">Записано соединений: %1$d</string>
+	<string name="conn_hint">Читается из /proc/net во время работы туннеля, только для приложений через прокси; число пакетов движок не выдаёт.</string>
 </resources>

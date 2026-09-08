@@ -65,4 +65,35 @@
 	<string name="traffic_reset">Reset totals</string>
 	<string name="traffic_empty">No traffic recorded yet</string>
 	<string name="traffic_hint">Per-app numbers come from the system counters, so they also include traffic that did not go through the tunnel.</string>
+
+	<string name="rules">Routing rules</string>
+	<string name="rules_hint">Match a domain, an IP or an IP range. Domains are resolved when the tunnel starts; “direct” rules need Android 13+.</string>
+	<string name="rules_default_proxy">Unmatched traffic uses the proxy</string>
+	<string name="rule_add">Add</string>
+	<string name="rule_delete">Delete</string>
+	<string name="rule_value_hint">Domain / IP / CIDR (e.g. 10.0.0.0/8)</string>
+	<string name="rule_empty">No rules, everything follows the switch above</string>
+	<string name="rule_invalid">Enter a valid value</string>
+	<string name="rule_exists">That rule already exists</string>
+	<string name="rule_type_domain">Domain</string>
+	<string name="rule_type_ip">IP</string>
+	<string name="rule_type_cidr">CIDR</string>
+	<string name="rule_action_proxy">Proxy</string>
+	<string name="rule_action_direct">Direct</string>
+	<string-array name="rule_types">
+		<item>@string/rule_type_domain</item>
+		<item>@string/rule_type_ip</item>
+		<item>@string/rule_type_cidr</item>
+	</string-array>
+	<string-array name="rule_actions">
+		<item>@string/rule_action_proxy</item>
+		<item>@string/rule_action_direct</item>
+	</string-array>
+
+	<string name="connections">Connections</string>
+	<string name="conn_clear">Clear records</string>
+	<string name="conn_empty">No connections (start the tunnel first)</string>
+	<string name="conn_now">Now  TCP %1$d · UDP %2$d · total %3$d</string>
+	<string name="conn_total">%1$d connections recorded</string>
+	<string name="conn_hint">Read from /proc/net while the tunnel runs, for the proxied apps only. Packet counts are not exposed by the tunnel engine.</string>
 </resources>
