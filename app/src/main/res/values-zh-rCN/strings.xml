@@ -56,4 +56,13 @@
 	<string name="profile_menu">配置管理</string>
 	<string name="app_list_empty">没有匹配的应用</string>
 	<string name="apps_selected">已选择 %d 个应用</string>
+
+	<string name="stats_realtime">实时</string>
+	<string name="stats_session">本次</string>
+	<string name="stats_total">累计</string>
+	<string name="stats_line">%1$s  ↑ %2$s  ↓ %3$s</string>
+	<string name="traffic">流量</string>
+	<string name="traffic_reset">重置累计</string>
+	<string name="traffic_empty">暂无流量记录</string>
+	<string name="traffic_hint">应用数据取自系统统计，其中也包含未走隧道的流量，仅供参考。</string>
 </resources>

@@ -9,6 +9,7 @@
 
 package hev.sockstun;
 
+import android.os.Build;
 import android.os.Bundle;
 import android.content.Intent;
 import android.content.Context;
@@ -96,6 +97,8 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 					  intent = new Intent(MainActivity.this, AppListActivity.class);
 					else if (id == R.id.nav_log)
 					  intent = new Intent(MainActivity.this, LogActivity.class);
+					else if (id == R.id.nav_traffic)
+					  intent = new Intent(MainActivity.this, TrafficActivity.class);
 					if (intent != null)
 					  startActivity(intent);
 				}
@@ -129,6 +132,14 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 		});
 		button_control.setOnClickListener(this);
 		updateUI();
+
+		/* Android 13+ hides the ongoing traffic notification unless the
+		   POST_NOTIFICATIONS permission has been granted. */
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+			checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+				android.content.pm.PackageManager.PERMISSION_GRANTED) {
+			requestPermissions(new String[] { android.Manifest.permission.POST_NOTIFICATIONS }, 1);
+		}
 
 		/* Request VPN permission */
 		Intent intent = VpnService.prepare(MainActivity.this);

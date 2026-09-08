@@ -21,6 +21,20 @@ git clone --recursive https://github.com/xieyuhua/sockstun
 cd sockstun
 gradle assembleDebug
 ```
+docker 
+
+```
+docker pull  mingc/android-build-box
+
+docker run --rm \
+  -v "$PWD":/project \
+  -v "$HOME/.gradle-cache":/root/.gradle \
+  -v "$HOME/android-ndk":/opt/android-sdk/ndk \
+  -e JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
+  -e ANDROID_SDK_ROOT=/opt/android-sdk \
+  mingc/android-build-box \
+  bash -lc 'cd /project && ./gradlew assembleDebug --warning-mode all --no-daemon'
+```
 
 ## Socks5 Server
 

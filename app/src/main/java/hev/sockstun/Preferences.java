@@ -11,8 +11,13 @@ package hev.sockstun;
 
 import java.util.Set;
 import java.util.HashSet;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 
 public class Preferences
 {
@@ -35,6 +40,14 @@ public class Preferences
 	public static final String PROFILE_COUNT = "ProfileCount";
 	public static final String SELECTED = "Selected";
 	public static final String LOG_ENABLED = "LogEnabled";
+	public static final String STATS_TOTAL_TX = "StatsTotalTx";
+	public static final String STATS_TOTAL_RX = "StatsTotalRx";
+	public static final String STATS_SESSION_TX = "StatsSessionTx";
+	public static final String STATS_SESSION_RX = "StatsSessionRx";
+	public static final String STATS_RATE_TX = "StatsRateTx";
+	public static final String STATS_RATE_RX = "StatsRateRx";
+	public static final String STATS_APP_BASE = "StatsAppBase";
+	public static final String STATS_APP_TOTAL = "StatsAppTotal";
 
 	public static final int MAX_PROFILES = 13;
 
@@ -351,6 +364,134 @@ public class Preferences
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putBoolean(LOG_ENABLED, enable);
 		editor.commit();
+	}
+
+	/* Traffic accumulated over every session (global, not per-profile).
+	   Written with commit() because the writer runs in the :native process
+	   and MODE_MULTI_PROCESS only re-reads on commit. */
+	public long getTotalTx() {
+		return prefs.getLong(STATS_TOTAL_TX, 0);
+	}
+
+	public long getTotalRx() {
+		return prefs.getLong(STATS_TOTAL_RX, 0);
+	}
+
+	public void setTotalTraffic(long tx, long rx) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putLong(STATS_TOTAL_TX, tx);
+		editor.putLong(STATS_TOTAL_RX, rx);
+		editor.commit();
+	}
+
+	public void resetTotalTraffic() {
+		setTotalTraffic(0, 0);
+	}
+
+	/* Everything the :native service knows, written in one commit. */
+	public long getSessionTx() {
+		return prefs.getLong(STATS_SESSION_TX, 0);
+	}
+
+	public long getSessionRx() {
+		return prefs.getLong(STATS_SESSION_RX, 0);
+	}
+
+	public long getRateTx() {
+		return prefs.getLong(STATS_RATE_TX, 0);
+	}
+
+	public long getRateRx() {
+		return prefs.getLong(STATS_RATE_RX, 0);
+	}
+
+	public void setStats(long totalTx, long totalRx, long sessionTx, long sessionRx,
+			long rateTx, long rateRx) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putLong(STATS_TOTAL_TX, totalTx);
+		editor.putLong(STATS_TOTAL_RX, totalRx);
+		editor.putLong(STATS_SESSION_TX, sessionTx);
+		editor.putLong(STATS_SESSION_RX, sessionRx);
+		editor.putLong(STATS_RATE_TX, rateTx);
+		editor.putLong(STATS_RATE_RX, rateRx);
+		editor.commit();
+	}
+
+	/* Per-app snapshots: "pkg:tx:rx;pkg:tx:rx;...". */
+	public String getAppBase() {
+		return prefs.getString(STATS_APP_BASE, "");
+	}
+
+	public String getAppTotal() {
+		return prefs.getString(STATS_APP_TOTAL, "");
+	}
+
+	public void setAppStats(String base, String total) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(STATS_APP_BASE, base);
+		editor.putString(STATS_APP_TOTAL, total);
+		editor.commit();
+	}
+
+	public void resetStats() {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putLong(STATS_TOTAL_TX, 0);
+		editor.putLong(STATS_TOTAL_RX, 0);
+		editor.putLong(STATS_SESSION_TX, 0);
+		editor.putLong(STATS_SESSION_RX, 0);
+		editor.putLong(STATS_RATE_TX, 0);
+		editor.putLong(STATS_RATE_RX, 0);
+		editor.putString(STATS_APP_BASE, "");
+		editor.putString(STATS_APP_TOTAL, "");
+		editor.commit();
+	}
+
+	public static Map<String, long[]> parseAppStats(String value) {
+		Map<String, long[]> map = new HashMap<String, long[]>();
+		if (value == null || value.isEmpty())
+		  return map;
+		for (String part : value.split(";")) {
+			String[] f = part.split(":");
+			if (f.length != 3)
+			  continue;
+			try {
+				map.put(f[0], new long[] { Long.parseLong(f[1]), Long.parseLong(f[2]) });
+			} catch (NumberFormatException e) {
+			}
+		}
+		return map;
+	}
+
+	public static String formatAppStats(Map<String, long[]> map) {
+		StringBuilder sb = new StringBuilder();
+		for (Map.Entry<String, long[]> e : map.entrySet()) {
+			if (sb.length() > 0)
+			  sb.append(';');
+			long[] v = e.getValue();
+			sb.append(e.getKey()).append(':').append(v[0]).append(':').append(v[1]);
+		}
+		return sb.toString();
+	}
+
+	/* The set of packages whose traffic goes through the tunnel:
+	   the selected apps, or every app with INTERNET in global mode. */
+	public Set<String> getRoutedApps(Context context) {
+		Set<String> apps = new HashSet<String>();
+		if (getGlobal()) {
+			PackageManager pm = context.getPackageManager();
+			for (PackageInfo info : pm.getInstalledPackages(PackageManager.GET_PERMISSIONS)) {
+				if (info.packageName.equals(context.getPackageName()))
+				  continue;
+				if (info.requestedPermissions == null)
+				  continue;
+				if (!Arrays.asList(info.requestedPermissions).contains(android.Manifest.permission.INTERNET))
+				  continue;
+				apps.add(info.packageName);
+			}
+		} else {
+			apps.addAll(getApps());
+		}
+		return apps;
 	}
 
 	public void registerOnChange(SharedPreferences.OnSharedPreferenceChangeListener listener) {

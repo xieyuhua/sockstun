@@ -27,4 +27,12 @@
 	<string name="profile_limit">Достигнут лимит профилей (13)</string>
 	<string name="profile_last">Нельзя удалить последний профиль</string>
 	<string name="profile_delete_confirm">Удалить профиль «%s»?</string>
+	<string name="stats_realtime">Текущ.</string>
+	<string name="stats_session">Сессия</string>
+	<string name="stats_total">Всего</string>
+	<string name="stats_line">%1$s  ↑ %2$s  ↓ %3$s</string>
+	<string name="traffic">Трафик</string>
+	<string name="traffic_reset">Сбросить итоги</string>
+	<string name="traffic_empty">Данных о трафике пока нет</string>
+	<string name="traffic_hint">Данные по приложениям берутся из системных счётчиков и включают трафик вне туннеля.</string>
 </resources>

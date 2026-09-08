@@ -17,12 +17,17 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
 import android.os.ParcelFileDescriptor;
 import android.app.Notification;
 import android.app.Notification.Builder;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.net.VpnService;
+import android.net.TrafficStats;
+import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.ServiceInfo;
 
@@ -35,6 +40,9 @@ import java.lang.reflect.Method;
 import java.io.FileDescriptor;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
 import android.widget.Toast;
 
 public class TProxyService extends VpnService {
@@ -53,6 +61,27 @@ public class TProxyService extends VpnService {
 
 	public static final String ACTION_CONNECT = "hev.sockstun.CONNECT";
 	public static final String ACTION_DISCONNECT = "hev.sockstun.DISCONNECT";
+
+	/* Traffic statistics */
+	private static final int NOTIFY_ID = 1;
+	private static final String NOTIFY_CHANNEL = "socks5";
+	private static final long STATS_INTERVAL = 1000;
+
+	/* Layout of the long[] returned by TProxyGetStats():
+	   [0] = bytes sent (tx / up), [1] = bytes received (rx / down).
+	   Swap these two constants if a future build of the native library
+	   reports them the other way round. */
+	private static final int STATS_TX = 0;
+	private static final int STATS_RX = 1;
+
+	private Handler statsHandler = null;
+	private Runnable statsTask = null;
+	private Preferences statsPrefs = null;
+	private long lastTx, lastRx, lastTime;
+	private long sessionTx, sessionRx;
+	private long baseTx, baseRx, totalTx, totalRx;
+	private long txRate, rxRate;
+	private String lastNotifyText = null;
 
 	/* Append a line to the log file directly (bypassing the fd-1/2
 	   redirection), so startup diagnostics are always captured even if the
@@ -275,14 +304,17 @@ public class TProxyService extends VpnService {
 		prefs.setEnable(true);
 		QSTileService.requestUpdate(this);
 
-		String channelName = "socks5";
-		initNotificationChannel(channelName);
-		createNotification(channelName);
+		initNotificationChannel(NOTIFY_CHANNEL);
+		createNotification();
+		startStats(prefs);
 	}
 
 	public void stopService() {
 		if (tunFd == null)
 		  return;
+
+		/* Flush the traffic counters before the tunnel goes away. */
+		stopStats();
 
 		new Preferences(this).setEnable(false);
 		QSTileService.requestUpdate(this);
@@ -302,21 +334,197 @@ public class TProxyService extends VpnService {
 		System.exit(0);
 	}
 
-	private void createNotification(String channelName) {
+	private void createNotification() {
+		Notification notify = buildNotification();
+		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+			startForeground(NOTIFY_ID, notify);
+		} else {
+			startForeground(NOTIFY_ID, notify, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+		}
+	}
+
+	private Notification buildNotification() {
+		String line = statsLine(R.string.stats_realtime, formatRate(txRate), formatRate(rxRate));
+		String big = line + "\n" +
+			statsLine(R.string.stats_session, formatBytes(sessionTx), formatBytes(sessionRx)) + "\n" +
+			statsLine(R.string.stats_total, formatBytes(totalTx), formatBytes(totalRx));
+
 		Intent i = new Intent(this, MainActivity.class);
 		i.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
 		PendingIntent pi = PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE);
-		NotificationCompat.Builder notification = new NotificationCompat.Builder(this, channelName);
-		Notification notify = notification
-				.setContentTitle(getString(R.string.app_name))
-				.setSmallIcon(android.R.drawable.sym_def_app_icon)
-				.setContentIntent(pi)
-				.build();
-		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-			startForeground(1, notify);
-		} else {
-			startForeground(1, notify, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+
+		Intent stop = new Intent(this, TProxyService.class).setAction(ACTION_DISCONNECT);
+		PendingIntent psi = PendingIntent.getService(this, 0, stop, PendingIntent.FLAG_IMMUTABLE);
+
+		return new NotificationCompat.Builder(this, NOTIFY_CHANNEL)
+			.setContentTitle(getString(R.string.app_name))
+			.setContentText(line)
+			.setStyle(new NotificationCompat.BigTextStyle().bigText(big))
+			.setSmallIcon(android.R.drawable.sym_def_app_icon)
+			.setContentIntent(pi)
+			.setOngoing(true)
+			.setOnlyAlertOnce(true)
+			.setCategory(NotificationCompat.CATEGORY_SERVICE)
+			.addAction(android.R.drawable.ic_menu_close_clear_cancel,
+				getString(R.string.control_disable), psi)
+			.build();
+	}
+
+	private String statsLine(int labelId, String up, String down) {
+		return getString(R.string.stats_line, getString(labelId), up, down);
+	}
+
+	/* Sample TProxyGetStats() once a second: the notification shows the live
+	   rate, the usage of this session and the usage of all sessions. */
+	private void startStats(Preferences prefs) {
+		statsPrefs = prefs;
+		baseTx = prefs.getTotalTx();
+		baseRx = prefs.getTotalRx();
+		sessionTx = sessionRx = 0;
+		lastTx = lastRx = 0;
+		txRate = rxRate = 0;
+		totalTx = baseTx;
+		totalRx = baseRx;
+		lastTime = SystemClock.elapsedRealtime();
+		lastNotifyText = null;
+
+		/* Baseline of the per-app counters, so the traffic screen can show
+		   what each app used during this session. */
+		prefs.setStats(totalTx, totalRx, 0, 0, 0, 0);
+		prefs.setAppStats(snapshotApps(this, prefs), prefs.getAppTotal());
+
+		statsHandler = new Handler(Looper.getMainLooper());
+		statsTask = new Runnable() {
+			@Override
+			public void run() {
+				sampleStats(true);
+				statsHandler.postDelayed(this, STATS_INTERVAL);
+			}
+		};
+		statsHandler.postDelayed(statsTask, STATS_INTERVAL);
+	}
+
+	private void sampleStats(boolean updateNotify) {
+		long now = SystemClock.elapsedRealtime();
+		long dt = now - lastTime;
+		lastTime = now;
+
+		long[] stats = null;
+		try {
+			stats = TProxyGetStats();
+		} catch (Throwable e) {
 		}
+		if (stats != null && stats.length > STATS_RX) {
+			long tx = Math.max(stats[STATS_TX], 0);
+			long rx = Math.max(stats[STATS_RX], 0);
+			if (dt > 0) {
+				txRate = Math.max((tx - lastTx) * 1000 / dt, 0);
+				rxRate = Math.max((rx - lastRx) * 1000 / dt, 0);
+			}
+			sessionTx = tx;
+			sessionRx = rx;
+			lastTx = tx;
+			lastRx = rx;
+		}
+		totalTx = baseTx + sessionTx;
+		totalRx = baseRx + sessionRx;
+
+		if (updateNotify)
+		  updateNotification();
+
+		saveStats();
+	}
+
+	/* Only re-post the notification when the shown text really changed. */
+	private void updateNotification() {
+		String line = statsLine(R.string.stats_realtime, formatRate(txRate), formatRate(rxRate));
+		if (line.equals(lastNotifyText))
+		  return;
+		lastNotifyText = line;
+		NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+		if (nm != null)
+		  nm.notify(NOTIFY_ID, buildNotification());
+	}
+
+	private void saveStats() {
+		if (statsPrefs != null)
+		  statsPrefs.setStats(totalTx, totalRx, sessionTx, sessionRx, txRate, rxRate);
+	}
+
+	private void stopStats() {
+		if (statsHandler != null) {
+			statsHandler.removeCallbacks(statsTask);
+			statsHandler = null;
+			statsTask = null;
+		}
+		if (statsPrefs != null) {
+			sampleStats(false);
+			saveStats();
+			accumulateApps(this, statsPrefs);
+			statsPrefs = null;
+		}
+	}
+
+	/* Current value of the per-app byte counters (device-wide, since boot). */
+	private static String snapshotApps(Context context, Preferences prefs) {
+		Map<String, long[]> map = new HashMap<String, long[]>();
+		PackageManager pm = context.getPackageManager();
+		for (String pkg : prefs.getRoutedApps(context)) {
+			int uid = uidOf(pm, pkg);
+			if (uid < 0)
+			  continue;
+			long tx = TrafficStats.getUidTxBytes(uid);
+			long rx = TrafficStats.getUidRxBytes(uid);
+			map.put(pkg, new long[] { Math.max(tx, 0), Math.max(rx, 0) });
+		}
+		return Preferences.formatAppStats(map);
+	}
+
+	/* Fold the usage of this session into the per-app totals. */
+	private static void accumulateApps(Context context, Preferences prefs) {
+		Map<String, long[]> base = Preferences.parseAppStats(prefs.getAppBase());
+		Map<String, long[]> now = Preferences.parseAppStats(snapshotApps(context, prefs));
+		Map<String, long[]> total = Preferences.parseAppStats(prefs.getAppTotal());
+
+		for (Map.Entry<String, long[]> e : now.entrySet()) {
+			long[] b = base.get(e.getKey());
+			long[] v = e.getValue();
+			long tx = b != null ? Math.max(v[0] - b[0], 0) : 0;
+			long rx = b != null ? Math.max(v[1] - b[1], 0) : 0;
+			long[] t = total.get(e.getKey());
+			if (t == null)
+			  total.put(e.getKey(), new long[] { tx, rx });
+			else {
+				t[0] += tx;
+				t[1] += rx;
+			}
+		}
+		prefs.setAppStats("", Preferences.formatAppStats(total));
+	}
+
+	private static int uidOf(PackageManager pm, String pkg) {
+		try {
+			return pm.getApplicationInfo(pkg, 0).uid;
+		} catch (NameNotFoundException e) {
+			return -1;
+		}
+	}
+
+	public static String formatRate(long bytesPerSecond) {
+		return formatBytes(bytesPerSecond) + "/s";
+	}
+
+	public static String formatBytes(long bytes) {
+		if (bytes < 1024)
+		  return bytes + " B";
+		String[] units = { "KB", "MB", "GB", "TB" };
+		double value = bytes;
+		int unit = 0;
+		while (value >= 1024 && unit < units.length - 1) {
+			value /= 1024;
+			unit++;
+		}
+		return String.format(Locale.US, value < 10 ? "%.2f %s" : "%.1f %s", value, units[unit]);
 	}
 
 	// create NotificationChannel
@@ -324,8 +532,19 @@ public class TProxyService extends VpnService {
 		NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 			CharSequence name = getString(R.string.app_name);
-			NotificationChannel channel = new NotificationChannel(channelName, name, NotificationManager.IMPORTANCE_DEFAULT);
-			notificationManager.createNotificationChannel(channel);
+			/* The notification is refreshed every second, so it must be a
+			   silent/low-importance channel. Importance can only be set when
+			   the channel is created, hence the delete + recreate once. */
+			NotificationChannel old = notificationManager.getNotificationChannel(channelName);
+			if (old != null && old.getImportance() != NotificationManager.IMPORTANCE_LOW)
+			  notificationManager.deleteNotificationChannel(channelName);
+			if (notificationManager.getNotificationChannel(channelName) == null) {
+				NotificationChannel channel = new NotificationChannel(channelName, name,
+					NotificationManager.IMPORTANCE_LOW);
+				channel.setSound(null, null);
+				channel.enableVibration(false);
+				notificationManager.createNotificationChannel(channel);
+			}
 		}
 	}
 }

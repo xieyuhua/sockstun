@@ -56,4 +56,13 @@
 	<string name="profile_menu">Profile options</string>
 	<string name="app_list_empty">No matching apps</string>
 	<string name="apps_selected">%d selected</string>
+
+	<string name="stats_realtime">Live</string>
+	<string name="stats_session">Session</string>
+	<string name="stats_total">Total</string>
+	<string name="stats_line">%1$s  ↑ %2$s  ↓ %3$s</string>
+	<string name="traffic">Traffic</string>
+	<string name="traffic_reset">Reset totals</string>
+	<string name="traffic_empty">No traffic recorded yet</string>
+	<string name="traffic_hint">Per-app numbers come from the system counters, so they also include traffic that did not go through the tunnel.</string>
 </resources>
