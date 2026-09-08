@@ -52,7 +52,7 @@
 			android:exported="false" android:parentActivityName=".MainActivity"/>
 		<activity android:name=".LogActivity" android:label="@string/log"
 			android:exported="false" android:parentActivityName=".MainActivity"/>
-		<activity android:name=".TrafficActivity" android:label="@string/traffic"
+		<activity android:name=".RulesActivity" android:label="@string/rules"
 			android:exported="false" android:parentActivityName=".MainActivity"/>
 		<activity android:name=".ConnActivity" android:label="@string/connections"
 			android:exported="false" android:parentActivityName=".MainActivity"/>

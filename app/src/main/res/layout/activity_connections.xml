@@ -45,6 +45,15 @@
 				android:textAppearance="?attr/textAppearanceBodySmall"
 				android:textColor="?attr/colorOnSurfaceVariant"/>
 			<TextView
+				android:id="@+id/conn_blocked"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="12dp"
+				android:text="@string/conn_blocked"
+				android:textAppearance="?attr/textAppearanceBodySmall"
+				android:textColor="?attr/colorError"
+				android:visibility="gone"/>
+			<TextView
 				android:layout_width="match_parent"
 				android:layout_height="wrap_content"
 				android:layout_marginTop="12dp"

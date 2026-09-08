@@ -92,6 +92,7 @@ public class TProxyService extends VpnService {
 	private long txRate, rxRate;
 	private String lastNotifyText = null;
 	private final Set<String> seenConns = new HashSet<String>();
+	private boolean connLogged = false;
 
 	/* Append a line to the log file directly (bypassing the fd-1/2
 	   redirection), so startup diagnostics are always captured even if the
@@ -401,6 +402,7 @@ public class TProxyService extends VpnService {
 		lastTime = SystemClock.elapsedRealtime();
 		lastNotifyText = null;
 		seenConns.clear();
+		connLogged = false;
 
 		/* Baseline of the per-app counters, so the traffic screen can show
 		   what each app used during this session. */
@@ -737,19 +739,25 @@ public class TProxyService extends VpnService {
 			if (uid >= 0)
 			  uids.put(uid, pkg);
 		}
-		if (uids.isEmpty())
-		  return rows;
+		if (uids.isEmpty()) {
+			logConn("conn: no routed app, nothing to scan");
+			return rows;
+		}
 
 		String[] files = { "/proc/net/tcp", "/proc/net/tcp6", "/proc/net/udp", "/proc/net/udp6" };
+		int scanned = 0;
+		boolean openedAny = false;
 		for (String file : files) {
 			String proto = file.substring(file.lastIndexOf('/') + 1);
 			boolean v6 = proto.endsWith("6");
 			BufferedReader reader = null;
 			try {
 				reader = new BufferedReader(new FileReader(file));
-				reader.readLine();
+				if (reader.readLine() != null)
+				  openedAny = true;
 				String line;
 				while ((line = reader.readLine()) != null) {
+					scanned++;
 					String[] f = line.trim().split("\\s+");
 					if (f.length < 10)
 					  continue;
@@ -774,7 +782,21 @@ public class TProxyService extends VpnService {
 				}
 			}
 		}
+		if (!uids.isEmpty())
+		  prefs.setConnUnreadable(!openedAny);
+		if (!openedAny)
+		  logConn("conn: /proc/net is not readable (blocked by the system?)");
+		else
+		  logConn("conn: " + rows.size() + " sockets of " + uids.size() + " apps (" + scanned + " scanned)");
 		return rows;
+	}
+
+	/* Write the connection diagnostic only once per session. */
+	private void logConn(String text) {
+		if (!connLogged) {
+			connLogged = true;
+			appendLog(text);
+		}
 	}
 
 	private static int parseUid(String text) {

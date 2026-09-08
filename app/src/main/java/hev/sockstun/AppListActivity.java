@@ -40,9 +40,8 @@ import android.content.pm.ApplicationInfo;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.appbar.MaterialToolbar;
-import com.google.android.material.color.DynamicColors;
 
-public class AppListActivity extends AppCompatActivity {
+public class AppListActivity extends BaseActivity {
 	private Preferences prefs;
 	private AppArrayAdapter adapter;
 	private ListView listView;
@@ -160,8 +159,6 @@ public class AppListActivity extends AppCompatActivity {
 	@Override
 	public void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-		DynamicColors.applyToActivityIfAvailable(this);
-
 		setContentView(R.layout.applist);
 		toolbar = (MaterialToolbar) findViewById(R.id.toolbar);
 		setSupportActionBar(toolbar);

@@ -96,4 +96,12 @@
 	<string name="conn_now">Now  TCP %1$d · UDP %2$d · total %3$d</string>
 	<string name="conn_total">%1$d connections recorded</string>
 	<string name="conn_hint">Read from /proc/net while the tunnel runs, for the proxied apps only. Packet counts are not exposed by the tunnel engine.</string>
+	<string name="conn_blocked">本机系统禁止读取 /proc/net（Android 10+ 隐私限制），无法列出连接明细。隧道与流量统计不受影响。</string>
+
+	<string name="theme">Theme</string>
+	<string name="theme_neon">Neon Green</string>
+	<string name="theme_cyan">Cyber Cyan</string>
+	<string name="theme_purple">Midnight Purple</string>
+	<string name="theme_amber">Amber</string>
+	<string name="theme_light">Paper Light</string>
 </resources>

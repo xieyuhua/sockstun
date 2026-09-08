@@ -16,9 +16,8 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.color.DynamicColors;
 
-public class ServerActivity extends AppCompatActivity implements View.OnClickListener {
+public class ServerActivity extends BaseActivity implements View.OnClickListener {
 	private Preferences prefs;
 	private EditText edittext_socks_addr;
 	private EditText edittext_socks_udp_addr;
@@ -29,7 +28,6 @@ public class ServerActivity extends AppCompatActivity implements View.OnClickLis
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-		DynamicColors.applyToActivityIfAvailable(this);
 		prefs = new Preferences(this);
 		setContentView(R.layout.activity_server);
 

@@ -31,9 +31,8 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.color.DynamicColors;
 
-public class ConnActivity extends AppCompatActivity {
+public class ConnActivity extends BaseActivity {
 	private static final long REFRESH_INTERVAL = 1500;
 	private static final int MAX_APPS_SHOWN = 5;
 
@@ -44,6 +43,7 @@ public class ConnActivity extends AppCompatActivity {
 	private TextView textNow;
 	private TextView textTotal;
 	private TextView textApps;
+	private TextView textBlocked;
 	private ListView listView;
 	private ConnAdapter adapter;
 
@@ -80,7 +80,6 @@ public class ConnActivity extends AppCompatActivity {
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-		DynamicColors.applyToActivityIfAvailable(this);
 		setContentView(R.layout.activity_connections);
 
 		MaterialToolbar toolbar = (MaterialToolbar) findViewById(R.id.toolbar);
@@ -98,6 +97,7 @@ public class ConnActivity extends AppCompatActivity {
 		textNow = (TextView) findViewById(R.id.conn_now);
 		textTotal = (TextView) findViewById(R.id.conn_total);
 		textApps = (TextView) findViewById(R.id.conn_apps);
+		textBlocked = (TextView) findViewById(R.id.conn_blocked);
 
 		adapter = new ConnAdapter(this);
 		listView = (ListView) findViewById(R.id.list);
@@ -186,6 +186,7 @@ public class ConnActivity extends AppCompatActivity {
 		textNow.setText(getString(R.string.conn_now, tcp, udp, tcp + udp));
 		textTotal.setText(getString(R.string.conn_total, prefs.getConnTotal()));
 		textApps.setText(appSummary(Preferences.parseAppStats(prefs.getConnAppTotal())));
+		textBlocked.setVisibility(prefs.getConnUnreadable() ? View.VISIBLE : View.GONE);
 
 		List<Conn> conns = new ArrayList<Conn>();
 		String list = prefs.getConnList();

@@ -57,6 +57,8 @@ public class Preferences
 	public static final String CONN_TOTAL = "ConnTotal";
 	public static final String CONN_APP_TOTAL = "ConnAppTotal";
 	public static final String CONN_LIST = "ConnList";
+	public static final String CONN_UNREADABLE = "ConnUnreadable";
+	public static final String THEME = "Theme";
 
 	public static final int MAX_PROFILES = 13;
 
@@ -594,23 +596,38 @@ public class Preferences
 		editor.commit();
 	}
 
+	/* True when /proc/net could not be read on this device (Android 10+). */
+	public boolean getConnUnreadable() {
+		return prefs.getBoolean(CONN_UNREADABLE, false);
+	}
+
+	public void setConnUnreadable(boolean v) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putBoolean(CONN_UNREADABLE, v);
+		editor.commit();
+	}
+
 	/* The set of packages whose traffic goes through the tunnel:
-	   the selected apps, or every app with INTERNET in global mode. */
+	   the selected apps, or every app with INTERNET when no allow-list is
+	   set. An empty allow-list means "everything but this app", which is
+	   exactly what VpnService does, so it must be expanded here too. */
 	public Set<String> getRoutedApps(Context context) {
 		Set<String> apps = new HashSet<String>();
-		if (getGlobal()) {
-			PackageManager pm = context.getPackageManager();
-			for (PackageInfo info : pm.getInstalledPackages(PackageManager.GET_PERMISSIONS)) {
-				if (info.packageName.equals(context.getPackageName()))
-				  continue;
-				if (info.requestedPermissions == null)
-				  continue;
-				if (!Arrays.asList(info.requestedPermissions).contains(android.Manifest.permission.INTERNET))
-				  continue;
-				apps.add(info.packageName);
-			}
-		} else {
+		if (!getGlobal()) {
 			apps.addAll(getApps());
+			if (!apps.isEmpty())
+			  return apps;
+		}
+
+		PackageManager pm = context.getPackageManager();
+		for (PackageInfo info : pm.getInstalledPackages(PackageManager.GET_PERMISSIONS)) {
+			if (info.packageName.equals(context.getPackageName()))
+			  continue;
+			if (info.requestedPermissions == null)
+			  continue;
+			if (!Arrays.asList(info.requestedPermissions).contains(android.Manifest.permission.INTERNET))
+			  continue;
+			apps.add(info.packageName);
 		}
 		return apps;
 	}
@@ -621,6 +638,22 @@ public class Preferences
 
 	public void unregisterOnChange(SharedPreferences.OnSharedPreferenceChangeListener listener) {
 		prefs.unregisterOnSharedPreferenceChangeListener(listener);
+	}
+
+	/* Which palette to use (ThemeManager.*). */
+	public static int getTheme(Context context) {
+		SharedPreferences sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_MULTI_PROCESS);
+		return sp.getInt(THEME, ThemeManager.NEON);
+	}
+
+	public int getTheme() {
+		return prefs.getInt(THEME, ThemeManager.NEON);
+	}
+
+	public void setTheme(int id) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putInt(THEME, id);
+		editor.commit();
 	}
 
 	public int getTunnelMtu() {

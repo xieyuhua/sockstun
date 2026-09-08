@@ -9,8 +9,16 @@
 
 package hev.sockstun;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.content.Intent;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -32,11 +40,10 @@ import androidx.drawerlayout.widget.DrawerLayout;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
-import com.google.android.material.color.DynamicColors;
 import com.google.android.material.color.MaterialColors;
 import com.google.android.material.navigation.NavigationView;
 
-public class MainActivity extends AppCompatActivity implements View.OnClickListener {
+public class MainActivity extends BaseActivity implements View.OnClickListener {
 	private Preferences prefs;
 	private DrawerLayout drawer;
 	private NavigationView navView;
@@ -50,6 +57,15 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 	private Button button_profile_prev;
 	private Button button_profile_next;
 	private Button button_profile_menu;
+	private TextView textview_realtime;
+	private TextView textview_session;
+	private TextView textview_total;
+	private TextView textview_apps;
+
+	private static final long STATS_INTERVAL = 1500;
+	private static final int MAX_APPS_SHOWN = 3;
+	private Handler statsHandler;
+	private Runnable statsTask;
 
 	/* Refresh the control state when the tunnel is toggled elsewhere
 	   (e.g. from the Quick Settings tile) while this screen is visible. */
@@ -65,8 +81,6 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 	@Override
 	public void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-		DynamicColors.applyToActivityIfAvailable(this);
-
 		prefs = new Preferences(this);
 		setContentView(R.layout.main);
 
@@ -97,10 +111,15 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 					  intent = new Intent(MainActivity.this, AppListActivity.class);
 					else if (id == R.id.nav_log)
 					  intent = new Intent(MainActivity.this, LogActivity.class);
-					else if (id == R.id.nav_traffic)
-					  intent = new Intent(MainActivity.this, TrafficActivity.class);
+					else if (id == R.id.nav_rules)
+					  intent = new Intent(MainActivity.this, RulesActivity.class);
 					else if (id == R.id.nav_conn)
 					  intent = new Intent(MainActivity.this, ConnActivity.class);
+					else if (id == R.id.nav_theme) {
+					  showThemeDialog();
+					  drawer.closeDrawers();
+					  return true;
+					}
 					if (intent != null)
 					  startActivity(intent);
 				}
@@ -108,6 +127,33 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 				return true;
 			}
 		});
+
+	}
+
+	/* Theme picker: choose one of the bundled palettes, then recreate
+	   so every activity picks up the new theme on next creation. */
+	private void showThemeDialog() {
+		final int current = prefs.getTheme();
+		final String[] names = new String[ThemeManager.count()];
+		for (int i = 0; i < names.length; i++)
+			names[i] = getString(ThemeManager.nameRes(i));
+
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.theme)
+			.setSingleChoiceItems(names, current, null)
+			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface d, int which) {
+					int sel = ((AlertDialog) d).getListView().getCheckedItemPosition();
+					if (sel >= 0 && sel != current) {
+						prefs.setTheme(sel);
+						recreate();
+					}
+				}
+			})
+			.setNegativeButton(android.R.string.cancel, null)
+			.show();
+	}
 
 		card_status = (MaterialCardView) findViewById(R.id.status_card);
 		card_status_dot = (MaterialCardView) findViewById(R.id.status_dot);
@@ -119,6 +165,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 		button_profile_prev = (Button) findViewById(R.id.profile_prev);
 		button_profile_next = (Button) findViewById(R.id.profile_next);
 		button_profile_menu = (Button) findViewById(R.id.profile_menu);
+		textview_realtime = (TextView) findViewById(R.id.stats_realtime);
+		textview_session = (TextView) findViewById(R.id.stats_session);
+		textview_total = (TextView) findViewById(R.id.stats_total);
+		textview_apps = (TextView) findViewById(R.id.stats_apps);
+		((Button) findViewById(R.id.traffic_reset)).setOnClickListener(this);
 
 		button_profile_prev.setOnClickListener(this);
 		button_profile_next.setOnClickListener(this);
@@ -134,6 +185,15 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 		});
 		button_control.setOnClickListener(this);
 		updateUI();
+
+		statsHandler = new Handler(Looper.getMainLooper());
+		statsTask = new Runnable() {
+			@Override
+			public void run() {
+				refreshTraffic();
+				statsHandler.postDelayed(this, STATS_INTERVAL);
+			}
+		};
 
 		/* Android 13+ hides the ongoing traffic notification unless the
 		   POST_NOTIFICATIONS permission has been granted. */
@@ -155,18 +215,22 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 	protected void onStart() {
 		super.onStart();
 		prefs.registerOnChange(prefsListener);
+		refreshTraffic();
+		statsHandler.postDelayed(statsTask, STATS_INTERVAL);
 	}
 
 	@Override
 	protected void onResume() {
 		super.onResume();
 		updateControlState();
+		refreshTraffic();
 	}
 
 	@Override
 	protected void onStop() {
 		super.onStop();
 		prefs.unregisterOnChange(prefsListener);
+		statsHandler.removeCallbacks(statsTask);
 	}
 
 	@Override
@@ -179,6 +243,11 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 
 	@Override
 	public void onClick(View view) {
+		if (view.getId() == R.id.traffic_reset) {
+			prefs.resetStats();
+			refreshTraffic();
+			return;
+		}
 		if (view == button_control) {
 			boolean isEnable = prefs.getEnable();
 			prefs.setEnable(!isEnable);
@@ -290,6 +359,62 @@ public class MainActivity extends AppCompatActivity implements View.OnClickListe
 	private void updateUI() {
 		textview_profile_name.setText(prefs.getProfileName());
 		updateControlState();
+	}
+
+	/* Traffic counters: the tunnel totals are exact, the per-app numbers come
+	   from the system counters and include traffic outside the tunnel. */
+	private void refreshTraffic() {
+		prefs = new Preferences(this);
+		textview_realtime.setText(statsLine(R.string.stats_realtime,
+			TProxyService.formatRate(prefs.getRateTx()),
+			TProxyService.formatRate(prefs.getRateRx())));
+		textview_session.setText(statsLine(R.string.stats_session,
+			TProxyService.formatBytes(prefs.getSessionTx()),
+			TProxyService.formatBytes(prefs.getSessionRx())));
+		textview_total.setText(statsLine(R.string.stats_total,
+			TProxyService.formatBytes(prefs.getTotalTx()),
+			TProxyService.formatBytes(prefs.getTotalRx())));
+		textview_apps.setText(appSummary(Preferences.parseAppStats(prefs.getAppTotal())));
+	}
+
+	private String statsLine(int labelId, String up, String down) {
+		return getString(R.string.stats_line, getString(labelId), up, down);
+	}
+
+	private String appSummary(Map<String, long[]> totals) {
+		if (totals.isEmpty())
+		  return "";
+
+		List<Map.Entry<String, long[]>> entries =
+			new ArrayList<Map.Entry<String, long[]>>(totals.entrySet());
+		Collections.sort(entries, new Comparator<Map.Entry<String, long[]>>() {
+			@Override
+			public int compare(Map.Entry<String, long[]> a, Map.Entry<String, long[]> b) {
+				long ca = a.getValue()[0] + a.getValue()[1];
+				long cb = b.getValue()[0] + b.getValue()[1];
+				if (ca != cb)
+				  return ca < cb ? 1 : -1;
+				return 0;
+			}
+		});
+
+		StringBuilder sb = new StringBuilder();
+		for (int i = 0; i < entries.size() && i < MAX_APPS_SHOWN; i++) {
+			if (sb.length() > 0)
+			  sb.append("  ·  ");
+			long[] v = entries.get(i).getValue();
+			sb.append(labelOf(entries.get(i).getKey())).append(' ')
+			  .append(TProxyService.formatBytes(v[0] + v[1]));
+		}
+		return sb.toString();
+	}
+
+	private String labelOf(String pkg) {
+		try {
+			return getPackageManager().getApplicationInfo(pkg, 0).loadLabel(getPackageManager()).toString();
+		} catch (Exception e) {
+			return pkg;
+		}
 	}
 
 	private void updateControlState() {

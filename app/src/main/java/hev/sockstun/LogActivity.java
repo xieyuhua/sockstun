@@ -19,7 +19,6 @@ import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.appbar.MaterialToolbar;
-import com.google.android.material.color.DynamicColors;
 import com.google.android.material.switchmaterial.SwitchMaterial;
 
 import java.io.BufferedReader;
@@ -28,7 +27,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 
-public class LogActivity extends AppCompatActivity implements View.OnClickListener {
+public class LogActivity extends BaseActivity implements View.OnClickListener {
 	private static final String LOG_NAME = "tproxy.log";
 	private Handler handler;
 	private Runnable refresher;
@@ -40,7 +39,6 @@ public class LogActivity extends AppCompatActivity implements View.OnClickListen
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-		DynamicColors.applyToActivityIfAvailable(this);
 		setContentView(R.layout.activity_log);
 
 		MaterialToolbar toolbar = (MaterialToolbar) findViewById(R.id.toolbar);

@@ -17,10 +17,9 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.color.DynamicColors;
 import com.google.android.material.textfield.TextInputLayout;
 
-public class DnsActivity extends AppCompatActivity implements View.OnClickListener {
+public class DnsActivity extends BaseActivity implements View.OnClickListener {
 	private Preferences prefs;
 	private CompoundButton checkbox_remote_dns;
 	private EditText edittext_dns_ipv4;
@@ -31,7 +30,6 @@ public class DnsActivity extends AppCompatActivity implements View.OnClickListen
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-		DynamicColors.applyToActivityIfAvailable(this);
 		prefs = new Preferences(this);
 		setContentView(R.layout.activity_dns);
 

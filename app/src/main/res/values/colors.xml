@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+	<!-- Terminal / hacker palette: near-black canvas, one neon accent. -->
+	<color name="brand">#00E5A0</color>
+	<color name="brand_dim">#0B2E26</color>
+	<color name="brand_deep">#10261F</color>
+	<color name="accent">#00B0FF</color>
+
+	<color name="bg">#060A09</color>
+	<color name="surface">#0D1312</color>
+	<color name="surface_alt">#131B1A</color>
+	<color name="surface_high">#18221F</color>
+
+	<color name="text">#E4FFF5</color>
+	<color name="text_dim">#7F9A93</color>
+	<color name="line">#1F2C29</color>
+
+	<color name="danger">#FF5C7A</color>
+	<color name="danger_container">#3A1220</color>
+	<color name="on_danger_container">#FFC2CE</color>
+</resources>

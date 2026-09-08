@@ -1,6 +1,146 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<style name="Theme.SocksTun" parent="Theme.Material3.DayNight.NoActionBar"/>
+	<!-- ===== Neon Green (default, near-black + neon green) ===== -->
+	<style name="Theme.SocksTun" parent="Theme.Material3.Dark.NoActionBar">
+		<item name="colorPrimary">#00E5A0</item>
+		<item name="colorOnPrimary">#060A09</item>
+		<item name="colorPrimaryContainer">#10261F</item>
+		<item name="colorOnPrimaryContainer">#6CFFD0</item>
+		<item name="colorSecondary">#00E5A0</item>
+		<item name="colorOnSecondary">#060A09</item>
+		<item name="colorSecondaryContainer">#0B2E26</item>
+		<item name="colorOnSecondaryContainer">#6CFFD0</item>
+		<item name="colorError">#FF5C7A</item>
+		<item name="colorOnError">#060A09</item>
+		<item name="colorErrorContainer">#3A1220</item>
+		<item name="colorOnErrorContainer">#FFC2CE</item>
+		<item name="android:colorBackground">#060A09</item>
+		<item name="colorSurface">#0D1312</item>
+		<item name="colorOnSurface">#E4FFF5</item>
+		<item name="colorSurfaceVariant">#131B1A</item>
+		<item name="colorOnSurfaceVariant">#7F9A93</item>
+		<item name="colorSurfaceContainer">#18221F</item>
+		<item name="colorOutline">#1F2C29</item>
+		<item name="android:statusBarColor">@android:color/transparent</item>
+		<item name="android:navigationBarColor">@android:color/transparent</item>
+		<item name="android:windowLightStatusBar">false</item>
+		<item name="android:windowBackground">#060A09</item>
+	</style>
+
+	<!-- ===== Cyber Cyan ===== -->
+	<style name="Theme.SocksTun.Cyan" parent="Theme.Material3.Dark.NoActionBar">
+		<item name="colorPrimary">#22D3EE</item>
+		<item name="colorOnPrimary">#04181C</item>
+		<item name="colorPrimaryContainer">#04333B</item>
+		<item name="colorOnPrimaryContainer">#9DF2FF</item>
+		<item name="colorSecondary">#22D3EE</item>
+		<item name="colorOnSecondary">#04181C</item>
+		<item name="colorSecondaryContainer">#0B2E33</item>
+		<item name="colorOnSecondaryContainer">#9DF2FF</item>
+		<item name="colorError">#FF6B8B</item>
+		<item name="colorOnError">#2B0612</item>
+		<item name="colorErrorContainer">#3A1220</item>
+		<item name="colorOnErrorContainer">#FFC2CE</item>
+		<item name="android:colorBackground">#05090C</item>
+		<item name="colorSurface">#0B1318</item>
+		<item name="colorOnSurface">#E3F6FB</item>
+		<item name="colorSurfaceVariant">#121D24</item>
+		<item name="colorOnSurfaceVariant">#7E9AA6</item>
+		<item name="colorSurfaceContainer">#18272F</item>
+		<item name="colorOutline">#1E2E35</item>
+		<item name="android:statusBarColor">@android:color/transparent</item>
+		<item name="android:navigationBarColor">@android:color/transparent</item>
+		<item name="android:windowLightStatusBar">false</item>
+		<item name="android:windowBackground">#05090C</item>
+	</style>
+
+	<!-- ===== Midnight Purple ===== -->
+	<style name="Theme.SocksTun.Purple" parent="Theme.Material3.Dark.NoActionBar">
+		<item name="colorPrimary">#A78BFA</item>
+		<item name="colorOnPrimary">#160C33</item>
+		<item name="colorPrimaryContainer">#2E1F5C</item>
+		<item name="colorOnPrimaryContainer">#E0D6FF</item>
+		<item name="colorSecondary">#A78BFA</item>
+		<item name="colorOnSecondary">#160C33</item>
+		<item name="colorSecondaryContainer">#2A1F4A</item>
+		<item name="colorOnSecondaryContainer">#E0D6FF</item>
+		<item name="colorError">#FF7AA0</item>
+		<item name="colorOnError">#2B0014</item>
+		<item name="colorErrorContainer">#3A1230</item>
+		<item name="colorOnErrorContainer">#FFC2DE</item>
+		<item name="android:colorBackground">#0A0712</item>
+		<item name="colorSurface">#120E1E</item>
+		<item name="colorOnSurface">#F1ECFF</item>
+		<item name="colorSurfaceVariant">#1A1430</item>
+		<item name="colorOnSurfaceVariant">#9B8FC0</item>
+		<item name="colorSurfaceContainer">#231B3C</item>
+		<item name="colorOutline">#2A2138</item>
+		<item name="android:statusBarColor">@android:color/transparent</item>
+		<item name="android:navigationBarColor">@android:color/transparent</item>
+		<item name="android:windowLightStatusBar">false</item>
+		<item name="android:windowBackground">#0A0712</item>
+	</style>
+
+	<!-- ===== Amber ===== -->
+	<style name="Theme.SocksTun.Amber" parent="Theme.Material3.Dark.NoActionBar">
+		<item name="colorPrimary">#FFB020</item>
+		<item name="colorOnPrimary">#2B1700</item>
+		<item name="colorPrimaryContainer">#4A2E00</item>
+		<item name="colorOnPrimaryContainer">#FFD58A</item>
+		<item name="colorSecondary">#FFB020</item>
+		<item name="colorOnSecondary">#2B1700</item>
+		<item name="colorSecondaryContainer">#3A2600</item>
+		<item name="colorOnSecondaryContainer">#FFD58A</item>
+		<item name="colorError">#FF6B5C</item>
+		<item name="colorOnError">#2B0A06</item>
+		<item name="colorErrorContainer">#3A1A12</item>
+		<item name="colorOnErrorContainer">#FFD2C2</item>
+		<item name="android:colorBackground">#0C0905</item>
+		<item name="colorSurface">#160F08</item>
+		<item name="colorOnSurface">#FFF4E6</item>
+		<item name="colorSurfaceVariant">#20160C</item>
+		<item name="colorOnSurfaceVariant">#C2A988</item>
+		<item name="colorSurfaceContainer">#2A1E10</item>
+		<item name="colorOutline">#33280F</item>
+		<item name="android:statusBarColor">@android:color/transparent</item>
+		<item name="android:navigationBarColor">@android:color/transparent</item>
+		<item name="android:windowLightStatusBar">false</item>
+		<item name="android:windowBackground">#0C0905</item>
+	</style>
+
+	<!-- ===== Paper Light ===== -->
+	<style name="Theme.SocksTun.Light" parent="Theme.Material3.Light.NoActionBar">
+		<item name="colorPrimary">#0A7D5A</item>
+		<item name="colorOnPrimary">#FFFFFF</item>
+		<item name="colorPrimaryContainer">#C7F3E2</item>
+		<item name="colorOnPrimaryContainer">#003B2C</item>
+		<item name="colorSecondary">#0A7D5A</item>
+		<item name="colorOnSecondary">#FFFFFF</item>
+		<item name="colorSecondaryContainer">#C7F3E2</item>
+		<item name="colorOnSecondaryContainer">#003B2C</item>
+		<item name="colorError">#D23B5C</item>
+		<item name="colorOnError">#FFFFFF</item>
+		<item name="colorErrorContainer">#FCE3EA</item>
+		<item name="colorOnErrorContainer">#5A0F22</item>
+		<item name="android:colorBackground">#F4F7F6</item>
+		<item name="colorSurface">#FFFFFF</item>
+		<item name="colorOnSurface">#0B1411</item>
+		<item name="colorSurfaceVariant">#EEF3F1</item>
+		<item name="colorOnSurfaceVariant">#51615B</item>
+		<item name="colorSurfaceContainer">#E4EBE8</item>
+		<item name="colorOutline">#D2DEDA</item>
+		<item name="android:statusBarColor">#F4F7F6</item>
+		<item name="android:navigationBarColor">#F4F7F6</item>
+		<item name="android:windowLightStatusBar">true</item>
+		<item name="android:windowBackground">#F4F7F6</item>
+	</style>
+
+	<style name="Widget.SocksTun.Card" parent="Widget.Material3.CardView.Outlined">
+		<item name="cardCornerRadius">18dp</item>
+		<item name="cardBackgroundColor">?attr/colorSurface</item>
+		<item name="strokeColor">?attr/colorOutline</item>
+		<item name="strokeWidth">1dp</item>
+	</style>
 
 	<style name="Widget.SocksTun.TextInputLayout" parent="Widget.Material3.TextInputLayout.OutlinedBox">
 		<item name="boxCornerRadiusTopStart">12dp</item>
@@ -9,13 +149,30 @@
 		<item name="boxCornerRadiusBottomEnd">12dp</item>
 	</style>
 
-	<style name="TextAppearance.SocksTun.Toolbar" parent="TextAppearance.Material3.TitleLarge"/>
+	<style name="TextAppearance.SocksTun.Toolbar" parent="TextAppearance.Material3.TitleMedium">
+		<item name="fontFamily">monospace</item>
+		<item name="android:fontFamily">monospace</item>
+		<item name="android:letterSpacing">0.12</item>
+	</style>
 
 	<style name="TextAppearance.SocksTun.Section" parent="TextAppearance.Material3.TitleSmall">
 		<item name="android:textColor">?attr/colorPrimary</item>
+		<item name="fontFamily">monospace</item>
+		<item name="android:fontFamily">monospace</item>
+		<item name="android:letterSpacing">0.08</item>
 	</style>
 
 	<style name="TextAppearance.SocksTun.Hint" parent="TextAppearance.Material3.BodySmall">
 		<item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+	</style>
+
+	<style name="TextAppearance.SocksTun.Mono" parent="TextAppearance.Material3.BodyMedium">
+		<item name="fontFamily">monospace</item>
+		<item name="android:fontFamily">monospace</item>
+	</style>
+
+	<style name="TextAppearance.SocksTun.MonoSmall" parent="TextAppearance.Material3.BodySmall">
+		<item name="fontFamily">monospace</item>
+		<item name="android:fontFamily">monospace</item>
 	</style>
 </resources>
