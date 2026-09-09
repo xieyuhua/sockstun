@@ -10,7 +10,7 @@
 		android:layout_width="match_parent"
 		android:layout_height="?attr/actionBarSize"
 		app:navigationIcon="?attr/homeAsUpIndicator"
-		app:title="@string/section_server"
+		app:title="@string/server_edit"
 		app:titleTextAppearance="@style/TextAppearance.SocksTun.Toolbar"/>
 	<ScrollView
 		android:layout_width="match_parent"
@@ -25,74 +25,68 @@
 			android:paddingLeft="16dp"
 			android:paddingRight="16dp"
 			android:paddingTop="8dp"
-			android:paddingBottom="16dp">
+			android:paddingBottom="24dp">
 			<com.google.android.material.card.MaterialCardView
-				style="@style/Widget.Material3.CardView.Outlined"
+				style="@style/Widget.SocksTun.Card"
 				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				app:cardCornerRadius="20dp">
+				android:layout_height="wrap_content">
 				<LinearLayout
 					android:orientation="vertical"
 					android:layout_width="match_parent"
 					android:layout_height="wrap_content"
 					android:padding="16dp">
 					<com.google.android.material.textfield.TextInputLayout
-						android:id="@+id/til_socks_addr"
 						style="@style/Widget.SocksTun.TextInputLayout"
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
-						android:hint="@string/socks_addr">
+						android:hint="@string/server_name">
 						<com.google.android.material.textfield.TextInputEditText
-							android:id="@+id/socks_addr"
+							android:id="@+id/server_name"
 							android:layout_width="match_parent"
 							android:layout_height="wrap_content"
 							android:inputType="text"
 							android:maxLines="1"/>
 					</com.google.android.material.textfield.TextInputLayout>
 					<com.google.android.material.textfield.TextInputLayout
-						android:id="@+id/til_socks_udp_addr"
 						style="@style/Widget.SocksTun.TextInputLayout"
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
 						android:layout_marginTop="12dp"
-						android:hint="@string/socks_udp_addr">
+						android:hint="@string/socks_addr">
 						<com.google.android.material.textfield.TextInputEditText
-							android:id="@+id/socks_udp_addr"
+							android:id="@+id/server_addr"
 							android:layout_width="match_parent"
 							android:layout_height="wrap_content"
 							android:inputType="text"
 							android:maxLines="1"/>
 					</com.google.android.material.textfield.TextInputLayout>
 					<com.google.android.material.textfield.TextInputLayout
-						android:id="@+id/til_socks_port"
 						style="@style/Widget.SocksTun.TextInputLayout"
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
 						android:layout_marginTop="12dp"
 						android:hint="@string/port">
 						<com.google.android.material.textfield.TextInputEditText
-							android:id="@+id/socks_port"
+							android:id="@+id/server_port"
 							android:layout_width="match_parent"
 							android:layout_height="wrap_content"
 							android:inputType="number"
 							android:maxLines="1"/>
 					</com.google.android.material.textfield.TextInputLayout>
 					<com.google.android.material.textfield.TextInputLayout
-						android:id="@+id/til_socks_user"
 						style="@style/Widget.SocksTun.TextInputLayout"
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
 						android:layout_marginTop="12dp"
 						android:hint="@string/socks_user">
 						<com.google.android.material.textfield.TextInputEditText
-							android:id="@+id/socks_user"
+							android:id="@+id/server_user"
 							android:layout_width="match_parent"
 							android:layout_height="wrap_content"
 							android:inputType="text"
 							android:maxLines="1"/>
 					</com.google.android.material.textfield.TextInputLayout>
 					<com.google.android.material.textfield.TextInputLayout
-						android:id="@+id/til_socks_pass"
 						style="@style/Widget.SocksTun.TextInputLayout"
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
@@ -100,7 +94,7 @@
 						android:hint="@string/socks_pass"
 						app:endIconMode="password_toggle">
 						<com.google.android.material.textfield.TextInputEditText
-							android:id="@+id/socks_pass"
+							android:id="@+id/server_pass"
 							android:layout_width="match_parent"
 							android:layout_height="wrap_content"
 							android:inputType="textPassword"
@@ -108,6 +102,19 @@
 					</com.google.android.material.textfield.TextInputLayout>
 				</LinearLayout>
 			</com.google.android.material.card.MaterialCardView>
+			<com.google.android.material.button.MaterialButton
+				android:id="@+id/server_delete"
+				style="?attr/materialButtonOutlinedStyle"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="16dp"
+				android:minHeight="48dp"
+				android:text="@string/server_delete"
+				android:textSize="14sp"
+				app:cornerRadius="24dp"
+				app:icon="@drawable/ic_delete"
+				app:iconGravity="textStart"
+				app:iconPadding="8dp"/>
 		</LinearLayout>
 	</ScrollView>
 	<com.google.android.material.button.MaterialButton
@@ -116,10 +123,10 @@
 		android:layout_width="match_parent"
 		android:layout_height="wrap_content"
 		android:layout_margin="16dp"
-		android:minHeight="56dp"
+		android:minHeight="52dp"
 		android:text="@string/save"
-		android:textSize="16sp"
-		app:cornerRadius="28dp"
+		android:textSize="15sp"
+		app:cornerRadius="26dp"
 		app:icon="@drawable/ic_save"
 		app:iconGravity="textStart"
 		app:iconPadding="8dp"/>

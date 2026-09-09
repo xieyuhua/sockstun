@@ -24,15 +24,12 @@ import android.content.pm.PackageManager;
 public class Preferences
 {
 	public static final String PREFS_NAME = "SocksPrefs";
-	public static final String SOCKS_ADDR = "SocksAddr";
-	public static final String SOCKS_UDP_ADDR = "SocksUdpAddr";
-	public static final String SOCKS_PORT = "SocksPort";
-	public static final String SOCKS_USER = "SocksUser";
-	public static final String SOCKS_PASS = "SocksPass";
 	public static final String SUB_URL = "SubUrl";
 	public static final String SUB_NODES = "SubNodes";
 	public static final String SUB_RAW = "SubRaw";
 	public static final String SUB_SELECTED = "SubSelected";
+	public static final String SOCKS_SERVERS = "SocksServers";
+	public static final String SOCKS_ACTIVE = "SocksActive";
 	public static final String DNS_IPV4 = "DnsIpv4";
 	public static final String DNS_IPV6 = "DnsIpv6";
 	public static final String IPV4 = "Ipv4";
@@ -115,16 +112,6 @@ public class Preferences
 
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(0, NAME), "Default");
-		if (prefs.contains(SOCKS_ADDR))
-		  editor.putString(key(0, SOCKS_ADDR), prefs.getString(SOCKS_ADDR, ""));
-		if (prefs.contains(SOCKS_UDP_ADDR))
-		  editor.putString(key(0, SOCKS_UDP_ADDR), prefs.getString(SOCKS_UDP_ADDR, ""));
-		if (prefs.contains(SOCKS_PORT))
-		  editor.putInt(key(0, SOCKS_PORT), prefs.getInt(SOCKS_PORT, 1080));
-		if (prefs.contains(SOCKS_USER))
-		  editor.putString(key(0, SOCKS_USER), prefs.getString(SOCKS_USER, ""));
-		if (prefs.contains(SOCKS_PASS))
-		  editor.putString(key(0, SOCKS_PASS), prefs.getString(SOCKS_PASS, ""));
 		if (prefs.contains(DNS_IPV4))
 		  editor.putString(key(0, DNS_IPV4), prefs.getString(DNS_IPV4, ""));
 		if (prefs.contains(DNS_IPV6))
@@ -141,11 +128,6 @@ public class Preferences
 		  editor.putBoolean(key(0, REMOTE_DNS), prefs.getBoolean(REMOTE_DNS, true));
 		if (prefs.contains(APPS))
 		  editor.putStringSet(key(0, APPS), new HashSet<String>(prefs.getStringSet(APPS, new HashSet<String>())));
-		editor.remove(SOCKS_ADDR);
-		editor.remove(SOCKS_UDP_ADDR);
-		editor.remove(SOCKS_PORT);
-		editor.remove(SOCKS_USER);
-		editor.remove(SOCKS_PASS);
 		editor.remove(DNS_IPV4);
 		editor.remove(DNS_IPV6);
 		editor.remove(IPV4);
@@ -164,11 +146,6 @@ public class Preferences
 	   in ascending order within one editor is safe. */
 	private void copyProfile(SharedPreferences.Editor editor, int src, int dst) {
 		editor.putString(key(dst, NAME), prefs.getString(key(src, NAME), "Default"));
-		editor.putString(key(dst, SOCKS_ADDR), prefs.getString(key(src, SOCKS_ADDR), "127.0.0.1"));
-		editor.putString(key(dst, SOCKS_UDP_ADDR), prefs.getString(key(src, SOCKS_UDP_ADDR), ""));
-		editor.putInt(key(dst, SOCKS_PORT), prefs.getInt(key(src, SOCKS_PORT), 1080));
-		editor.putString(key(dst, SOCKS_USER), prefs.getString(key(src, SOCKS_USER), ""));
-		editor.putString(key(dst, SOCKS_PASS), prefs.getString(key(src, SOCKS_PASS), ""));
 		editor.putString(key(dst, DNS_IPV4), prefs.getString(key(src, DNS_IPV4), "8.8.8.8"));
 		editor.putString(key(dst, DNS_IPV6), prefs.getString(key(src, DNS_IPV6), "2001:4860:4860::8888"));
 		editor.putBoolean(key(dst, IPV4), prefs.getBoolean(key(src, IPV4), true));
@@ -183,15 +160,12 @@ public class Preferences
 		editor.putString(key(dst, SUB_NODES), prefs.getString(key(src, SUB_NODES), ""));
 		editor.putString(key(dst, SUB_RAW), prefs.getString(key(src, SUB_RAW), ""));
 		editor.putString(key(dst, SUB_SELECTED), prefs.getString(key(src, SUB_SELECTED), ""));
+		editor.putString(key(dst, SOCKS_SERVERS), prefs.getString(key(src, SOCKS_SERVERS), ""));
+		editor.putString(key(dst, SOCKS_ACTIVE), prefs.getString(key(src, SOCKS_ACTIVE), ""));
 	}
 
 	private void removeProfile(SharedPreferences.Editor editor, int profile) {
 		editor.remove(key(profile, NAME));
-		editor.remove(key(profile, SOCKS_ADDR));
-		editor.remove(key(profile, SOCKS_UDP_ADDR));
-		editor.remove(key(profile, SOCKS_PORT));
-		editor.remove(key(profile, SOCKS_USER));
-		editor.remove(key(profile, SOCKS_PASS));
 		editor.remove(key(profile, DNS_IPV4));
 		editor.remove(key(profile, DNS_IPV6));
 		editor.remove(key(profile, IPV4));
@@ -206,6 +180,8 @@ public class Preferences
 		editor.remove(key(profile, SUB_NODES));
 		editor.remove(key(profile, SUB_RAW));
 		editor.remove(key(profile, SUB_SELECTED));
+		editor.remove(key(profile, SOCKS_SERVERS));
+		editor.remove(key(profile, SOCKS_ACTIVE));
 	}
 
 	public int getProfileCount() {
@@ -265,56 +241,6 @@ public class Preferences
 		return true;
 	}
 
-	public String getSocksAddress() {
-		return prefs.getString(key(SOCKS_ADDR), "127.0.0.1");
-	}
-
-	public void setSocksAddress(String addr) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putString(key(SOCKS_ADDR), addr);
-		editor.commit();
-	}
-
-	public String getSocksUdpAddress() {
-		return prefs.getString(key(SOCKS_UDP_ADDR), "");
-	}
-
-	public void setSocksUdpAddress(String addr) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putString(key(SOCKS_UDP_ADDR), addr);
-		editor.commit();
-	}
-
-	public int getSocksPort() {
-		return prefs.getInt(key(SOCKS_PORT), 1080);
-	}
-
-	public void setSocksPort(int port) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putInt(key(SOCKS_PORT), port);
-		editor.commit();
-	}
-
-	public String getSocksUsername() {
-		return prefs.getString(key(SOCKS_USER), "");
-	}
-
-	public void setSocksUsername(String user) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putString(key(SOCKS_USER), user);
-		editor.commit();
-	}
-
-	public String getSocksPassword() {
-		return prefs.getString(key(SOCKS_PASS), "");
-	}
-
-	public void setSocksPassword(String pass) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putString(key(SOCKS_PASS), pass);
-		editor.commit();
-	}
-
 	/* Remote clash.yml subscription (per profile). */
 	public String getSubUrl() {
 		return prefs.getString(key(SUB_URL), "");
@@ -344,6 +270,64 @@ public class Preferences
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(SUB_SELECTED), name);
 		editor.commit();
+	}
+
+	public boolean hasSubscription() {
+		String raw = getSubRaw();
+		return raw != null && !raw.trim().isEmpty();
+	}
+
+	/* The manually configured SOCKS5 servers, plus which one is enabled.
+	   An enabled server takes over from the subscription. */
+	public List<SocksServer> getSocksServers() {
+		return SocksServer.decode(prefs.getString(key(SOCKS_SERVERS), ""));
+	}
+
+	public void setSocksServers(List<SocksServer> list) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SOCKS_SERVERS), SocksServer.encode(list));
+		editor.commit();
+	}
+
+	public String getActiveSocksId() {
+		return prefs.getString(key(SOCKS_ACTIVE), "");
+	}
+
+	public void setActiveSocksId(String id) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SOCKS_ACTIVE), id == null ? "" : id);
+		editor.commit();
+	}
+
+	/* The enabled server, or null when the subscription is in charge. */
+	public SocksServer getActiveSocksServer() {
+		String id = getActiveSocksId();
+		if (id == null || id.isEmpty())
+		  return null;
+		for (SocksServer s : getSocksServers()) {
+			if (id.equals(s.id))
+			  return s;
+		}
+		return null;
+	}
+
+	/* Which node the tunnel is meant to use. Empty means "let the
+	   subscription decide for itself". */
+	public String getCurrentNode() {
+		SocksServer s = getActiveSocksServer();
+		if (s != null)
+		  return socks5Label(s);
+		String sel = getSubSelected();
+		if (sel != null && !sel.isEmpty())
+		  return sel;
+		return "";
+	}
+
+	private String socks5Label(SocksServer s) {
+		String addr = s.addr == null ? "" : s.addr.trim();
+		if (addr.isEmpty())
+		  return "";
+		return "socks5://" + addr + ":" + s.port;
 	}
 
 	/* Raw clash.yml text of the subscription (already base64-decoded if the
@@ -376,10 +360,6 @@ public class Preferences
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(DNS_IPV6), addr);
 		editor.commit();
-	}
-
-	public String getMappedDns() {
-		return "198.18.0.2";
 	}
 
 	public boolean getUdpInTcp() {
@@ -657,25 +637,5 @@ public class Preferences
 
 	public int getTunnelMtu() {
 		return 8500;
-	}
-
-	public String getTunnelIpv4Address() {
-		return "198.18.0.1";
-	}
-
-	public int getTunnelIpv4Prefix() {
-		return 32;
-	}
-
-	public String getTunnelIpv6Address() {
-		return "fc00::1";
-	}
-
-	public int getTunnelIpv6Prefix() {
-		return 128;
-	}
-
-	public int getTaskStackSize() {
-		return 81920;
 	}
 }

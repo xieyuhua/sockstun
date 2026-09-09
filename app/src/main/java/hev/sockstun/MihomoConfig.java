@@ -21,11 +21,15 @@ public class MihomoConfig {
 	/* Write the final clash config into the app's files dir and return the
 	   file. Throws if no subscription has been fetched yet. */
 	public static File build(Context context, Preferences prefs) throws IOException {
-		String raw = prefs.getSubRaw();
-		if (raw == null || raw.trim().isEmpty())
-		  throw new IOException("no subscription configured");
+		/* An enabled SOCKS5 server wins; otherwise the subscription is used. */
+		SocksServer server = prefs.getActiveSocksServer();
+		boolean useSub = (server == null);
 
-		StringBuilder cfg = new StringBuilder(raw);
+		String raw = prefs.getSubRaw();
+		if (useSub && (raw == null || raw.trim().isEmpty()))
+		  throw new IOException("no upstream: add a subscription or enable a SOCKS5 server");
+
+		StringBuilder cfg = new StringBuilder(useSub ? raw : manualSocksConfig(server));
 		if (!cfg.toString().endsWith("\n"))
 		  cfg.append('\n');
 
@@ -54,11 +58,40 @@ public class MihomoConfig {
 				.append("  auto-route: true\n")
 				.append("  auto-detect-interface: true\n");
 
+		/* The home screen asks an echo service for the public IP through the
+		   core's local HTTP port, so make sure such a port is exposed. */
+		if (!sectionExists(cfg, "port:") && !sectionExists(cfg, "mixed-port:"))
+			cfg.append("mixed-port: 7890\n");
+
 		File out = new File(context.getFilesDir(), "mihomo.yaml");
 		FileOutputStream fos = new FileOutputStream(out, false);
 		fos.write(cfg.toString().getBytes("UTF-8"));
 		fos.close();
 		return out;
+	}
+
+	/* Minimal clash config that uses one manually configured SOCKS5 server as
+	   the only upstream. */
+	private static String manualSocksConfig(SocksServer s) throws IOException {
+		String addr = s.addr == null ? "" : s.addr.trim();
+		if (addr.isEmpty())
+		  throw new IOException("SOCKS5 server address is empty");
+
+		StringBuilder sb = new StringBuilder();
+		sb.append("proxies:\n");
+		sb.append("  - {name: \"socks5\", type: socks5, server: ").append(addr)
+			.append(", port: ").append(s.port)
+			.append(", udp: true");
+		if (s.user != null && !s.user.isEmpty())
+			sb.append(", username: \"").append(s.user).append("\"");
+		if (s.pass != null && !s.pass.isEmpty())
+			sb.append(", password: \"").append(s.pass).append("\"");
+		sb.append("}\n");
+		sb.append("proxy-groups:\n");
+		sb.append("  - {name: \"PROXY\", type: select, proxies: [\"socks5\"]}\n");
+		sb.append("rules:\n");
+		sb.append("  - MATCH,PROXY\n");
+		return sb.toString();
 	}
 
 	/* True when "key:" appears as a top-level YAML key (column 0). */

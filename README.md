@@ -5,17 +5,16 @@ A simple and lightweight VPN proxy client for Android. It embeds [mihomo](https:
 
 ## Features
 
-* **Multi-protocol**: any node type supported by mihomo, straight from your subscription.
-* Redirect TCP connections.
-* Redirect UDP packets.
-* Simple username/password authentication.
-* Specifying DNS addresses.
-* IPv4/IPv6 dual stack.
-* Global/per-App modes.
+* **Multi-protocol**: any node type supported by mihomo — vmess / vless / trojan / shadowsocks / shadowsocksr / hysteria2 / tuic / socks5 / wireguard and more.
+* Redirect TCP connections and UDP packets.
+* **Two upstream sources, pick either**: a remote `clash.yml` subscription, or a manual SOCKS5 server.
+* **Clash subscription**: import a remote `clash.yml` (plain or base64), list **all** proxy nodes, latency-test them, sort by latency and filter available / unavailable.
+* **Switch node without reconnecting**: picking a node applies it to the running tunnel right away.
+* The active node is shown on the home screen and in the notification (live rates are always kept visible).
+* IPv4/IPv6 dual stack, global / per-App modes.
 * Traffic statistics (live rate, session and total usage, per-app usage).
-* Clash subscription: import a remote `clash.yml` (plain or base64), list **all** proxy nodes, test latency, and pick the one to use.
 * Routing is handled by the subscription's own `rules` / `rule-providers` / `proxy-groups` inside mihomo (the app pushes all traffic into the TUN and lets the core decide proxy vs direct).
-* Multiple profiles (up to 13), Quick Settings tile, start on boot.
+* Bottom navigation bar, multiple profiles (up to 13), Quick Settings tile, start on boot.
 
 ## Documents
 
@@ -56,7 +55,11 @@ docker run --rm \
   bash -lc 'cd /project && ./gradlew assembleDebug --warning-mode all --no-daemon'
 ```
 
-## Socks5 Server
+## Socks5 Server (manual upstream)
+
+When no subscription is used (or when "use this SOCKS5 as upstream" is enabled on the
+Server page), the app builds a minimal mihomo config with this server as the only
+upstream node.
 
 ### UDP relay over TCP
 

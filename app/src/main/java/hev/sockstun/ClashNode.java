@@ -46,6 +46,7 @@ public class ClashNode {
 				o.put("port", n.port);
 				o.put("user", n.username);
 				o.put("pass", n.password);
+				o.put("lat", n.latency);
 				arr.put(o);
 			}
 		} catch (JSONException e) {
@@ -61,13 +62,15 @@ public class ClashNode {
 			JSONArray arr = new JSONArray(json);
 			for (int i = 0; i < arr.length(); i++) {
 				JSONObject o = arr.getJSONObject(i);
-				out.add(new ClashNode(
+				ClashNode n = new ClashNode(
 					o.optString("name"),
 					o.optString("type"),
 					o.optString("server"),
 					o.optInt("port", 0),
 					o.optString("user"),
-					o.optString("pass")));
+					o.optString("pass"));
+				n.latency = o.optLong("lat", -1);
+				out.add(n);
 			}
 		} catch (JSONException e) {
 		}

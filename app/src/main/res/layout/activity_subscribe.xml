@@ -69,6 +69,44 @@
 					app:iconGravity="textStart"
 					app:iconPadding="8dp"/>
 			</LinearLayout>
+			<LinearLayout
+				android:orientation="horizontal"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="12dp">
+				<Spinner
+					android:id="@+id/sub_sort"
+					android:layout_width="0dp"
+					android:layout_weight="1"
+					android:layout_height="wrap_content"
+					android:minHeight="48dp"
+					android:spinnerMode="dropdown"/>
+				<Spinner
+					android:id="@+id/sub_filter"
+					android:layout_width="0dp"
+					android:layout_weight="1"
+					android:layout_height="wrap_content"
+					android:layout_marginStart="12dp"
+					android:minHeight="48dp"
+					android:spinnerMode="dropdown"/>
+			</LinearLayout>
+			<TextView
+				android:id="@+id/sub_stats"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="10dp"
+				android:textAppearance="?attr/textAppearanceBodySmall"
+				android:textColor="?attr/colorOutline"/>
+			<com.google.android.material.button.MaterialButton
+				android:id="@+id/sub_help"
+				style="?attr/materialButtonOutlinedStyle"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="12dp"
+				android:minHeight="48dp"
+				android:text="@string/sub_help"
+				android:textSize="14sp"
+				app:cornerRadius="24dp"/>
 		</LinearLayout>
 	</com.google.android.material.card.MaterialCardView>
 	<TextView

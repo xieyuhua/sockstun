@@ -57,6 +57,8 @@ import io.github.oviron.libmihomo.InvokeInterface;
 public class TProxyService extends VpnService {
 	public static final String ACTION_CONNECT = "hev.sockstun.CONNECT";
 	public static final String ACTION_DISCONNECT = "hev.sockstun.DISCONNECT";
+	/* Switch the selected node while the tunnel keeps running. */
+	public static final String ACTION_SELECT = "hev.sockstun.SELECT";
 
 	/* Traffic statistics */
 	private static final int NOTIFY_ID = 1;
@@ -138,6 +140,13 @@ public class TProxyService extends VpnService {
 		if (intent != null && ACTION_DISCONNECT.equals(intent.getAction())) {
 			stopService();
 			return START_NOT_STICKY;
+		}
+		/* mihomo can change a selector while running, so a newly picked node
+		   takes effect immediately instead of waiting for a restart. */
+		if (intent != null && ACTION_SELECT.equals(intent.getAction())) {
+			if (tunFd != null)
+			  applySelectedNode(new Preferences(this));
+			return START_STICKY;
 		}
 		startService();
 		return START_STICKY;
@@ -319,15 +328,23 @@ public class TProxyService extends VpnService {
 		String sel = prefs.getSubSelected();
 		if (sel == null || sel.isEmpty())
 		  return;
+		/* The group is named by the subscription, so look it up instead of
+		   assuming it is called GLOBAL. */
+		String group = ClashParser.parseSelectorGroup(prefs.getSubRaw());
+		if (group == null || group.isEmpty()) {
+			appendLog("selector skipped: subscription has no switchable proxy-group");
+			return;
+		}
 		try {
 			String action = "{\"type\":\"selector\",\"action\":\"set\"," +
-				"\"name\":\"GLOBAL\",\"value\":\"" + sel + "\"}";
+				"\"name\":\"" + group + "\",\"value\":\"" + sel + "\"}";
 			Clash.INSTANCE.invokeAction(action, new InvokeInterface() {
 				@Override
 				public void onResult(String result) {
 					appendLog("selector set: " + (result == null ? "ok" : result));
 				}
 			});
+			appendLog("selected node: " + sel + " in group " + group);
 		} catch (Throwable e) {
 			appendLog("selector set skipped: " + e);
 		}
@@ -375,6 +392,17 @@ public class TProxyService extends VpnService {
 			statsLine(R.string.stats_session, formatBytes(sessionTx), formatBytes(sessionRx)) + "\n" +
 			statsLine(R.string.stats_total, formatBytes(totalTx), formatBytes(totalRx));
 
+		/* The node goes into the title, where a long name is simply ellipsized,
+		   so the live rates below can never be pushed out of the notification.
+		   statsPrefs is still null for the very first notification (it is set
+		   by startStats), hence the fallback. */
+		Preferences p = (statsPrefs != null) ? statsPrefs : new Preferences(this);
+		String node = p.getCurrentNode();
+		if (node.isEmpty())
+		  node = p.hasSubscription() ? getString(R.string.node_default)
+									 : getString(R.string.node_none);
+		String bigText = getString(R.string.notify_node, node) + "\n" + big;
+
 		Intent i = new Intent(this, MainActivity.class);
 		i.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
 		PendingIntent pi = PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE);
@@ -383,9 +411,9 @@ public class TProxyService extends VpnService {
 		PendingIntent psi = PendingIntent.getService(this, 0, stop, PendingIntent.FLAG_IMMUTABLE);
 
 		return new NotificationCompat.Builder(this, NOTIFY_CHANNEL)
-			.setContentTitle(getString(R.string.app_name))
+			.setContentTitle(node)
 			.setContentText(line)
-			.setStyle(new NotificationCompat.BigTextStyle().bigText(big))
+			.setStyle(new NotificationCompat.BigTextStyle().bigText(bigText))
 			.setSmallIcon(android.R.drawable.sym_def_app_icon)
 			.setContentIntent(pi)
 			.setOngoing(true)

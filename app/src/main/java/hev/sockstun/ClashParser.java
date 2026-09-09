@@ -36,15 +36,10 @@ public class ClashParser {
 
 	/* Every proxy node, regardless of protocol. */
 	public static List<ClashNode> parseAll(String raw) {
-		return collect(raw, false);
+		return collect(raw);
 	}
 
-	/* Backward-compatible: SOCKS5-capable nodes only. */
-	public static List<ClashNode> parse(String raw) {
-		return collect(raw, true);
-	}
-
-	private static List<ClashNode> collect(String raw, boolean socksOnly) {
+	private static List<ClashNode> collect(String raw) {
 		List<ClashNode> result = new ArrayList<ClashNode>();
 		if (raw == null || raw.isEmpty())
 		  return result;
@@ -101,7 +96,7 @@ public class ClashParser {
 					putKV(m, l2.trim());
 					i++;
 				}
-				addIfMatch(m, result, socksOnly);
+				addIfMatch(m, result);
 			} else {
 				i++;
 			}
@@ -109,11 +104,9 @@ public class ClashParser {
 		return result;
 	}
 
-	private static void addIfMatch(Map<String, String> m, List<ClashNode> out, boolean socksOnly) {
+	private static void addIfMatch(Map<String, String> m, List<ClashNode> out) {
 		String type = m.get("type");
 		if (type == null)
-		  return;
-		if (socksOnly && !type.equalsIgnoreCase("socks5") && !type.equalsIgnoreCase("socks"))
 		  return;
 		String name = m.get("name");
 		String server = m.get("server");
@@ -209,5 +202,86 @@ public class ClashParser {
 		} catch (Exception e) {
 		}
 		return null;
+	}
+
+	/* Name of the proxy-group a picked node must be selected in.
+	   Subscriptions name it freely ("GLOBAL", "节点选择", ...), so prefer a
+	   group called GLOBAL, else the first switchable group (select /
+	   url-test / fallback / load-balance), else simply the first group. */
+	public static String parseSelectorGroup(String raw) {
+		if (raw == null || raw.isEmpty())
+		  return "";
+		String text = raw;
+		if (!containsProxies(text)) {
+			String dec = tryBase64(text);
+			if (dec != null && containsProxies(dec))
+			  text = dec;
+		}
+		String[] lines = text.split("\\r?\\n");
+		int start = -1;
+		for (int i = 0; i < lines.length; i++) {
+			if (leadingSpaces(lines[i]) != 0)
+			  continue;
+			String t = lines[i].trim();
+			if (t.equals("proxy-groups:") || t.startsWith("proxy-groups:")) {
+				start = i;
+				break;
+			}
+		}
+		if (start < 0)
+		  return "";
+
+		String firstSelect = "";
+		String firstAny = "";
+		int i = start + 1;
+		while (i < lines.length) {
+			String line = lines[i];
+			if (line.trim().isEmpty()) {
+				i++;
+				continue;
+			}
+			String trimmed = line.trim();
+			int indent = leadingSpaces(line);
+			if (indent <= 0 && !trimmed.startsWith("- "))
+			  break;
+			if (trimmed.startsWith("- ")) {
+				int baseIndent = indent;
+				Map<String, String> m = new HashMap<String, String>();
+				String first = trimmed.substring(2);
+				if (first.trim().startsWith("{"))
+				  parseFlowMap(m, first);
+				else
+				  putKV(m, first);
+				i++;
+				while (i < lines.length) {
+					String l2 = lines[i];
+					if (l2.trim().isEmpty()) {
+						i++;
+						continue;
+					}
+					if (leadingSpaces(l2) <= baseIndent)
+					  break;
+					putKV(m, l2.trim());
+					i++;
+				}
+				String name = m.get("name");
+				String type = m.get("type");
+				if (name != null && !name.isEmpty()) {
+					if ("GLOBAL".equalsIgnoreCase(name))
+					  return name;
+					if (firstSelect.isEmpty() && type != null &&
+						("select".equalsIgnoreCase(type) ||
+						 "url-test".equalsIgnoreCase(type) ||
+						 "fallback".equalsIgnoreCase(type) ||
+						 "load-balance".equalsIgnoreCase(type)))
+					  firstSelect = name;
+					if (firstAny.isEmpty())
+					  firstAny = name;
+				}
+			} else {
+				i++;
+			}
+		}
+		return !firstSelect.isEmpty() ? firstSelect : firstAny;
 	}
 }

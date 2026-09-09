@@ -2,9 +2,7 @@
 <resources>
 	<string name="app_name">SocksTun</string>
 	<string name="home">Home</string>
-	<string name="nav_open">Open navigation</string>
-	<string name="nav_close">Close navigation</string>
-	<string name="home_hint">Open the top-left menu to set up the server, DNS and routing</string>
+	<string name="home_hint">Use the bottom tabs to open subscription, server, per-app and more settings</string>
 	<string name="log">Log</string>
 	<string name="log_empty">(No log yet, connect first)</string>
 	<string name="log_disabled">Logging is off (takes effect on next connect)</string>
@@ -108,8 +106,55 @@
 	<string name="sub_latency_untested">未测速</string>
 	<string name="sub_latency_failed">失败</string>
 	<string name="sub_fetched">已拉取 %d 个节点</string>
-	<string name="sub_no_socks5">未能从订阅解析到任何节点（请确认是标准 clash.yml 并含 proxies: 列表）</string>
+	<string name="sub_no_nodes">未能从订阅解析到任何节点（请确认是标准 clash.yml 并含 proxies: 列表）</string>
 	<string name="sub_fetch_failed">拉取失败：%s</string>
 	<string name="sub_applied">已应用：%s</string>
+	<string name="sub_sort">排序</string>
+	<string name="sub_filter">筛选</string>
+	<string-array name="sub_sort_options">
+		<item>订阅顺序</item>
+		<item>按延迟（快→慢）</item>
+	</string-array>
+	<string-array name="sub_filter_options">
+		<item>全部</item>
+		<item>仅可用</item>
+		<item>仅不可用</item>
+	</string-array>
+	<string name="sub_stats">可用 %1$d · 不可用 %2$d · 共 %3$d</string>
+	<string name="sub_status_ok">可用</string>
+	<string name="sub_status_fail">不可用</string>
+	<string name="sub_status_untested">未测速</string>
+	<string name="sub_help">使用说明</string>
+	<string name="sub_help_title">订阅怎么用？</string>
+	<string name="sub_help_text">1. 粘贴 clash.yml 订阅地址 → 点「拉取订阅」，会列出订阅里的全部节点（vmess / ss / trojan / vless / hysteria2 等都支持，不限于 socks5）。\n\n2. 点「测速全部」：绿色 = 可连通，红色 = 连不上，数字是 TCP 握手延迟，只代表链路快慢，不代表实际带宽。\n\n3. 点某个节点的「使用」：只是记住这个节点，隧道下次启动时才会在订阅的策略组里选中它，所以需要重启一次隧道才生效。\n\n4. 「使用」依赖订阅里有可切换的策略组（select / url-test 等）。若订阅没有策略组，选择不会生效，会按订阅自带的默认节点走。\n\n5. 与「服务器」页的关系：填了订阅就用订阅；没填订阅时，「服务器」里配置的 SOCKS5 会作为手动上游生效。</string>
+	<string name="sub_applied_hint">已选择：%s\n下次启动隧道时生效</string>
+	<string name="sub_switched">已切换到：%s\n立即生效，无需重启</string>
+	<string name="sub_no_group">订阅没有可切换的策略组，节点选择不会生效</string>
 	<string name="sub_invalid_url">请输入有效的订阅地址</string>
+	<string name="server_manual_hint">未配置订阅时，这里填写的 SOCKS5 会作为手动上游生效；已配置订阅时以订阅为准。</string>
+	<string name="server_use_as_upstream">使用此 SOCKS5 作为上游（忽略订阅）</string>
+	<string name="settings">设置</string>
+	<string name="settings_version">版本</string>
+	<string name="version_info">版本信息</string>
+	<string name="version_detail">版本：%1$s（%2$d）\n内核：mihomo v1.19.30\nABI：arm64-v8a、armeabi-v7a</string>
+	<string name="ip_unknown">IP：未获取</string>
+	<string name="ip_label">IP：%s</string>
+	<string name="server_list_hint">在此管理 SOCKS5 服务器：可新增、修改、删除，并启用其中一台。启用后即以它为上游并忽略订阅；在订阅里选用节点会自动取消启用。</string>
+	<string name="server_list_empty">暂无服务器，点下方「新增服务器」</string>
+	<string name="server_add">新增服务器</string>
+	<string name="server_edit">编辑服务器</string>
+	<string name="server_name">名称（可选）</string>
+	<string name="server_enable">启用</string>
+	<string name="server_enabled">启用中</string>
+	<string name="server_delete">删除</string>
+	<string name="server_delete_confirm">删除服务器“%s”？</string>
+	<string name="server_delete_confirm_short">删除这台服务器？</string>
+	<string name="server_enabled_msg">已启用：%s（将忽略订阅，重启隧道生效）</string>
+	<string name="server_saved">已保存</string>
+	<string name="server_addr_required">请填写服务器地址</string>
+	<string name="node_current">节点：%s</string>
+	<string name="node_default">订阅默认节点</string>
+	<string name="node_none">未配置节点</string>
+	<string name="notify_node">节点：%s</string>
+	<string name="node_in_use">使用中</string>
 </resources>

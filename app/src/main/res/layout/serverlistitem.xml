@@ -22,18 +22,18 @@
 				android:layout_height="wrap_content"
 				android:layout_weight="1"
 				android:ellipsize="end"
-				android:maxLines="2"
+				android:maxLines="1"
 				android:textAppearance="?attr/textAppearanceTitleMedium"
 				android:textStyle="bold"/>
 			<TextView
-				android:id="@+id/item_status"
+				android:id="@+id/item_badge"
 				android:layout_width="wrap_content"
 				android:layout_height="wrap_content"
 				android:layout_marginStart="8dp"
-				android:gravity="end"
-				android:maxLines="1"
-				android:textAppearance="?attr/textAppearanceLabelLarge"
-				android:textStyle="bold"/>
+				android:text="@string/server_enabled"
+				android:textAppearance="?attr/textAppearanceLabelMedium"
+				android:textStyle="bold"
+				android:visibility="gone"/>
 		</LinearLayout>
 		<TextView
 			android:id="@+id/item_detail"
@@ -44,38 +44,39 @@
 			android:maxLines="1"
 			android:textAppearance="?attr/textAppearanceBodySmall"
 			android:textColor="?attr/colorOutline"/>
-		<TextView
-			android:id="@+id/item_badge"
-			android:layout_width="wrap_content"
-			android:layout_height="wrap_content"
-			android:layout_marginTop="6dp"
-			android:text="@string/node_in_use"
-			android:textAppearance="?attr/textAppearanceLabelMedium"
-			android:textStyle="bold"
-			android:visibility="gone"/>
 		<LinearLayout
 			android:orientation="horizontal"
 			android:layout_width="match_parent"
 			android:layout_height="wrap_content"
 			android:layout_marginTop="8dp">
 			<Button
-				android:id="@+id/item_test"
+				android:id="@+id/item_enable"
 				style="?attr/materialButtonOutlinedStyle"
 				android:layout_width="0dp"
 				android:layout_weight="1"
 				android:layout_height="wrap_content"
 				android:minHeight="44dp"
-				android:text="@string/sub_test"
+				android:text="@string/server_enable"
 				android:textSize="14sp"/>
 			<Button
-				android:id="@+id/item_use"
+				android:id="@+id/item_edit"
 				style="?attr/materialButtonOutlinedStyle"
 				android:layout_width="0dp"
 				android:layout_weight="1"
 				android:layout_height="wrap_content"
-				android:layout_marginStart="12dp"
+				android:layout_marginStart="8dp"
 				android:minHeight="44dp"
-				android:text="@string/sub_use"
+				android:text="@string/server_edit"
+				android:textSize="14sp"/>
+			<Button
+				android:id="@+id/item_delete"
+				style="?attr/materialButtonOutlinedStyle"
+				android:layout_width="0dp"
+				android:layout_weight="1"
+				android:layout_height="wrap_content"
+				android:layout_marginStart="8dp"
+				android:minHeight="44dp"
+				android:text="@string/server_delete"
 				android:textSize="14sp"/>
 		</LinearLayout>
 	</LinearLayout>

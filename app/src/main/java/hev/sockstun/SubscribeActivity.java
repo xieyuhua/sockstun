@@ -1,25 +1,35 @@
 /*
  ============================================================================
  Name        : SubscribeActivity.java
- Description : Fetch a remote clash.yml subscription, list its SOCKS5 nodes,
-               test latency and apply a node as the tunnel upstream.
+ Description : Fetch a remote clash.yml subscription, list every proxy node,
+               latency-test them (available / unavailable), sort + filter and
+               apply a node as the tunnel upstream.
  ============================================================================
  */
 
 package hev.sockstun;
 
+import android.content.Intent;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ListView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.appcompat.app.AlertDialog;
+
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.color.MaterialColors;
 
 import java.io.BufferedReader;
@@ -31,18 +41,38 @@ import java.net.Socket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 public class SubscribeActivity extends BaseActivity {
+	private static final int SORT_DEFAULT = 0;
+	private static final int SORT_LATENCY = 1;
+	private static final int FILTER_ALL = 0;
+	private static final int FILTER_OK = 1;
+	private static final int FILTER_BAD = 2;
+
 	private Preferences prefs;
 	private EditText edittext_url;
 	private MaterialButton button_fetch;
 	private MaterialButton button_test_all;
+	private MaterialButton button_help;
 	private ListView listview;
 	private TextView textview_empty;
+	private TextView textview_stats;
+	private Spinner spinner_sort;
+	private Spinner spinner_filter;
+
+	/* nodes = everything we parsed (source of truth, persisted)
+	   shown = what the list displays after filtering + sorting */
 	private List<ClashNode> nodes = new ArrayList<ClashNode>();
+	private List<ClashNode> shown = new ArrayList<ClashNode>();
 	private NodeAdapter adapter;
 	private final Handler ui = new Handler(Looper.getMainLooper());
+
+	private int sortMode = SORT_DEFAULT;
+	private int filterMode = FILTER_ALL;
+	private int pendingTests = 0;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -62,14 +92,21 @@ public class SubscribeActivity extends BaseActivity {
 		edittext_url = (EditText) findViewById(R.id.sub_url);
 		button_fetch = (MaterialButton) findViewById(R.id.sub_fetch);
 		button_test_all = (MaterialButton) findViewById(R.id.sub_test_all);
+		button_help = (MaterialButton) findViewById(R.id.sub_help);
 		listview = (ListView) findViewById(R.id.sub_list);
 		textview_empty = (TextView) findViewById(R.id.sub_empty);
+		textview_stats = (TextView) findViewById(R.id.sub_stats);
+		spinner_sort = (Spinner) findViewById(R.id.sub_sort);
+		spinner_filter = (Spinner) findViewById(R.id.sub_filter);
 
 		edittext_url.setText(prefs.getSubUrl());
 
 		adapter = new NodeAdapter();
 		listview.setAdapter(adapter);
 		listview.setEmptyView(textview_empty);
+
+		setupSpinner(spinner_sort, R.array.sub_sort_options, true);
+		setupSpinner(spinner_filter, R.array.sub_filter_options, false);
 
 		button_fetch.setOnClickListener(new View.OnClickListener() {
 			@Override
@@ -83,14 +120,102 @@ public class SubscribeActivity extends BaseActivity {
 				testAll();
 			}
 		});
+		button_help.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				showHelp();
+			}
+		});
 
 		loadNodes();
+	}
+
+	private void setupSpinner(Spinner spinner, int arrayRes, final boolean isSort) {
+		ArrayAdapter<CharSequence> a = ArrayAdapter.createFromResource(this,
+			arrayRes, android.R.layout.simple_spinner_item);
+		a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+		spinner.setAdapter(a);
+		spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+			@Override
+			public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+				if (isSort)
+				  sortMode = position;
+				else
+				  filterMode = position;
+				applyView();
+			}
+			@Override
+			public void onNothingSelected(AdapterView<?> parent) {
+			}
+		});
 	}
 
 	private void loadNodes() {
 		nodes.clear();
 		nodes.addAll(ClashNode.decode(prefs.getSubNodes()));
+		applyView();
+	}
+
+	/* Rebuild the visible list from nodes according to filter + sort. */
+	private void applyView() {
+		shown.clear();
+		for (ClashNode n : nodes) {
+			if (filterMode == FILTER_OK && !isAvailable(n))
+			  continue;
+			if (filterMode == FILTER_BAD && !isBroken(n))
+			  continue;
+			shown.add(n);
+		}
+		if (sortMode == SORT_LATENCY)
+		  Collections.sort(shown, latencyComparator);
 		adapter.notifyDataSetChanged();
+		updateStats();
+	}
+
+	private static boolean isAvailable(ClashNode n) {
+		return n.latency >= 0;
+	}
+
+	private static boolean isBroken(ClashNode n) {
+		return n.latency == -2;
+	}
+
+	/* Available nodes first by latency, then untested, then broken. */
+	private static long rank(ClashNode n) {
+		if (n.latency >= 0)
+		  return n.latency;
+		if (n.latency == -2)
+		  return Long.MAX_VALUE;
+		return Long.MAX_VALUE - 1;
+	}
+
+	private final Comparator<ClashNode> latencyComparator = new Comparator<ClashNode>() {
+		@Override
+		public int compare(ClashNode a, ClashNode b) {
+			long ra = rank(a);
+			long rb = rank(b);
+			if (ra < rb)
+			  return -1;
+			if (ra > rb)
+			  return 1;
+			return 0;
+		}
+	};
+
+	private void updateStats() {
+		int ok = 0;
+		int bad = 0;
+		for (ClashNode n : nodes) {
+			if (isAvailable(n))
+			  ok++;
+			else if (isBroken(n))
+			  bad++;
+		}
+		textview_stats.setText(getString(R.string.sub_stats, ok, bad, nodes.size()));
+	}
+
+	private void saveNodes() {
+		prefs.setSubNodes(ClashNode.encode(nodes));
 	}
 
 	private void fetch() {
@@ -116,12 +241,12 @@ public class SubscribeActivity extends BaseActivity {
 						public void run() {
 							nodes.clear();
 							nodes.addAll(parsed);
-							adapter.notifyDataSetChanged();
 							prefs.setSubRaw(yaml);
-							prefs.setSubNodes(ClashNode.encode(nodes));
+							saveNodes();
+							applyView();
 							if (parsed.isEmpty())
 								Toast.makeText(SubscribeActivity.this,
-									R.string.sub_no_socks5, Toast.LENGTH_LONG).show();
+									R.string.sub_no_nodes, Toast.LENGTH_LONG).show();
 							else
 								Toast.makeText(SubscribeActivity.this,
 									getString(R.string.sub_fetched, parsed.size()),
@@ -177,12 +302,16 @@ public class SubscribeActivity extends BaseActivity {
 	}
 
 	private void testAll() {
-		for (int i = 0; i < nodes.size(); i++)
-		  testNode(i);
+		if (nodes.isEmpty())
+		  return;
+		pendingTests = nodes.size();
+		for (ClashNode n : nodes)
+		  testNode(n, true);
 	}
 
-	private void testNode(final int index) {
-		final ClashNode n = nodes.get(index);
+	/* batch = part of "test all": only refresh + persist once the last one
+	   finishes, otherwise we would rewrite the whole cache per node. */
+	private void testNode(final ClashNode n, final boolean batch) {
 		new Thread(new Runnable() {
 			@Override
 			public void run() {
@@ -198,7 +327,15 @@ public class SubscribeActivity extends BaseActivity {
 				ui.post(new Runnable() {
 					@Override
 					public void run() {
-						adapter.notifyDataSetChanged();
+						if (batch) {
+							pendingTests--;
+							if (pendingTests > 0) {
+								adapter.notifyDataSetChanged();
+								return;
+							}
+						}
+						saveNodes();
+						applyView();
 					}
 				});
 			}
@@ -208,45 +345,84 @@ public class SubscribeActivity extends BaseActivity {
 	private void useNode(final ClashNode n) {
 		/* The mihomo core consumes the whole subscription, so "use" just
 		   remembers which node the user picked; TProxyService asks mihomo to
-		   select it in its proxy group when the tunnel starts. */
+		   select it in the subscription's proxy group when the tunnel starts. */
 		prefs.setSubSelected(n.name);
-		Toast.makeText(this, getString(R.string.sub_applied, n.name),
-			Toast.LENGTH_SHORT).show();
+		/* Picking a subscription node hands the upstream back to the
+		   subscription, so any enabled SOCKS5 server is disabled. */
+		prefs.setActiveSocksId("");
+		String group = ClashParser.parseSelectorGroup(prefs.getSubRaw());
+		String msg;
+		if (group == null || group.isEmpty())
+			msg = getString(R.string.sub_no_group);
+		else if (prefs.getEnable()) {
+			startService(new Intent(this, TProxyService.class)
+				.setAction(TProxyService.ACTION_SELECT));
+			msg = getString(R.string.sub_switched, n.name);
+		} else
+			msg = getString(R.string.sub_applied_hint, n.name);
+		Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
 		adapter.notifyDataSetChanged();
 	}
 
-	private class NodeAdapter extends android.widget.ArrayAdapter<ClashNode> {
+	private void showHelp() {
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.sub_help_title)
+			.setMessage(R.string.sub_help_text)
+			.setPositiveButton(android.R.string.ok, null)
+			.show();
+	}
+
+	private class NodeAdapter extends ArrayAdapter<ClashNode> {
 		private final android.view.LayoutInflater inflater;
+		private final int colorOk;
+		private final int colorBad;
+		private final int colorIdle;
+		private final int colorSelected;
 
 		NodeAdapter() {
-			super(SubscribeActivity.this, R.layout.subscribelistitem, nodes);
+			super(SubscribeActivity.this, R.layout.subscribelistitem, shown);
 			inflater = getLayoutInflater();
+			colorOk = MaterialColors.getColor(SubscribeActivity.this,
+				com.google.android.material.R.attr.colorPrimary, 0);
+			colorBad = MaterialColors.getColor(SubscribeActivity.this,
+				com.google.android.material.R.attr.colorError, 0);
+			colorIdle = MaterialColors.getColor(SubscribeActivity.this,
+				com.google.android.material.R.attr.colorOutline, 0);
+			colorSelected = MaterialColors.getColor(SubscribeActivity.this,
+				com.google.android.material.R.attr.colorPrimaryContainer, 0);
 		}
 
 		@Override
-		public View getView(int position, View convertView, android.view.ViewGroup parent) {
+		public View getView(int position, View convertView, ViewGroup parent) {
 			if (convertView == null)
 				convertView = inflater.inflate(R.layout.subscribelistitem, parent, false);
 			final ClashNode n = getItem(position);
+			MaterialCardView card = (MaterialCardView) convertView;
 			TextView name = (TextView) convertView.findViewById(R.id.item_name);
 			TextView detail = (TextView) convertView.findViewById(R.id.item_detail);
+			TextView status = (TextView) convertView.findViewById(R.id.item_status);
+			TextView badge = (TextView) convertView.findViewById(R.id.item_badge);
 			Button use = (Button) convertView.findViewById(R.id.item_use);
 			Button test = (Button) convertView.findViewById(R.id.item_test);
 
 			name.setText(n.name);
-			String lat;
-			if (n.latency == -1)
-			  lat = getString(R.string.sub_latency_untested);
-			else if (n.latency == -2)
-			  lat = getString(R.string.sub_latency_failed);
-			else
-			  lat = n.latency + " ms";
-			detail.setText(n.server + ":" + n.port + "  ·  " + n.type + "  ·  " + lat);
+			detail.setText(n.server + ":" + n.port + "  ·  " + n.type);
+
+			if (n.latency >= 0) {
+				status.setText(n.latency + " ms");
+				status.setTextColor(colorOk);
+			} else if (n.latency == -2) {
+				status.setText(getString(R.string.sub_status_fail));
+				status.setTextColor(colorBad);
+			} else {
+				status.setText(getString(R.string.sub_status_untested));
+				status.setTextColor(colorIdle);
+			}
 
 			boolean selected = n.name.equals(prefs.getSubSelected());
-			convertView.setBackgroundColor(selected ?
-				MaterialColors.getColor(SubscribeActivity.this,
-					com.google.android.material.R.attr.colorPrimaryContainer, 0) : 0);
+			card.setCardBackgroundColor(selected ? colorSelected : Color.TRANSPARENT);
+			badge.setVisibility(selected ? View.VISIBLE : View.GONE);
+			badge.setTextColor(colorOk);
 
 			use.setOnClickListener(new View.OnClickListener() {
 				@Override
@@ -257,7 +433,7 @@ public class SubscribeActivity extends BaseActivity {
 			test.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
-					testNode(position);
+					testNode(n, false);
 				}
 			});
 			return convertView;

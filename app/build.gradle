@@ -76,6 +76,16 @@ android {
 		}
 	}
 
+	/* The manifest sets android:extractNativeLibs="true" and that is required:
+	   Clash.load() is handed getApplicationInfo().nativeLibraryDir, so the
+	   .so files must really be extracted there. AGP 8 refuses to package
+	   unless this flag matches the manifest. */
+	packagingOptions {
+		jniLibs {
+			useLegacyPackaging = true
+		}
+	}
+
 	lintOptions {
 		checkReleaseBuilds false
 		// Or, if you prefer, you can continue to check for errors in release builds,

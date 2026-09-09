@@ -19,6 +19,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.content.Intent;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -31,27 +32,33 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.net.VpnService;
+import java.net.Proxy;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.InetSocketAddress;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.app.ActionBarDrawerToggle;
-import androidx.drawerlayout.widget.DrawerLayout;
 
 import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.color.MaterialColors;
-import com.google.android.material.navigation.NavigationView;
+import com.google.android.material.navigation.NavigationBarView;
 
 public class MainActivity extends BaseActivity implements View.OnClickListener {
 	private Preferences prefs;
-	private DrawerLayout drawer;
-	private NavigationView navView;
+	private BottomNavigationView bottomNav;
 	private MaterialCardView card_status;
 	private MaterialCardView card_status_dot;
 	private ImageView imageview_status_icon;
 	private TextView textview_status_title;
 	private TextView textview_status_subtitle;
+	private TextView textview_status_node;
+	private TextView textview_status_ip;
 	private TextView textview_profile_name;
 	private Button button_control;
 	private Button button_profile_prev;
@@ -64,8 +71,13 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 
 	private static final long STATS_INTERVAL = 1500;
 	private static final int MAX_APPS_SHOWN = 3;
+	/* Local HTTP port of the core, and how often to refresh the public IP. */
+	private static final int PROXY_PORT = 7890;
+	private static final long IP_QUERY_INTERVAL = 60000;
 	private Handler statsHandler;
 	private Runnable statsTask;
+	private final Handler ui = new Handler(Looper.getMainLooper());
+	private long lastIpQuery = 0;
 
 	/* Refresh the control state when the tunnel is toggled elsewhere
 	   (e.g. from the Quick Settings tile) while this screen is visible. */
@@ -87,43 +99,29 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		MaterialToolbar toolbar = (MaterialToolbar) findViewById(R.id.toolbar);
 		setSupportActionBar(toolbar);
 
-		drawer = (DrawerLayout) findViewById(R.id.drawer);
-		navView = (NavigationView) findViewById(R.id.nav);
-		ActionBarDrawerToggle toggle = new ActionBarDrawerToggle(
-				this, drawer, toolbar, R.string.nav_open, R.string.nav_close);
-		drawer.addDrawerListener(toggle);
-		toggle.syncState();
-
-		navView.setCheckedItem(R.id.nav_home);
-		navView.setNavigationItemSelectedListener(new NavigationView.OnNavigationItemSelectedListener() {
+		bottomNav = (BottomNavigationView) findViewById(R.id.bottom_nav);
+		bottomNav.setSelectedItemId(R.id.nav_home);
+		bottomNav.setOnItemSelectedListener(new NavigationBarView.OnItemSelectedListener() {
 			@Override
 			public boolean onNavigationItemSelected(android.view.MenuItem item) {
 				int id = item.getItemId();
-				if (id != R.id.nav_home) {
-					Intent intent = null;
-					if (id == R.id.nav_server)
-					  intent = new Intent(MainActivity.this, ServerActivity.class);
-					else if (id == R.id.nav_subscribe)
-					  intent = new Intent(MainActivity.this, SubscribeActivity.class);
-					else if (id == R.id.nav_dns)
-					  intent = new Intent(MainActivity.this, DnsActivity.class);
-					else if (id == R.id.nav_routing)
-					  intent = new Intent(MainActivity.this, RoutingActivity.class);
-					else if (id == R.id.nav_apps)
-					  intent = new Intent(MainActivity.this, AppListActivity.class);
-					else if (id == R.id.nav_log)
-					  intent = new Intent(MainActivity.this, LogActivity.class);
-					else if (id == R.id.nav_rules)
-					  intent = new Intent(MainActivity.this, RulesActivity.class);
-					else if (id == R.id.nav_theme) {
-					  showThemeDialog();
-					  drawer.closeDrawers();
-					  return true;
-					}
-					if (intent != null)
-					  startActivity(intent);
+				if (id == R.id.nav_home)
+				  return true;
+				Intent intent = null;
+				if (id == R.id.nav_subscribe)
+				  intent = new Intent(MainActivity.this, SubscribeActivity.class);
+				else if (id == R.id.nav_server)
+				  intent = new Intent(MainActivity.this, ServerListActivity.class);
+				else if (id == R.id.nav_rules)
+				  intent = new Intent(MainActivity.this, RulesHubActivity.class);
+				else if (id == R.id.nav_settings)
+				  intent = new Intent(MainActivity.this, SettingsActivity.class);
+				if (intent != null) {
+					startActivity(intent);
+					/* Those entries open their own screen, so keep "home"
+					   highlighted instead of leaving the tab selected. */
+					bottomNav.setSelectedItemId(R.id.nav_home);
 				}
-				drawer.closeDrawers();
 				return true;
 			}
 		});
@@ -133,6 +131,8 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		imageview_status_icon = (ImageView) findViewById(R.id.status_icon);
 		textview_status_title = (TextView) findViewById(R.id.status_title);
 		textview_status_subtitle = (TextView) findViewById(R.id.status_subtitle);
+		textview_status_node = (TextView) findViewById(R.id.status_node);
+		textview_status_ip = (TextView) findViewById(R.id.status_ip);
 		textview_profile_name = (TextView) findViewById(R.id.profile_name);
 		button_control = (Button) findViewById(R.id.control);
 		button_profile_prev = (Button) findViewById(R.id.profile_prev);
@@ -182,31 +182,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		  startActivityForResult(intent, 0);
 		else
 		  onActivityResult(0, RESULT_OK, null);
-	}
-
-	/* Theme picker: choose one of the bundled palettes, then recreate
-	   so every activity picks up the new theme on next creation. */
-	private void showThemeDialog() {
-		final int current = prefs.getTheme();
-		final String[] names = new String[ThemeManager.count()];
-		for (int i = 0; i < names.length; i++)
-			names[i] = getString(ThemeManager.nameRes(i));
-
-		new AlertDialog.Builder(this)
-			.setTitle(R.string.theme)
-			.setSingleChoiceItems(names, current, null)
-			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface d, int which) {
-					int sel = ((AlertDialog) d).getListView().getCheckedItemPosition();
-					if (sel >= 0 && sel != current) {
-						prefs.setTheme(sel);
-						recreate();
-					}
-				}
-			})
-			.setNegativeButton(android.R.string.cancel, null)
-			.show();
 	}
 
 	@Override
@@ -357,6 +332,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	private void updateUI() {
 		textview_profile_name.setText(prefs.getProfileName());
 		updateControlState();
+		updateNode();
 	}
 
 	/* Traffic counters: the tunnel totals are exact, the per-app numbers come
@@ -373,6 +349,66 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 			TProxyService.formatBytes(prefs.getTotalTx()),
 			TProxyService.formatBytes(prefs.getTotalRx())));
 		textview_apps.setText(appSummary(Preferences.parseAppStats(prefs.getAppTotal())));
+		updateNode();
+		updateExternalIp();
+	}
+
+	/* Ask an echo service through the core's local HTTP port, so the answer
+	   is the address the proxy exposes rather than the device's own one. */
+	private void updateExternalIp() {
+		if (!prefs.getEnable()) {
+			textview_status_ip.setText(getString(R.string.ip_unknown));
+			return;
+		}
+		long now = SystemClock.elapsedRealtime();
+		if (now - lastIpQuery < IP_QUERY_INTERVAL)
+		  return;
+		lastIpQuery = now;
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				final String ip = queryExternalIp();
+				ui.post(new Runnable() {
+					@Override
+					public void run() {
+						textview_status_ip.setText(ip == null || ip.isEmpty()
+							? getString(R.string.ip_unknown)
+							: getString(R.string.ip_label, ip));
+					}
+				});
+			}
+		}).start();
+	}
+
+	private String queryExternalIp() {
+		HttpURLConnection conn = null;
+		try {
+			Proxy proxy = new Proxy(Proxy.Type.HTTP,
+				new InetSocketAddress("127.0.0.1", PROXY_PORT));
+			conn = (HttpURLConnection) new URL("http://api.ipify.org").openConnection(proxy);
+			conn.setConnectTimeout(5000);
+			conn.setReadTimeout(5000);
+			BufferedReader reader = new BufferedReader(
+				new InputStreamReader(conn.getInputStream()));
+			String line = reader.readLine();
+			reader.close();
+			return line == null ? null : line.trim();
+		} catch (Exception e) {
+			return null;
+		} finally {
+			if (conn != null)
+			  conn.disconnect();
+		}
+	}
+
+	/* Which node the tunnel is using: the picked subscription node, the manual
+	   SOCKS5 upstream, or the subscription's own default. */
+	private void updateNode() {
+		String node = prefs.getCurrentNode();
+		String label = node.isEmpty()
+			? getString(prefs.hasSubscription() ? R.string.node_default : R.string.node_none)
+			: node;
+		textview_status_node.setText(getString(R.string.node_current, label));
 	}
 
 	private String statsLine(int labelId, String up, String down) {
@@ -426,6 +462,9 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 
 	/* Paint the hero card and the main button for the current tunnel state. */
 	private void updateStatus(boolean connected) {
+		/* Refresh the public IP right after the tunnel comes up. */
+		if (connected)
+		  lastIpQuery = 0;
 		int bg = getThemeColor(connected ?
 			com.google.android.material.R.attr.colorPrimaryContainer :
 			com.google.android.material.R.attr.colorSurfaceVariant);
@@ -436,6 +475,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		card_status.setCardBackgroundColor(ColorStateList.valueOf(bg));
 		textview_status_title.setTextColor(fg);
 		textview_status_subtitle.setTextColor(fg);
+		textview_status_node.setTextColor(fg);
 		textview_status_title.setText(connected ?
 			R.string.status_connected : R.string.status_disconnected);
 		textview_status_subtitle.setText(connected ?
