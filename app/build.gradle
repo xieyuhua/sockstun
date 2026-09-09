@@ -94,58 +94,103 @@ android {
 /* ---------------------------------------------------------------------------
    libmihomo (clash.meta) embedded core.
 
-   The library is published as a GitHub Release .aar (not on Maven Central), so
-   we download it once into app/build/libs (git-ignored) and consume it through
-   a flatDir repository. Pin the exact version: v0.3.3 bundles mihomo v1.19.30.
-   A network connection is required on the first build (or after a clean).
+   The library is published as a GitHub Release .aar (not on Maven Central).
+   We download it (once) into app/thirdparty/ (NOT app/libs/: AGP auto-treats
+   app/libs/*.aar as a dependency and would merge its res/ + manifest) and then
+   EXTRACT only what the app actually needs, dropping the rest on purpose:
+     - classes.jar            -> compile/runtime classpath (io.github.oviron.libmihomo.*)
+     - jni/<abi>/*.so         -> packaged as native libraries (libmihomo.so, ...)
+     - (any) libs/*.jar       -> extra classpath jars
+   The AAR's res/ and AndroidManifest.xml are intentionally NOT merged into the
+   app: they are irrelevant for a headless JNI core, and merging them has been
+   observed to crash AGP's resource merger (NullPointerException in
+   mergeDebugResources).  Pinned: v0.3.3 bundles mihomo v1.19.30.
    License: GPL-3.0 (the embedded core is statically linked Go code).
-
-   We use a flatDir repo + `name/ext` (instead of `files(.aar)`) because AGP
-   reliably extracts the AAR's classes.jar / jniLibs only via repository
-   resolution, and defers lookup to execution time so the task-produced file
-   is present when the classpath is computed.
 --------------------------------------------------------------------------- */
 def mihomoVersion = "0.3.3"
 def mihomoAarName = "libmihomo-android-v${mihomoVersion}.aar"
-def mihomoAar = file("$buildDir/libs/${mihomoAarName}")
+def mihomoAar = file("${projectDir}/thirdparty/${mihomoAarName}")
+def mihomoUrl = "https://github.com/oviron/libmihomo-android/releases/download/v${mihomoVersion}/${mihomoAarName}"
+def mihomoExtractDir = file("${projectDir}/thirdparty/mihomo")
+def mihomoClassesJar = file("${mihomoExtractDir}/classes.jar")
+def mihomoJniDir = file("${mihomoExtractDir}/jni")
+def mihomoExtraJars = []
 
-task downloadMihomo {
-	outputs.file(mihomoAar)
-	doLast {
-		/* Re-download if missing or suspiciously small (e.g. a stale/bad file
-		   left over from a previous failed attempt). */
-		def need = !mihomoAar.exists() || mihomoAar.length() < 1024 * 1024
-		if (need) {
-			if (mihomoAar.exists()) mihomoAar.delete()
-			mihomoAar.parentFile.mkdirs()
-			def url = "https://github.com/oviron/libmihomo-android/releases/download/v${mihomoVersion}/${mihomoAarName}"
-			def conn = new URL(url).openConnection()
-			conn.instanceFollowRedirects = true
-			conn.connect()
-			def code = conn.responseCode
-			if (code != 200) {
-				throw new GradleException("Download mihomo AAR failed: HTTP ${code} from ${url}")
-			}
-			mihomoAar.withOutputStream { os -> os << conn.inputStream }
-			if (mihomoAar.length() < 1024 * 1024) {
-				mihomoAar.delete()
-				throw new GradleException("Downloaded mihomo AAR is suspiciously small " +
-					"(${mihomoAar.length()} bytes); the release asset/URL may have changed.")
-			}
-			println "Downloaded ${mihomoAarName} (${mihomoAar.length()} bytes)"
-		}
+/* A usable AAR: a real zip whose classes.jar ships io.github.oviron.libmihomo.Clash. */
+def isUsableMihomoAar(File f) {
+	if (f == null || !f.exists() || f.length() < 1024 * 1024) return false
+	def tmp = File.createTempFile("mihomo_classes", ".jar")
+	try {
+		def zf = new java.util.zip.ZipFile(f)
+		def ce = zf.getEntry("classes.jar")
+		if (ce == null) { zf.close(); return false }
+		tmp.withOutputStream { os -> os << zf.getInputStream(ce) }
+		zf.close()
+		def cj = new java.util.zip.ZipFile(tmp)
+		def ok = cj.getEntry("io/github/oviron/libmihomo/Clash.class") != null
+		cj.close()
+		return ok
+	} catch (Exception e) {
+		return false
+	} finally {
+		tmp.delete()
 	}
 }
 
-repositories {
-	flatDir { dirs mihomoAar.parentFile }
+if (!isUsableMihomoAar(mihomoAar)) {
+	if (mihomoAar.exists()) mihomoAar.delete()
+	file("${projectDir}/thirdparty").mkdirs()
+	println "Fetching libmihomo AAR (${mihomoAarName}) ..."
+	def conn = new URL(mihomoUrl).openConnection()
+	conn.instanceFollowRedirects = true
+	conn.connect()
+	if (conn.responseCode != 200) {
+		throw new GradleException("Failed to download libmihomo AAR: HTTP ${conn.responseCode} " +
+			"from ${mihomoUrl}. If this host cannot reach GitHub, download the AAR manually into ${mihomoAar}.")
+	}
+	mihomoAar.withOutputStream { os -> os << conn.inputStream }
+	if (!isUsableMihomoAar(mihomoAar)) {
+		mihomoAar.delete()
+		throw new GradleException("Downloaded libmihomo AAR is invalid (missing " +
+			"io.github.oviron.libmihomo.Clash). The release asset or package layout may have changed.")
+	}
+	println "libmihomo AAR ready: ${mihomoAar} (${mihomoAar.length()} bytes)"
 }
+
+/* Extract classes.jar, jni libs and any bundled jars from the AAR. Re-extract
+   only when needed (missing output, or a newer AAR). */
+if (!mihomoClassesJar.exists() || mihomoAar.lastModified() > mihomoClassesJar.lastModified()) {
+	if (mihomoExtractDir.exists()) mihomoExtractDir.deleteDir()
+	mihomoExtractDir.mkdirs()
+	mihomoJniDir.mkdirs()
+	mihomoExtraJars = []
+	def zf = new java.util.zip.ZipFile(mihomoAar)
+	zf.entries().each { e ->
+		if (e.directory) return
+		if (e.name == "classes.jar") {
+			mihomoClassesJar.withOutputStream { os -> os << zf.getInputStream(e) }
+		} else if (e.name.startsWith("jni/")) {
+			def rel = e.name.substring("jni/".length())
+			def out = new File(mihomoJniDir, rel)
+			out.parentFile.mkdirs()
+			out.withOutputStream { os -> os << zf.getInputStream(e) }
+		} else if (e.name.startsWith("libs/") && e.name.endsWith(".jar")) {
+			def out = new File(mihomoExtractDir, e.name)
+			out.parentFile.mkdirs()
+			out.withOutputStream { os -> os << zf.getInputStream(e) }
+			mihomoExtraJars << out
+		}
+	}
+	zf.close()
+	println "Extracted libmihomo: classes.jar + jni + ${mihomoExtraJars.size()} extra jar(s) -> ${mihomoExtractDir}"
+}
+
+/* Expose the extracted native libs to the build (in addition to any existing
+   jniLibs sources such as src/main/jniLibs). */
+android.sourceSets.main.jniLibs.srcDirs += mihomoJniDir
 
 dependencies {
 	implementation 'androidx.appcompat:appcompat:1.7.0'
 	implementation 'com.google.android.material:material:1.12.0'
-	implementation(name: mihomoAarName.replace('.aar', ''), ext: 'aar') { builtBy downloadMihomo }
+	implementation(files(mihomoClassesJar, *mihomoExtraJars))
 }
-
-/* Make sure the AAR exists before the build's pre-build phase. */
-preBuild.dependsOn downloadMihomo

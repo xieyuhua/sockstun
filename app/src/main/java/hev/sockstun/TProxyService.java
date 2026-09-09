@@ -172,8 +172,8 @@ public class TProxyService extends VpnService {
 
 		/* Load the embedded mihomo core (libclash.so + libmihomo-jni.so). */
 		try {
-			Clash.load(getApplicationInfo().nativeLibraryDir);
-			appendLog("mihomo core loaded OK (bridge ABI " + Clash.bridgeABI() + ")");
+			Clash.INSTANCE.load(getApplicationInfo().nativeLibraryDir);
+			appendLog("mihomo core loaded OK (bridge ABI " + Clash.INSTANCE.bridgeABI() + ")");
 		} catch (Throwable e) {
 			appendLog("FATAL: failed to load mihomo core: " + e);
 			Toast.makeText(this, "内核加载失败，请查看日志", Toast.LENGTH_LONG).show();
@@ -247,7 +247,7 @@ public class TProxyService extends VpnService {
 		String initParams = "{\"homeDir\":\"" + homeDir + "\"}";
 		String setupParams = "{\"profile\":\"" + configFile.getAbsolutePath() + "\"}";
 		try {
-			Clash.quickSetup(initParams, setupParams, new InvokeInterface() {
+			Clash.INSTANCE.quickSetup(initParams, setupParams, new InvokeInterface() {
 				@Override
 				public void onResult(String result) {
 					if (result == null || result.isEmpty())
@@ -265,7 +265,7 @@ public class TProxyService extends VpnService {
 
 		/* Forward mihomo's log/event stream into our log file. */
 		try {
-			Clash.setEventListener(new InvokeInterface() {
+			Clash.INSTANCE.setEventListener(new InvokeInterface() {
 				@Override
 				public void onResult(String result) {
 					if (result != null && !result.isEmpty())
@@ -283,7 +283,7 @@ public class TProxyService extends VpnService {
 			(ipv6 ? (ipv4 ? "," : "") + tunAddr6 + "/64" : "");
 		String dns = "223.5.5.5,119.29.29.29";
 		try {
-			Clash.startTUN(tunFd.getFd(), new TunInterface() {
+			Clash.INSTANCE.startTUN(tunFd.getFd(), new TunInterface() {
 				@Override
 				public void protect(int fd) {
 					TProxyService.this.protect(fd);
@@ -322,7 +322,7 @@ public class TProxyService extends VpnService {
 		try {
 			String action = "{\"type\":\"selector\",\"action\":\"set\"," +
 				"\"name\":\"GLOBAL\",\"value\":\"" + sel + "\"}";
-			Clash.invokeAction(action, new InvokeInterface() {
+			Clash.INSTANCE.invokeAction(action, new InvokeInterface() {
 				@Override
 				public void onResult(String result) {
 					appendLog("selector set: " + (result == null ? "ok" : result));
@@ -347,7 +347,7 @@ public class TProxyService extends VpnService {
 
 		/* Tear the tunnel down before releasing the fd. */
 		try {
-			Clash.stopTun();
+			Clash.INSTANCE.stopTun();
 		} catch (Throwable e) {
 		}
 
@@ -434,7 +434,7 @@ public class TProxyService extends VpnService {
 
 		long tx = -1, rx = -1;
 		try {
-			String s = Clash.getTraffic();
+			String s = Clash.INSTANCE.getTraffic();
 			if (s != null) {
 				tx = jsonLong(s, "up");
 				if (tx < 0) tx = jsonLong(s, "Upload");
