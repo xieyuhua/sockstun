@@ -78,12 +78,17 @@ public class ClashParser {
 				continue;
 			}
 			int indent = leadingSpaces(line);
-			if (indent <= 0)
+			if (indent <= 0 && !line.trim().startsWith("- "))
 			  break; /* reached the next top-level key */
 			String trimmed = line.trim();
-			if (indent == 2 && trimmed.startsWith("- ")) {
+			if (trimmed.startsWith("- ")) {
+				int baseIndent = indent;
 				Map<String, String> m = new HashMap<String, String>();
-				putKV(m, trimmed.substring(2));
+				String first = trimmed.substring(2);
+				if (first.trim().startsWith("{"))
+				  parseFlowMap(m, first);
+				else
+				  putKV(m, first);
 				i++;
 				while (i < lines.length) {
 					String l2 = lines[i];
@@ -91,7 +96,7 @@ public class ClashParser {
 						i++;
 						continue;
 					}
-					if (leadingSpaces(l2) <= 2)
+					if (leadingSpaces(l2) <= baseIndent)
 					  break;
 					putKV(m, l2.trim());
 					i++;
@@ -124,6 +129,52 @@ public class ClashParser {
 		out.add(new ClashNode(name, type, server, port,
 			m.get("username") == null ? "" : m.get("username"),
 			m.get("password") == null ? "" : m.get("password")));
+	}
+
+	/* A proxy may be written as a single-line YAML flow mapping, e.g.
+	   "- {name: x, server: y, port: 1234, type: vmess, ...}".  Split it into
+	   its key: value pairs so addIfMatch() can see type / server / port. */
+	private static void parseFlowMap(Map<String, String> m, String s) {
+		String inner = s.trim();
+		if (inner.startsWith("{"))
+		  inner = inner.substring(1);
+		if (inner.endsWith("}"))
+		  inner = inner.substring(0, inner.length() - 1);
+		for (String part : splitTopLevel(inner))
+		  putKV(m, part.trim());
+	}
+
+	/* Split on commas that are not inside quotes. */
+	private static List<String> splitTopLevel(String s) {
+		List<String> out = new ArrayList<String>();
+		StringBuilder cur = new StringBuilder();
+		boolean inQuote = false;
+		char quote = 0;
+		for (int i = 0; i < s.length(); i++) {
+			char c = s.charAt(i);
+			if (inQuote) {
+				cur.append(c);
+				if (c == quote)
+				  inQuote = false;
+				continue;
+			}
+			/* 34 = double quote, 39 = single quote */
+			if (c == 34 || c == 39) {
+				inQuote = true;
+				quote = c;
+				cur.append(c);
+				continue;
+			}
+			if (c == ',') {
+				out.add(cur.toString());
+				cur.setLength(0);
+				continue;
+			}
+			cur.append(c);
+		}
+		if (cur.length() > 0)
+		  out.add(cur.toString());
+		return out;
 	}
 
 	private static void putKV(Map<String, String> m, String s) {

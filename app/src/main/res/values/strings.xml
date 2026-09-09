@@ -108,7 +108,7 @@
 	<string name="sub_latency_untested">未测速</string>
 	<string name="sub_latency_failed">失败</string>
 	<string name="sub_fetched">已拉取 %d 个节点</string>
-	<string name="sub_no_socks5">该订阅没有可用的 SOCKS5 节点</string>
+	<string name="sub_no_socks5">未能从订阅解析到任何节点（请确认是标准 clash.yml 并含 proxies: 列表）</string>
 	<string name="sub_fetch_failed">拉取失败：%s</string>
 	<string name="sub_applied">已应用：%s</string>
 	<string name="sub_invalid_url">请输入有效的订阅地址</string>
