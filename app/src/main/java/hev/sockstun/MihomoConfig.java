@@ -63,7 +63,10 @@ public class MihomoConfig {
 		if (!sectionExists(cfg, "port:") && !sectionExists(cfg, "mixed-port:"))
 			cfg.append("mixed-port: 7890\n");
 
-		File out = new File(context.getFilesDir(), "mihomo.yaml");
+		/* The core loads <homeDir>/config.yaml, so the file name matters —
+		   naming it anything else makes quickSetup fail with
+		   "stat config.yaml: no such file or directory". */
+		File out = new File(context.getFilesDir(), "config.yaml");
 		FileOutputStream fos = new FileOutputStream(out, false);
 		fos.write(cfg.toString().getBytes("UTF-8"));
 		fos.close();

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+	<item
+		android:id="@+id/action_subs"
+		android:title="@string/subs_config"/>
+	<item
+		android:id="@+id/action_help"
+		android:title="@string/sub_help"/>
+</menu>

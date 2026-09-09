@@ -19,7 +19,6 @@ import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -53,10 +52,9 @@ public class SubscribeActivity extends BaseActivity {
 	private static final int FILTER_BAD = 2;
 
 	private Preferences prefs;
-	private EditText edittext_url;
+	private TextView textview_current;
 	private MaterialButton button_fetch;
 	private MaterialButton button_test_all;
-	private MaterialButton button_help;
 	private ListView listview;
 	private TextView textview_empty;
 	private TextView textview_stats;
@@ -89,17 +87,15 @@ public class SubscribeActivity extends BaseActivity {
 			}
 		});
 
-		edittext_url = (EditText) findViewById(R.id.sub_url);
+		textview_current = (TextView) findViewById(R.id.sub_current);
 		button_fetch = (MaterialButton) findViewById(R.id.sub_fetch);
 		button_test_all = (MaterialButton) findViewById(R.id.sub_test_all);
-		button_help = (MaterialButton) findViewById(R.id.sub_help);
 		listview = (ListView) findViewById(R.id.sub_list);
 		textview_empty = (TextView) findViewById(R.id.sub_empty);
 		textview_stats = (TextView) findViewById(R.id.sub_stats);
 		spinner_sort = (Spinner) findViewById(R.id.sub_sort);
 		spinner_filter = (Spinner) findViewById(R.id.sub_filter);
 
-		edittext_url.setText(prefs.getSubUrl());
 
 		adapter = new NodeAdapter();
 		listview.setAdapter(adapter);
@@ -120,14 +116,44 @@ public class SubscribeActivity extends BaseActivity {
 				testAll();
 			}
 		});
-		button_help.setOnClickListener(new View.OnClickListener() {
+		/* Subscription management and the usage guide live in the toolbar
+		   menu, so the page itself only shows the current subscription. */
+		toolbar.inflateMenu(R.menu.subscribe_menu);
+		toolbar.setOnMenuItemClickListener(new MaterialToolbar.OnMenuItemClickListener() {
 			@Override
-			public void onClick(View v) {
-				showHelp();
+			public boolean onMenuItemClick(android.view.MenuItem item) {
+				int id = item.getItemId();
+				if (id == R.id.action_subs)
+				  startActivity(new Intent(SubscribeActivity.this, SubscribeConfigActivity.class));
+				else if (id == R.id.action_help)
+				  showHelp();
+				return true;
 			}
 		});
 
 		loadNodes();
+		updateCurrent();
+	}
+
+	@Override
+	protected void onResume() {
+		super.onResume();
+		updateCurrent();
+	}
+
+	/* Which subscription the node list below belongs to. */
+	private void updateCurrent() {
+		Subscription sub = prefs.getActiveSubscription();
+		if (sub != null) {
+			textview_current.setText(getString(R.string.subs_current, sub.label()));
+			return;
+		}
+		String url = prefs.getSubUrl();
+		if (url == null || url.trim().isEmpty()) {
+			textview_current.setText(R.string.subs_none);
+			return;
+		}
+		textview_current.setText(getString(R.string.subs_current, url.trim()));
 	}
 
 	private void setupSpinner(Spinner spinner, int arrayRes, final boolean isSort) {
@@ -219,12 +245,13 @@ public class SubscribeActivity extends BaseActivity {
 	}
 
 	private void fetch() {
-		final String url = edittext_url.getText().toString().trim();
-		if (url.isEmpty()) {
-			Toast.makeText(this, R.string.sub_invalid_url, Toast.LENGTH_SHORT).show();
+		Subscription sub = prefs.getActiveSubscription();
+		final String url = (sub != null) ? sub.url : prefs.getSubUrl();
+		if (url == null || url.trim().isEmpty()) {
+			Toast.makeText(this, R.string.subs_none, Toast.LENGTH_SHORT).show();
 			return;
 		}
-		prefs.setSubUrl(url);
+		prefs.setSubUrl(url.trim());
 		button_fetch.setEnabled(false);
 		button_fetch.setText(R.string.sub_fetching);
 		new Thread(new Runnable() {

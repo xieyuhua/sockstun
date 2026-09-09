@@ -9,6 +9,9 @@
 
 package hev.sockstun;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -251,10 +254,15 @@ public class TProxyService extends VpnService {
 			return;
 		}
 
-		/* Initialise mihomo with our generated profile. */
+		/* Initialise mihomo. It loads <homeDir>/config.yaml, and the picked
+		   node can already be applied here via selected-map.
+		   InitParams uses "home-dir"; keep "homeDir" too so an older core
+		   still understands it (unknown fields are ignored). */
 		String homeDir = getFilesDir().getAbsolutePath();
-		String initParams = "{\"homeDir\":\"" + homeDir + "\"}";
-		String setupParams = "{\"profile\":\"" + configFile.getAbsolutePath() + "\"}";
+		String initParams = "{\"home-dir\":\"" + homeDir + "\"," +
+			"\"homeDir\":\"" + homeDir + "\"}";
+		String setupParams = "{\"selected-map\":" + selectedMap(prefs) + "," +
+			"\"profile\":\"" + configFile.getAbsolutePath() + "\"}";
 		try {
 			Clash.INSTANCE.quickSetup(initParams, setupParams, new InvokeInterface() {
 				@Override
@@ -321,9 +329,27 @@ public class TProxyService extends VpnService {
 		startStats(prefs);
 	}
 
-	/* Ask mihomo to select the chosen proxy inside its "GLOBAL" group. The
-	   exact group name varies between subscriptions; this is best-effort and
-	   failures are non-fatal (the subscription's own default stays in effect). */
+	/* {"<group>":"<node>"} for quickSetup's selected-map; empty when no node
+	   has been picked yet. */
+	private String selectedMap(Preferences prefs) {
+		String sel = prefs.getSubSelected();
+		if (sel == null || sel.isEmpty())
+		  return "{}";
+		String group = ClashParser.parseSelectorGroup(prefs.getSubRaw());
+		if (group == null || group.isEmpty())
+		  return "{}";
+		try {
+			JSONObject map = new JSONObject();
+			map.put(group, sel);
+			return map.toString();
+		} catch (JSONException e) {
+			return "{}";
+		}
+	}
+
+	/* Ask mihomo to select the chosen proxy inside its proxy group. The exact
+	   group name varies between subscriptions; failures are non-fatal (the
+	   subscription's own default stays in effect). */
 	private void applySelectedNode(Preferences prefs) {
 		String sel = prefs.getSubSelected();
 		if (sel == null || sel.isEmpty())
@@ -335,16 +361,25 @@ public class TProxyService extends VpnService {
 			appendLog("selector skipped: subscription has no switchable proxy-group");
 			return;
 		}
+		/* An action document is {"id","method","data"}; changeProxy expects
+		   data to be a *string* holding {"group-name","proxy-name"}. */
 		try {
-			String action = "{\"type\":\"selector\",\"action\":\"set\"," +
-				"\"name\":\"" + group + "\",\"value\":\"" + sel + "\"}";
-			Clash.INSTANCE.invokeAction(action, new InvokeInterface() {
+			JSONObject data = new JSONObject();
+			data.put("group-name", group);
+			data.put("proxy-name", sel);
+			JSONObject action = new JSONObject();
+			action.put("id", "select");
+			action.put("method", "changeProxy");
+			action.put("data", data.toString());
+			Clash.INSTANCE.invokeAction(action.toString(), new InvokeInterface() {
 				@Override
 				public void onResult(String result) {
 					appendLog("selector set: " + (result == null ? "ok" : result));
 				}
 			});
 			appendLog("selected node: " + sel + " in group " + group);
+		} catch (JSONException e) {
+			appendLog("selector set skipped: " + e);
 		} catch (Throwable e) {
 			appendLog("selector set skipped: " + e);
 		}

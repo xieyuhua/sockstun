@@ -23,19 +23,14 @@
 			android:layout_width="match_parent"
 			android:layout_height="wrap_content"
 			android:padding="16dp">
-			<com.google.android.material.textfield.TextInputLayout
-				android:id="@+id/til_sub_url"
-				style="@style/Widget.SocksTun.TextInputLayout"
+			<TextView
+				android:id="@+id/sub_current"
 				android:layout_width="match_parent"
 				android:layout_height="wrap_content"
-				android:hint="@string/sub_url_hint">
-				<com.google.android.material.textfield.TextInputEditText
-					android:id="@+id/sub_url"
-					android:layout_width="match_parent"
-					android:layout_height="wrap_content"
-					android:inputType="textUri"
-					android:maxLines="1"/>
-			</com.google.android.material.textfield.TextInputLayout>
+				android:ellipsize="end"
+				android:maxLines="2"
+				android:text="@string/subs_none"
+				android:textAppearance="?attr/textAppearanceBodyMedium"/>
 			<LinearLayout
 				android:orientation="horizontal"
 				android:layout_width="match_parent"
@@ -97,16 +92,7 @@
 				android:layout_marginTop="10dp"
 				android:textAppearance="?attr/textAppearanceBodySmall"
 				android:textColor="?attr/colorOutline"/>
-			<com.google.android.material.button.MaterialButton
-				android:id="@+id/sub_help"
-				style="?attr/materialButtonOutlinedStyle"
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="12dp"
-				android:minHeight="48dp"
-				android:text="@string/sub_help"
-				android:textSize="14sp"
-				app:cornerRadius="24dp"/>
+
 		</LinearLayout>
 	</com.google.android.material.card.MaterialCardView>
 	<TextView

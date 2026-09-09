@@ -96,7 +96,6 @@
 	<string name="theme_light">Paper Light</string>
 
 	<string name="subscribe">订阅</string>
-	<string name="sub_url_hint">clash.yml 订阅地址</string>
 	<string name="sub_fetch">拉取订阅</string>
 	<string name="sub_fetching">拉取中…</string>
 	<string name="sub_test_all">测速全部</string>
@@ -134,6 +133,19 @@
 	<string name="server_manual_hint">未配置订阅时，这里填写的 SOCKS5 会作为手动上游生效；已配置订阅时以订阅为准。</string>
 	<string name="server_use_as_upstream">使用此 SOCKS5 作为上游（忽略订阅）</string>
 	<string name="settings">设置</string>
+	<string name="subs_config">订阅配置</string>
+	<string name="subs_add">新增订阅</string>
+	<string name="subs_edit">编辑订阅</string>
+	<string name="subs_name">名称（可选）</string>
+	<string name="subs_url">订阅地址</string>
+	<string name="subs_empty">暂无订阅，点「新增订阅」添加一个</string>
+	<string name="subs_set_default">设为默认</string>
+	<string name="subs_default_badge">默认</string>
+	<string name="subs_current">当前订阅：%s</string>
+	<string name="subs_none">未配置订阅，请先在右上角添加</string>
+	<string name="subs_delete_confirm">删除订阅“%s”？</string>
+	<string name="subs_url_required">请填写订阅地址</string>
+	<string name="server_list_hint_sub">可保存多个订阅地址，「设为默认」的那个就是订阅页拉取和使用的来源。删除默认订阅会同时清掉已拉取的节点。</string>
 	<string name="settings_version">版本</string>
 	<string name="version_info">版本信息</string>
 	<string name="version_detail">版本：%1$s（%2$d）\n内核：mihomo v1.19.30\nABI：arm64-v8a、armeabi-v7a</string>

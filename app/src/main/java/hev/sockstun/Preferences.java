@@ -30,6 +30,8 @@ public class Preferences
 	public static final String SUB_SELECTED = "SubSelected";
 	public static final String SOCKS_SERVERS = "SocksServers";
 	public static final String SOCKS_ACTIVE = "SocksActive";
+	public static final String SUBSCRIPTIONS = "Subscriptions";
+	public static final String SUB_ACTIVE = "SubActive";
 	public static final String DNS_IPV4 = "DnsIpv4";
 	public static final String DNS_IPV6 = "DnsIpv6";
 	public static final String IPV4 = "Ipv4";
@@ -162,6 +164,8 @@ public class Preferences
 		editor.putString(key(dst, SUB_SELECTED), prefs.getString(key(src, SUB_SELECTED), ""));
 		editor.putString(key(dst, SOCKS_SERVERS), prefs.getString(key(src, SOCKS_SERVERS), ""));
 		editor.putString(key(dst, SOCKS_ACTIVE), prefs.getString(key(src, SOCKS_ACTIVE), ""));
+		editor.putString(key(dst, SUBSCRIPTIONS), prefs.getString(key(src, SUBSCRIPTIONS), ""));
+		editor.putString(key(dst, SUB_ACTIVE), prefs.getString(key(src, SUB_ACTIVE), ""));
 	}
 
 	private void removeProfile(SharedPreferences.Editor editor, int profile) {
@@ -182,6 +186,8 @@ public class Preferences
 		editor.remove(key(profile, SUB_SELECTED));
 		editor.remove(key(profile, SOCKS_SERVERS));
 		editor.remove(key(profile, SOCKS_ACTIVE));
+		editor.remove(key(profile, SUBSCRIPTIONS));
+		editor.remove(key(profile, SUB_ACTIVE));
 	}
 
 	public int getProfileCount() {
@@ -239,6 +245,39 @@ public class Preferences
 		  editor.putInt(SELECTED, count - 2);
 		editor.commit();
 		return true;
+	}
+
+	/* The stored clash.yml subscriptions, and which one is enabled. The
+	   enabled one is what the subscribe page fetches. */
+	public List<Subscription> getSubscriptions() {
+		return Subscription.decode(prefs.getString(key(SUBSCRIPTIONS), ""));
+	}
+
+	public void setSubscriptions(List<Subscription> list) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SUBSCRIPTIONS), Subscription.encode(list));
+		editor.commit();
+	}
+
+	public String getActiveSubId() {
+		return prefs.getString(key(SUB_ACTIVE), "");
+	}
+
+	public void setActiveSubId(String id) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SUB_ACTIVE), id == null ? "" : id);
+		editor.commit();
+	}
+
+	public Subscription getActiveSubscription() {
+		String id = getActiveSubId();
+		if (id == null || id.isEmpty())
+		  return null;
+		for (Subscription s : getSubscriptions()) {
+			if (id.equals(s.id))
+			  return s;
+		}
+		return null;
 	}
 
 	/* Remote clash.yml subscription (per profile). */

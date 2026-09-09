@@ -52,6 +52,8 @@
 			android:exported="false" android:parentActivityName=".ServerListActivity"/>
 		<activity android:name=".SubscribeActivity" android:label="@string/subscribe"
 			android:exported="false" android:parentActivityName=".MainActivity"/>
+	<activity android:name=".SubscribeConfigActivity" android:label="@string/subs_config"
+			android:exported="false" android:parentActivityName=".SubscribeActivity"/>
 		<activity android:name=".RulesHubActivity" android:label="@string/rules"
 			android:exported="false" android:parentActivityName=".MainActivity"/>
 		<activity android:name=".LogActivity" android:label="@string/log"
