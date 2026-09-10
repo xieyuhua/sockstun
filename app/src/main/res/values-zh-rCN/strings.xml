@@ -44,13 +44,14 @@
 	<string name="server_delete">删除服务器</string>
 	<string name="server_in_use">使用中</string>
 	<string name="server_new_name">服务器 %1$d</string>
-	<string name="server_list_hint">点击某个服务器即可在首页使用它，切换在下次连接时生效。</string>
+	<string name="server_list_hint">点击某个服务器即启用它；正在连接时会自动重连到新服务器。</string>
 	<string name="server_edit_hint">改动将在下次连接时生效。</string>
 	<string name="server_delete_confirm">删除服务器“%s”？</string>
 	<string name="server_limit">服务器数量已达上限（13）</string>
 	<string name="server_last">不能删除最后一个服务器</string>
-	<string name="server_busy">请先断开连接再更换服务器</string>
-	<string name="server_selected_hint">已切换，重新连接后生效</string>
+	<string name="server_busy">请先断开连接再新增或删除服务器</string>
+	<string name="server_selected_hint">已启用该服务器</string>
+	<string name="server_switching">正在切换服务器…</string>
 	<string name="global_hint">所有应用都通过隧道转发</string>
 	<string name="apps_hint">关闭全局模式时，仅选中的应用走隧道</string>
 	<string name="remote_dns_hint">由代理服务器解析域名</string>

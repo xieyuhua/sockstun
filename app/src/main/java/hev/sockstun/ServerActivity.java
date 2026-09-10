@@ -11,8 +11,11 @@ package hev.sockstun;
 import java.util.ArrayList;
 import java.util.List;
 
+import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -135,16 +138,37 @@ public class ServerActivity extends BaseActivity {
 		adapter.notifyDataSetChanged();
 	}
 
+	/* Tapping an entry makes it the active one right away. While the tunnel
+	   is up that means restarting it: stopService() ends the :native process
+	   with System.exit(0), so the connect has to wait until it is gone. */
+	private static final long RESTART_DELAY = 1000;
+
 	private void select(int index) {
 		if (index == prefs.getSelected())
 		  return;
-		if (prefs.getEnable()) {
-			Toast.makeText(this, R.string.server_busy, Toast.LENGTH_SHORT).show();
-			return;
-		}
+
 		prefs.setSelected(index);
 		renderList();
-		Toast.makeText(this, R.string.server_selected_hint, Toast.LENGTH_SHORT).show();
+
+		if (!prefs.getEnable()) {
+			Toast.makeText(this, R.string.server_selected_hint, Toast.LENGTH_SHORT).show();
+			return;
+		}
+
+		Toast.makeText(this, R.string.server_switching, Toast.LENGTH_SHORT).show();
+		final Context app = getApplicationContext();
+		Intent stop = new Intent(app, TProxyService.class)
+			.setAction(TProxyService.ACTION_DISCONNECT);
+		startService(stop);
+
+		new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+			@Override
+			public void run() {
+				Intent start = new Intent(app, TProxyService.class)
+					.setAction(TProxyService.ACTION_CONNECT);
+				app.startService(start);
+			}
+		}, RESTART_DELAY);
 	}
 
 	private void addServer() {

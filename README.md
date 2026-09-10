@@ -22,11 +22,12 @@ A single bottom bar with five tabs — **Home · Server · Rules · Apps · Log*
 theme picker sits in the Home toolbar (top-right icon).
 
 * **Home** — connect/disconnect, the proxy currently in use, live traffic card.
-* **Server** — list of proxies (add / edit / delete); picking one makes it the
-  active proxy on Home. Each entry keeps its own DNS, scope, apps and rules.
-* **Rules** — domain / IP / CIDR rules (proxy or direct), then proxy scope
-  (global or per-app, IPv4/IPv6, UDP over TCP), DNS, and at the bottom the
-  "unmatched traffic uses the proxy" switch.
+* **Server** — list of proxies (add / edit / delete). Tapping one makes it the
+  active proxy right away, reconnecting the tunnel if it is running. Each entry
+  keeps its own DNS, scope, apps and rules.
+* **Rules** — three cards: proxy scope (global / per-app, IPv4/IPv6, UDP over
+  TCP), DNS, then the rules card holding the domain / IP / CIDR list together
+  with the "unmatched traffic uses the proxy" switch below it.
 * **Apps** — pick which apps use the tunnel in per-app mode.
 * **Log** — toggle and read the tunnel log.
 

@@ -44,13 +44,14 @@
 	<string name="server_delete">Delete server</string>
 	<string name="server_in_use">In use</string>
 	<string name="server_new_name">Server %1$d</string>
-	<string name="server_list_hint">Tap a server to use it on the Home screen. The switch takes effect on the next connect.</string>
+	<string name="server_list_hint">Tap a server to switch to it. If the tunnel is running it reconnects to the new server automatically.</string>
 	<string name="server_edit_hint">Changes take effect on the next connect.</string>
 	<string name="server_delete_confirm">Delete server “%s”?</string>
 	<string name="server_limit">Server limit reached (13)</string>
 	<string name="server_last">Cannot delete the last server</string>
-	<string name="server_busy">Disconnect before changing servers</string>
-	<string name="server_selected_hint">Switched, reconnect to apply</string>
+	<string name="server_busy">Disconnect before adding or removing servers</string>
+	<string name="server_selected_hint">Now using this server</string>
+	<string name="server_switching">Switching server…</string>
 	<string name="global_hint">Route all apps through the tunnel</string>
 	<string name="apps_hint">When global mode is off, only selected apps use the tunnel</string>
 	<string name="remote_dns_hint">Resolve domain names by the proxy server</string>
