@@ -33,12 +33,8 @@ public class ServerActivity extends BaseActivity implements View.OnClickListener
 
 		MaterialToolbar toolbar = (MaterialToolbar) findViewById(R.id.toolbar);
 		setSupportActionBar(toolbar);
-		toolbar.setNavigationOnClickListener(new View.OnClickListener() {
-			@Override
-			public void onClick(View v) {
-				finish();
-			}
-		});
+
+		setupBottomNav(R.id.nav_server);
 
 		edittext_socks_addr = (EditText) findViewById(R.id.socks_addr);
 		edittext_socks_udp_addr = (EditText) findViewById(R.id.socks_udp_addr);

@@ -2,9 +2,7 @@
 <resources>
 	<string name="app_name">SocksTun</string>
 	<string name="home">首页</string>
-	<string name="nav_open">打开菜单</string>
-	<string name="nav_close">关闭菜单</string>
-	<string name="home_hint">点击左上角菜单可配置服务器、DNS、路由与应用</string>
+	<string name="home_hint">使用底部导航栏配置服务器、规则、应用与日志</string>
 	<string name="log">日志</string>
 	<string name="log_empty">（暂无日志，请先连接）</string>
 	<string name="log_disabled">日志已关闭（下次连接生效）</string>
@@ -46,7 +44,7 @@
 	<string name="section_profile">配置</string>
 	<string name="section_server">服务器</string>
 	<string name="section_dns">DNS</string>
-	<string name="section_routing">分流</string>
+	<string name="section_scope">代理范围</string>
 	<string name="port">端口</string>
 	<string name="global_hint">所有应用都通过隧道转发</string>
 	<string name="apps_hint">关闭全局模式时，仅选中的应用走隧道</string>
@@ -66,7 +64,7 @@
 	<string name="traffic_empty">暂无流量记录</string>
 	<string name="traffic_hint">应用数据取自系统统计，其中也包含未走隧道的流量，仅供参考。</string>
 
-	<string name="rules">路由规则</string>
+	<string name="rules">规则</string>
 	<string name="rules_hint">按域名、IP 或 IP 段匹配。域名在连接时解析为 IP；「直连」规则需要 Android 13 及以上系统。</string>
 	<string name="rules_default_proxy">未命中的流量走代理</string>
 	<string name="rule_add">添加</string>
@@ -90,10 +88,4 @@
 		<item>@string/rule_action_direct</item>
 	</string-array>
 
-	<string name="connections">连接</string>
-	<string name="conn_clear">清空记录</string>
-	<string name="conn_empty">暂无连接（请先连接隧道）</string>
-	<string name="conn_now">当前 TCP %1$d · UDP %2$d · 合计 %3$d</string>
-	<string name="conn_total">累计记录 %1$d 条连接</string>
-	<string name="conn_hint">隧道运行时从 /proc/net 读取，仅统计走代理的应用；隧道引擎不提供包数量。</string>
 </resources>

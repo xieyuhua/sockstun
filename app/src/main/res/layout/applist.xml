@@ -9,8 +9,8 @@
 		android:id="@+id/toolbar"
 		android:layout_width="match_parent"
 		android:layout_height="?attr/actionBarSize"
-		app:navigationIcon="?attr/homeAsUpIndicator"
 		app:title="@string/apps"
+		app:titleCentered="true"
 		app:titleTextAppearance="@style/TextAppearance.SocksTun.Toolbar"/>
 	<com.google.android.material.textfield.TextInputLayout
 		style="@style/Widget.SocksTun.TextInputLayout"
@@ -52,4 +52,5 @@
 			android:textColor="?attr/colorOnSurfaceVariant"
 			android:visibility="gone"/>
 	</FrameLayout>
+	<include layout="@layout/bottom_nav"/>
 </LinearLayout>

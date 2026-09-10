@@ -34,19 +34,14 @@ import android.net.VpnService;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.appcompat.app.ActionBarDrawerToggle;
-import androidx.drawerlayout.widget.DrawerLayout;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.color.MaterialColors;
-import com.google.android.material.navigation.NavigationView;
 
 public class MainActivity extends BaseActivity implements View.OnClickListener {
 	private Preferences prefs;
-	private DrawerLayout drawer;
-	private NavigationView navView;
 	private MaterialCardView card_status;
 	private MaterialCardView card_status_dot;
 	private ImageView imageview_status_icon;
@@ -86,48 +81,19 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 
 		MaterialToolbar toolbar = (MaterialToolbar) findViewById(R.id.toolbar);
 		setSupportActionBar(toolbar);
-
-		drawer = (DrawerLayout) findViewById(R.id.drawer);
-		navView = (NavigationView) findViewById(R.id.nav);
-		ActionBarDrawerToggle toggle = new ActionBarDrawerToggle(
-				this, drawer, toolbar, R.string.nav_open, R.string.nav_close);
-		drawer.addDrawerListener(toggle);
-		toggle.syncState();
-
-		navView.setCheckedItem(R.id.nav_home);
-		navView.setNavigationItemSelectedListener(new NavigationView.OnNavigationItemSelectedListener() {
+		toolbar.inflateMenu(R.menu.home_menu);
+		toolbar.setOnMenuItemClickListener(new MaterialToolbar.OnMenuItemClickListener() {
 			@Override
-			public boolean onNavigationItemSelected(android.view.MenuItem item) {
-				int id = item.getItemId();
-				if (id != R.id.nav_home) {
-					Intent intent = null;
-					if (id == R.id.nav_server)
-					  intent = new Intent(MainActivity.this, ServerActivity.class);
-					else if (id == R.id.nav_dns)
-					  intent = new Intent(MainActivity.this, DnsActivity.class);
-					else if (id == R.id.nav_routing)
-					  intent = new Intent(MainActivity.this, RoutingActivity.class);
-					else if (id == R.id.nav_apps)
-					  intent = new Intent(MainActivity.this, AppListActivity.class);
-					else if (id == R.id.nav_log)
-					  intent = new Intent(MainActivity.this, LogActivity.class);
-					else if (id == R.id.nav_rules)
-					  intent = new Intent(MainActivity.this, RulesActivity.class);
-					else if (id == R.id.nav_conn)
-					  intent = new Intent(MainActivity.this, ConnActivity.class);
-					else if (id == R.id.nav_theme) {
-					  showThemeDialog();
-					  drawer.closeDrawers();
-					  return true;
-					}
-					if (intent != null)
-					  startActivity(intent);
+			public boolean onMenuItemClick(android.view.MenuItem item) {
+				if (item.getItemId() == R.id.action_theme) {
+					showThemeDialog();
+					return true;
 				}
-				drawer.closeDrawers();
-				return true;
-				}
-				});
+				return false;
+			}
+		});
 
+		setupBottomNav(R.id.nav_home);
 
 		card_status = (MaterialCardView) findViewById(R.id.status_card);
 		card_status_dot = (MaterialCardView) findViewById(R.id.status_dot);

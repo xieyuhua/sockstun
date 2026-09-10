@@ -43,12 +43,8 @@ public class LogActivity extends BaseActivity implements View.OnClickListener {
 
 		MaterialToolbar toolbar = (MaterialToolbar) findViewById(R.id.toolbar);
 		setSupportActionBar(toolbar);
-		toolbar.setNavigationOnClickListener(new View.OnClickListener() {
-			@Override
-			public void onClick(View v) {
-				finish();
-			}
-		});
+
+		setupBottomNav(R.id.nav_log);
 
 		prefs = new Preferences(this);
 

@@ -162,12 +162,8 @@ public class AppListActivity extends BaseActivity {
 		setContentView(R.layout.applist);
 		toolbar = (MaterialToolbar) findViewById(R.id.toolbar);
 		setSupportActionBar(toolbar);
-		toolbar.setNavigationOnClickListener(new View.OnClickListener() {
-			@Override
-			public void onClick(View view) {
-				finish();
-			}
-		});
+
+		setupBottomNav(R.id.nav_apps);
 
 		listView = (ListView) findViewById(R.id.list);
 		listView.setChoiceMode(ListView.CHOICE_MODE_MULTIPLE);

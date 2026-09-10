@@ -9,8 +9,8 @@
 		android:id="@+id/toolbar"
 		android:layout_width="match_parent"
 		android:layout_height="?attr/actionBarSize"
-		app:navigationIcon="?attr/homeAsUpIndicator"
 		app:title="@string/section_server"
+		app:titleCentered="true"
 		app:titleTextAppearance="@style/TextAppearance.SocksTun.Toolbar"/>
 	<ScrollView
 		android:layout_width="match_parent"
@@ -123,4 +123,5 @@
 		app:icon="@drawable/ic_save"
 		app:iconGravity="textStart"
 		app:iconPadding="8dp"/>
+	<include layout="@layout/bottom_nav"/>
 </LinearLayout>

@@ -2,9 +2,7 @@
 <resources>
 	<string name="app_name">SocksTun</string>
 	<string name="home">Home</string>
-	<string name="nav_open">Open navigation</string>
-	<string name="nav_close">Close navigation</string>
-	<string name="home_hint">Open the top-left menu to set up the server, DNS and routing</string>
+	<string name="home_hint">Use the bar at the bottom to set up the server, rules, apps and the log</string>
 	<string name="log">Log</string>
 	<string name="log_empty">(No log yet, connect first)</string>
 	<string name="log_disabled">Logging is off (takes effect on next connect)</string>
@@ -46,7 +44,7 @@
 	<string name="section_profile">Profile</string>
 	<string name="section_server">Server</string>
 	<string name="section_dns">DNS</string>
-	<string name="section_routing">Routing</string>
+	<string name="section_scope">Scope</string>
 	<string name="port">Port</string>
 	<string name="global_hint">Route all apps through the tunnel</string>
 	<string name="apps_hint">When global mode is off, only selected apps use the tunnel</string>
@@ -66,7 +64,7 @@
 	<string name="traffic_empty">No traffic recorded yet</string>
 	<string name="traffic_hint">Per-app numbers come from the system counters, so they also include traffic that did not go through the tunnel.</string>
 
-	<string name="rules">Routing rules</string>
+	<string name="rules">Rules</string>
 	<string name="rules_hint">Match a domain, an IP or an IP range. Domains are resolved when the tunnel starts; “direct” rules need Android 13+.</string>
 	<string name="rules_default_proxy">Unmatched traffic uses the proxy</string>
 	<string name="rule_add">Add</string>
@@ -89,14 +87,6 @@
 		<item>@string/rule_action_proxy</item>
 		<item>@string/rule_action_direct</item>
 	</string-array>
-
-	<string name="connections">Connections</string>
-	<string name="conn_clear">Clear records</string>
-	<string name="conn_empty">No connections (start the tunnel first)</string>
-	<string name="conn_now">Now  TCP %1$d · UDP %2$d · total %3$d</string>
-	<string name="conn_total">%1$d connections recorded</string>
-	<string name="conn_hint">Read from /proc/net while the tunnel runs, for the proxied apps only. Packet counts are not exposed by the tunnel engine.</string>
-	<string name="conn_blocked">本机系统禁止读取 /proc/net（Android 10+ 隐私限制），无法列出连接明细。隧道与流量统计不受影响。</string>
 
 	<string name="theme">Theme</string>
 	<string name="theme_neon">Neon Green</string>

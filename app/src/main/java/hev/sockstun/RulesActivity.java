@@ -1,7 +1,9 @@
 /*
  ============================================================================
  Name        : RulesActivity.java
- Description : Routing rules (domain / ip / cidr -> proxy or direct)
+ Description : Rules page: domain / IP / CIDR -> proxy or direct, plus the
+               routing scope (global or per-app, protocol) and DNS options
+               that used to live on their own screens.
  ============================================================================
  */
 
@@ -11,9 +13,11 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.util.List;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageButton;
@@ -26,9 +30,11 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.textfield.TextInputLayout;
 
 public class RulesActivity extends BaseActivity implements View.OnClickListener {
 	private Preferences prefs;
+
 	private CompoundButton switch_default_proxy;
 	private Spinner spinner_type;
 	private Spinner spinner_action;
@@ -36,6 +42,18 @@ public class RulesActivity extends BaseActivity implements View.OnClickListener 
 	private LinearLayout rules_list;
 	private TextView rules_empty;
 	private List<Preferences.Rule> rules;
+
+	private CompoundButton switch_global;
+	private CompoundButton switch_ipv4;
+	private CompoundButton switch_ipv6;
+	private CompoundButton switch_udp_in_tcp;
+	private Button button_apps;
+
+	private CompoundButton switch_remote_dns;
+	private EditText edittext_dns_ipv4;
+	private EditText edittext_dns_ipv6;
+	private TextInputLayout til_dns_ipv4;
+	private TextInputLayout til_dns_ipv6;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -45,13 +63,10 @@ public class RulesActivity extends BaseActivity implements View.OnClickListener 
 
 		MaterialToolbar toolbar = (MaterialToolbar) findViewById(R.id.toolbar);
 		setSupportActionBar(toolbar);
-		toolbar.setNavigationOnClickListener(new View.OnClickListener() {
-			@Override
-			public void onClick(View view) {
-				finish();
-			}
-		});
 
+		setupBottomNav(R.id.nav_rules);
+
+		/* --- rules --- */
 		switch_default_proxy = (CompoundButton) findViewById(R.id.rules_default_proxy);
 		spinner_type = (Spinner) findViewById(R.id.rule_type);
 		spinner_action = (Spinner) findViewById(R.id.rule_action);
@@ -69,26 +84,103 @@ public class RulesActivity extends BaseActivity implements View.OnClickListener 
 				}
 			});
 
+		/* --- routing scope --- */
+		switch_global = (CompoundButton) findViewById(R.id.global);
+		switch_ipv4 = (CompoundButton) findViewById(R.id.ipv4);
+		switch_ipv6 = (CompoundButton) findViewById(R.id.ipv6);
+		switch_udp_in_tcp = (CompoundButton) findViewById(R.id.udp_in_tcp);
+		button_apps = (Button) findViewById(R.id.apps);
+
+		/* --- dns --- */
+		switch_remote_dns = (CompoundButton) findViewById(R.id.remote_dns);
+		edittext_dns_ipv4 = (EditText) findViewById(R.id.dns_ipv4);
+		edittext_dns_ipv6 = (EditText) findViewById(R.id.dns_ipv6);
+		til_dns_ipv4 = (TextInputLayout) findViewById(R.id.til_dns_ipv4);
+		til_dns_ipv6 = (TextInputLayout) findViewById(R.id.til_dns_ipv6);
+
+		((MaterialButton) findViewById(R.id.save)).setOnClickListener(this);
+		button_apps.setOnClickListener(this);
+		switch_global.setOnClickListener(this);
+		switch_remote_dns.setOnClickListener(this);
+
+		rules = prefs.getRules();
+		loadUI();
+		renderRules();
+	}
+
+	private void loadUI() {
+		switch_global.setChecked(prefs.getGlobal());
+		switch_ipv4.setChecked(prefs.getIpv4());
+		switch_ipv6.setChecked(prefs.getIpv6());
+		switch_udp_in_tcp.setChecked(prefs.getUdpInTcp());
+
+		switch_remote_dns.setChecked(prefs.getRemoteDns());
+		edittext_dns_ipv4.setText(prefs.getDnsIpv4());
+		edittext_dns_ipv6.setText(prefs.getDnsIpv6());
+
+		updateEditable();
+	}
+
+	/* Everything here only takes effect on the next connect, so the whole
+	   page becomes read-only while the tunnel is up. */
+	private void updateEditable() {
 		boolean editable = !prefs.getEnable();
+
 		switch_default_proxy.setEnabled(editable);
 		spinner_type.setEnabled(editable);
 		spinner_action.setEnabled(editable);
 		edit_value.setEnabled(editable);
 		findViewById(R.id.rule_add).setEnabled(editable);
 
-		rules = prefs.getRules();
+		switch_global.setEnabled(editable);
+		switch_ipv4.setEnabled(editable);
+		switch_ipv6.setEnabled(editable);
+		switch_udp_in_tcp.setEnabled(editable);
+		button_apps.setEnabled(editable && !switch_global.isChecked());
+
+		switch_remote_dns.setEnabled(editable);
+		boolean dnsEditable = editable && !switch_remote_dns.isChecked();
+		edittext_dns_ipv4.setEnabled(dnsEditable);
+		edittext_dns_ipv6.setEnabled(dnsEditable);
+		til_dns_ipv4.setEnabled(dnsEditable);
+		til_dns_ipv6.setEnabled(dnsEditable);
+
 		renderRules();
 	}
 
 	@Override
 	protected void onPause() {
 		super.onPause();
-		prefs.setRules(rules);
+		savePrefs();
 	}
 
 	@Override
 	public void onClick(View view) {
+		if (view == button_apps) {
+			startActivity(new Intent(this, AppListActivity.class));
+			return;
+		}
+		if (view == switch_global || view == switch_remote_dns) {
+			updateEditable();
+			return;
+		}
+		if (view.getId() == R.id.save) {
+			savePrefs();
+			Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show();
+			return;
+		}
 		addRule();
+	}
+
+	private void savePrefs() {
+		prefs.setRules(rules);
+		prefs.setGlobal(switch_global.isChecked());
+		prefs.setIpv4(switch_ipv4.isChecked());
+		prefs.setIpv6(switch_ipv6.isChecked());
+		prefs.setUdpInTcp(switch_udp_in_tcp.isChecked());
+		prefs.setRemoteDns(switch_remote_dns.isChecked());
+		prefs.setDnsIpv4(edittext_dns_ipv4.getText().toString());
+		prefs.setDnsIpv6(edittext_dns_ipv6.getText().toString());
 	}
 
 	private String typeLabel(int type) {
