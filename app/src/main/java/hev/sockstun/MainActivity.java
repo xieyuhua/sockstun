@@ -47,11 +47,9 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	private ImageView imageview_status_icon;
 	private TextView textview_status_title;
 	private TextView textview_status_subtitle;
-	private TextView textview_profile_name;
+	private TextView textview_proxy_name;
+	private TextView textview_proxy_detail;
 	private Button button_control;
-	private Button button_profile_prev;
-	private Button button_profile_next;
-	private Button button_profile_menu;
 	private TextView textview_realtime;
 	private TextView textview_session;
 	private TextView textview_total;
@@ -100,29 +98,15 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		imageview_status_icon = (ImageView) findViewById(R.id.status_icon);
 		textview_status_title = (TextView) findViewById(R.id.status_title);
 		textview_status_subtitle = (TextView) findViewById(R.id.status_subtitle);
-		textview_profile_name = (TextView) findViewById(R.id.profile_name);
+		textview_proxy_name = (TextView) findViewById(R.id.proxy_name);
+		textview_proxy_detail = (TextView) findViewById(R.id.proxy_detail);
 		button_control = (Button) findViewById(R.id.control);
-		button_profile_prev = (Button) findViewById(R.id.profile_prev);
-		button_profile_next = (Button) findViewById(R.id.profile_next);
-		button_profile_menu = (Button) findViewById(R.id.profile_menu);
 		textview_realtime = (TextView) findViewById(R.id.stats_realtime);
 		textview_session = (TextView) findViewById(R.id.stats_session);
 		textview_total = (TextView) findViewById(R.id.stats_total);
 		textview_apps = (TextView) findViewById(R.id.stats_apps);
 		((Button) findViewById(R.id.traffic_reset)).setOnClickListener(this);
 
-		button_profile_prev.setOnClickListener(this);
-		button_profile_next.setOnClickListener(this);
-		button_profile_menu.setOnClickListener(this);
-		textview_profile_name.setOnLongClickListener(new View.OnLongClickListener() {
-			@Override
-			public boolean onLongClick(View view) {
-				if (prefs.getEnable())
-				  return false;
-				showProfileMenu();
-				return true;
-			}
-		});
 		button_control.setOnClickListener(this);
 		updateUI();
 
@@ -187,7 +171,10 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	@Override
 	protected void onResume() {
 		super.onResume();
-		updateControlState();
+		/* The server may have been switched on the Server tab, so re-read
+		   the profile before painting the proxy line. */
+		prefs = new Preferences(this);
+		updateUI();
 		refreshTraffic();
 	}
 
@@ -223,106 +210,12 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 			else
 			  startService(intent.setAction(TProxyService.ACTION_CONNECT));
 			QSTileService.requestUpdate(this);
-		} else if (view == button_profile_prev) {
-			switchProfile(-1);
-		} else if (view == button_profile_next) {
-			switchProfile(1);
-		} else if (view == button_profile_menu) {
-			if (!prefs.getEnable())
-			  showProfileMenu();
 		}
-	}
-
-	private void switchProfile(int direction) {
-		if (prefs.getEnable())
-		  return;
-		int count = prefs.getProfileCount();
-		prefs.setSelected((prefs.getSelected() + direction + count) % count);
-		updateUI();
-	}
-
-	private void showProfileMenu() {
-		String[] items = {
-			getString(R.string.profile_rename),
-			getString(R.string.profile_add),
-			getString(R.string.profile_delete),
-		};
-		new AlertDialog.Builder(this)
-			.setTitle(prefs.getProfileName())
-			.setItems(items, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface dialog, int which) {
-					switch (which) {
-					case 0:
-						showProfileNameDialog(R.string.profile_rename, false);
-						break;
-					case 1:
-						if (prefs.getProfileCount() >= Preferences.MAX_PROFILES)
-						  Toast.makeText(MainActivity.this, R.string.profile_limit, Toast.LENGTH_SHORT).show();
-						else
-						  showProfileNameDialog(R.string.profile_add, true);
-						break;
-					case 2:
-						deleteProfile();
-						break;
-					}
-				}
-			})
-			.show();
-	}
-
-	private void showProfileNameDialog(int titleId, final boolean add) {
-		final android.widget.EditText input = new android.widget.EditText(this);
-		input.setText(prefs.getProfileName());
-		input.setHint(R.string.profile_name);
-		input.setSingleLine(true);
-		input.selectAll();
-
-		android.widget.FrameLayout container = new android.widget.FrameLayout(this);
-		int padding = (int) (16 * getResources().getDisplayMetrics().density);
-		container.setPadding(padding, 0, padding, 0);
-		container.addView(input);
-
-		new AlertDialog.Builder(this)
-			.setTitle(titleId)
-			.setView(container)
-			.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface dialog, int which) {
-					String name = input.getText().toString().trim();
-					if (name.isEmpty())
-					  return;
-					if (add)
-					  prefs.addProfile(name);
-					else
-					  prefs.setProfileName(name);
-					updateUI();
-				}
-			})
-			.setNegativeButton(android.R.string.cancel, null)
-			.show();
-	}
-
-	private void deleteProfile() {
-		if (prefs.getProfileCount() <= 1) {
-			Toast.makeText(this, R.string.profile_last, Toast.LENGTH_SHORT).show();
-			return;
-		}
-		new AlertDialog.Builder(this)
-			.setMessage(getString(R.string.profile_delete_confirm, prefs.getProfileName()))
-			.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface dialog, int which) {
-					prefs.deleteProfile();
-					updateUI();
-				}
-			})
-			.setNegativeButton(android.R.string.cancel, null)
-			.show();
 	}
 
 	private void updateUI() {
-		textview_profile_name.setText(prefs.getProfileName());
+		textview_proxy_name.setText(prefs.getProfileName());
+		textview_proxy_detail.setText(prefs.getSocksAddress() + ":" + prefs.getSocksPort());
 		updateControlState();
 	}
 
@@ -383,12 +276,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	}
 
 	private void updateControlState() {
-		boolean editable = !prefs.getEnable();
-		button_profile_prev.setEnabled(editable);
-		button_profile_next.setEnabled(editable);
-		button_profile_menu.setEnabled(editable);
-		textview_profile_name.setEnabled(editable);
-		updateStatus(!editable);
+		updateStatus(prefs.getEnable());
 	}
 
 	/* Paint the hero card and the main button for the current tunnel state. */
@@ -403,6 +291,8 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		card_status.setCardBackgroundColor(ColorStateList.valueOf(bg));
 		textview_status_title.setTextColor(fg);
 		textview_status_subtitle.setTextColor(fg);
+		textview_proxy_name.setTextColor(fg);
+		textview_proxy_detail.setTextColor(fg);
 		textview_status_title.setText(connected ?
 			R.string.status_connected : R.string.status_disconnected);
 		textview_status_subtitle.setText(connected ?

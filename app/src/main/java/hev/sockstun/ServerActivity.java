@@ -1,29 +1,83 @@
 /*
  ============================================================================
  Name        : ServerActivity.java
- Description : Server settings page
+ Description : Server list: add / edit / delete / pick the proxy to use.
+               The selected entry is what the Home screen connects through.
  ============================================================================
  */
 
 package hev.sockstun;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import android.content.Intent;
 import android.os.Bundle;
+import android.view.LayoutInflater;
 import android.view.View;
-import android.widget.EditText;
+import android.view.ViewGroup;
+import android.widget.ArrayAdapter;
+import android.widget.ImageButton;
+import android.widget.ListView;
+import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 
-public class ServerActivity extends BaseActivity implements View.OnClickListener {
+public class ServerActivity extends BaseActivity {
+	public static final String EXTRA_INDEX = "index";
+
 	private Preferences prefs;
-	private EditText edittext_socks_addr;
-	private EditText edittext_socks_udp_addr;
-	private EditText edittext_socks_port;
-	private EditText edittext_socks_user;
-	private EditText edittext_socks_pass;
+	private ListView listView;
+	private ServerAdapter adapter;
+
+	private static class Entry {
+		public int index;
+		public String name;
+		public String addr;
+		public int port;
+	}
+
+	private class ServerAdapter extends ArrayAdapter<Entry> {
+		public ServerAdapter() {
+			super(ServerActivity.this, R.layout.serveritem);
+		}
+
+		@Override
+		public View getView(int position, View convertView, ViewGroup parent) {
+			LayoutInflater inflater = LayoutInflater.from(getContext());
+			View row = inflater.inflate(R.layout.serveritem, parent, false);
+
+			final Entry entry = getItem(position);
+			((TextView) row.findViewById(R.id.name)).setText(entry.name);
+			((TextView) row.findViewById(R.id.detail)).setText(entry.addr + ":" + entry.port);
+			row.findViewById(R.id.badge).setVisibility(
+				prefs.getSelected() == entry.index ? View.VISIBLE : View.GONE);
+
+			ImageButton edit = (ImageButton) row.findViewById(R.id.edit);
+			edit.setOnClickListener(new View.OnClickListener() {
+				@Override
+				public void onClick(View v) {
+					openEditor(entry.index);
+				}
+			});
+
+			ImageButton delete = (ImageButton) row.findViewById(R.id.delete);
+			delete.setEnabled(prefs.getProfileCount() > 1);
+			delete.setOnClickListener(new View.OnClickListener() {
+				@Override
+				public void onClick(View v) {
+					confirmDelete(entry);
+				}
+			});
+
+			return row;
+		}
+	}
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -36,58 +90,104 @@ public class ServerActivity extends BaseActivity implements View.OnClickListener
 
 		setupBottomNav(R.id.nav_server);
 
-		edittext_socks_addr = (EditText) findViewById(R.id.socks_addr);
-		edittext_socks_udp_addr = (EditText) findViewById(R.id.socks_udp_addr);
-		edittext_socks_port = (EditText) findViewById(R.id.socks_port);
-		edittext_socks_user = (EditText) findViewById(R.id.socks_user);
-		edittext_socks_pass = (EditText) findViewById(R.id.socks_pass);
-		((MaterialButton) findViewById(R.id.save)).setOnClickListener(this);
-
-		loadUI();
-	}
-
-	private void loadUI() {
-		edittext_socks_addr.setText(prefs.getSocksAddress());
-		edittext_socks_udp_addr.setText(prefs.getSocksUdpAddress());
-		edittext_socks_port.setText(Integer.toString(prefs.getSocksPort()));
-		edittext_socks_user.setText(prefs.getSocksUsername());
-		edittext_socks_pass.setText(prefs.getSocksPassword());
-
-		boolean editable = !prefs.getEnable();
-		edittext_socks_addr.setEnabled(editable);
-		edittext_socks_udp_addr.setEnabled(editable);
-		edittext_socks_port.setEnabled(editable);
-		edittext_socks_user.setEnabled(editable);
-		edittext_socks_pass.setEnabled(editable);
-	}
-
-	/* Persist any edits when leaving the page so the Home screen and the
-	   running tunnel always see the latest values. */
-	@Override
-	protected void onPause() {
-		super.onPause();
-		savePrefs();
-	}
-
-	@Override
-	public void onClick(View view) {
-		savePrefs();
-		Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show();
-		finish();
-	}
-
-	private void savePrefs() {
-		prefs.setSocksAddress(edittext_socks_addr.getText().toString());
-		prefs.setSocksUdpAddress(edittext_socks_udp_addr.getText().toString());
-		prefs.setSocksUsername(edittext_socks_user.getText().toString());
-		prefs.setSocksPassword(edittext_socks_pass.getText().toString());
-		String port = edittext_socks_port.getText().toString().trim();
-		if (!port.isEmpty()) {
-			try {
-				prefs.setSocksPort(Integer.parseInt(port));
-			} catch (NumberFormatException e) {
-				edittext_socks_port.setText(Integer.toString(prefs.getSocksPort()));
+		adapter = new ServerAdapter();
+		listView = (ListView) findViewById(R.id.list);
+		listView.setAdapter(adapter);
+		listView.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
+			@Override
+			public void onItemClick(android.widget.AdapterView<?> parent, View view,
+					int position, long id) {
+				select(adapter.getItem(position).index);
 			}
+		});
+
+		((MaterialButton) findViewById(R.id.add)).setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				addServer();
+			}
+		});
+	}
+
+	@Override
+	protected void onResume() {
+		super.onResume();
+		renderList();
+	}
+
+	private void renderList() {
+		prefs = new Preferences(this);
+		List<Entry> entries = new ArrayList<Entry>();
+		int count = prefs.getProfileCount();
+		for (int i = 0; i < count; i++) {
+			Entry entry = new Entry();
+			entry.index = i;
+			entry.name = prefs.getProfileName(i);
+			entry.addr = prefs.getSocksAddress(i);
+			entry.port = prefs.getSocksPort(i);
+			entries.add(entry);
 		}
+
+		adapter.setNotifyOnChange(false);
+		adapter.clear();
+		for (Entry entry : entries)
+		  adapter.add(entry);
+		adapter.notifyDataSetChanged();
+	}
+
+	private void select(int index) {
+		if (index == prefs.getSelected())
+		  return;
+		if (prefs.getEnable()) {
+			Toast.makeText(this, R.string.server_busy, Toast.LENGTH_SHORT).show();
+			return;
+		}
+		prefs.setSelected(index);
+		renderList();
+		Toast.makeText(this, R.string.server_selected_hint, Toast.LENGTH_SHORT).show();
+	}
+
+	private void addServer() {
+		if (prefs.getProfileCount() >= Preferences.MAX_PROFILES) {
+			Toast.makeText(this, R.string.server_limit, Toast.LENGTH_SHORT).show();
+			return;
+		}
+		if (prefs.getEnable()) {
+			Toast.makeText(this, R.string.server_busy, Toast.LENGTH_SHORT).show();
+			return;
+		}
+		/* A new entry starts as a copy of the current one, then opens in the
+		   editor so the name and address can be fixed right away. */
+		String name = getString(R.string.server_new_name, prefs.getProfileCount() + 1);
+		prefs.addProfile(name);
+		openEditor(prefs.getSelected());
+	}
+
+	private void confirmDelete(final Entry entry) {
+		if (prefs.getProfileCount() <= 1) {
+			Toast.makeText(this, R.string.server_last, Toast.LENGTH_SHORT).show();
+			return;
+		}
+		if (prefs.getEnable()) {
+			Toast.makeText(this, R.string.server_busy, Toast.LENGTH_SHORT).show();
+			return;
+		}
+		new AlertDialog.Builder(this)
+			.setMessage(getString(R.string.server_delete_confirm, entry.name))
+			.setPositiveButton(android.R.string.ok, new android.content.DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(android.content.DialogInterface dialog, int which) {
+					prefs.removeProfile(entry.index);
+					renderList();
+				}
+			})
+			.setNegativeButton(android.R.string.cancel, null)
+			.show();
+	}
+
+	private void openEditor(int index) {
+		Intent intent = new Intent(this, ServerEditActivity.class);
+		intent.putExtra(EXTRA_INDEX, index);
+		startActivity(intent);
 	}
 }

@@ -34,72 +34,10 @@
 				android:paddingTop="4dp"
 				android:paddingBottom="24dp">
 				<com.google.android.material.card.MaterialCardView
-					style="@style/Widget.SocksTun.Card"
-					android:layout_width="match_parent"
-					android:layout_height="wrap_content">
-					<LinearLayout
-						android:orientation="horizontal"
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:gravity="center_vertical"
-						android:paddingLeft="8dp"
-						android:paddingRight="8dp"
-						android:paddingTop="4dp"
-						android:paddingBottom="4dp">
-						<com.google.android.material.button.MaterialButton
-							android:id="@+id/profile_prev"
-							style="?attr/materialIconButtonOutlinedStyle"
-							android:layout_width="48dp"
-							android:layout_height="48dp"
-							android:minWidth="0dp"
-							android:minHeight="0dp"
-							android:contentDescription="@string/profile_prev_desc"
-							app:icon="@drawable/ic_chevron_left"/>
-						<LinearLayout
-							android:layout_width="0dp"
-							android:layout_height="wrap_content"
-							android:layout_weight="1"
-							android:orientation="vertical"
-							android:gravity="center_horizontal">
-							<TextView
-								android:layout_width="wrap_content"
-								android:layout_height="wrap_content"
-								android:text="@string/section_profile"
-								android:textAppearance="@style/TextAppearance.SocksTun.Section"/>
-							<TextView
-								android:id="@+id/profile_name"
-								android:layout_width="wrap_content"
-								android:layout_height="wrap_content"
-								android:ellipsize="end"
-								android:maxLines="1"
-								android:textAppearance="?attr/textAppearanceTitleMedium"/>
-						</LinearLayout>
-						<com.google.android.material.button.MaterialButton
-							android:id="@+id/profile_next"
-							style="?attr/materialIconButtonOutlinedStyle"
-							android:layout_width="48dp"
-							android:layout_height="48dp"
-							android:minWidth="0dp"
-							android:minHeight="0dp"
-							android:contentDescription="@string/profile_next_desc"
-							app:icon="@drawable/ic_chevron_right"/>
-						<com.google.android.material.button.MaterialButton
-							android:id="@+id/profile_menu"
-							style="?attr/materialIconButtonStyle"
-							android:layout_width="48dp"
-							android:layout_height="48dp"
-							android:minWidth="0dp"
-							android:minHeight="0dp"
-							android:contentDescription="@string/profile_menu"
-							app:icon="@drawable/ic_more_vert"/>
-					</LinearLayout>
-				</com.google.android.material.card.MaterialCardView>
-				<com.google.android.material.card.MaterialCardView
 					android:id="@+id/status_card"
 					style="@style/Widget.SocksTun.Card"
 					android:layout_width="match_parent"
 					android:layout_height="wrap_content"
-					android:layout_marginTop="16dp"
 					app:cardCornerRadius="24dp"
 					app:cardBackgroundColor="?attr/colorSurfaceVariant">
 					<LinearLayout
@@ -141,6 +79,34 @@
 							android:gravity="center"
 							android:text="@string/status_disconnected_hint"
 							android:textAppearance="@style/TextAppearance.SocksTun.Hint"/>
+						<LinearLayout
+							android:orientation="vertical"
+							android:layout_width="match_parent"
+							android:layout_height="wrap_content"
+							android:layout_marginTop="20dp"
+							android:gravity="center_horizontal">
+							<TextView
+								android:layout_width="wrap_content"
+								android:layout_height="wrap_content"
+								android:text="@string/proxy"
+								android:textAppearance="@style/TextAppearance.SocksTun.Section"/>
+							<TextView
+								android:id="@+id/proxy_name"
+								android:layout_width="wrap_content"
+								android:layout_height="wrap_content"
+								android:layout_marginTop="2dp"
+								android:ellipsize="end"
+								android:maxLines="1"
+								android:textAppearance="?attr/textAppearanceTitleMedium"/>
+							<TextView
+								android:id="@+id/proxy_detail"
+								android:layout_width="wrap_content"
+								android:layout_height="wrap_content"
+								android:ellipsize="middle"
+								android:fontFamily="monospace"
+								android:maxLines="1"
+								android:textAppearance="@style/TextAppearance.SocksTun.Hint"/>
+						</LinearLayout>
 						<com.google.android.material.button.MaterialButton
 							android:id="@+id/control"
 							android:layout_width="match_parent"

@@ -86,6 +86,7 @@ public class TProxyService extends VpnService {
 	private Handler statsHandler = null;
 	private Runnable statsTask = null;
 	private Preferences statsPrefs = null;
+	private Preferences tunnelPrefs = null;
 	private long lastTx, lastRx, lastTime;
 	private long sessionTx, sessionRx;
 	private long baseTx, baseRx, totalTx, totalRx;
@@ -181,6 +182,7 @@ public class TProxyService extends VpnService {
 		  return;
 
 		Preferences prefs = new Preferences(this);
+		tunnelPrefs = prefs;
 
 		/* Logging */
 		File tproxy_log = new File(getCacheDir(), "tproxy.log");
@@ -359,7 +361,8 @@ public class TProxyService extends VpnService {
 
 	private Notification buildNotification() {
 		String line = statsLine(R.string.stats_realtime, formatRate(txRate), formatRate(rxRate));
-		String big = line + "\n" +
+		String big = proxyLine() +
+			line + "\n" +
 			statsLine(R.string.stats_session, formatBytes(sessionTx), formatBytes(sessionRx)) + "\n" +
 			statsLine(R.string.stats_total, formatBytes(totalTx), formatBytes(totalRx));
 
@@ -386,6 +389,16 @@ public class TProxyService extends VpnService {
 
 	private String statsLine(int labelId, String up, String down) {
 		return getString(R.string.stats_line, getString(labelId), up, down);
+	}
+
+	/* Remind which proxy the running tunnel belongs to, since switching
+	   servers in the list only takes effect on the next connect. */
+	private String proxyLine() {
+		if (tunnelPrefs == null)
+		  return "";
+		return getString(R.string.stats_proxy_line, getString(R.string.proxy),
+			tunnelPrefs.getProfileName(),
+			tunnelPrefs.getSocksAddress() + ":" + tunnelPrefs.getSocksPort()) + "\n";
 	}
 
 	/* Sample TProxyGetStats() once a second: the notification shows the live

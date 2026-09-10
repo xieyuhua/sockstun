@@ -12,9 +12,23 @@ A simple and lightweight VPN over socks5 proxy for Android. It is based on a hig
 * IPv4/IPv6 dual stack.
 * Global/per-App modes.
 * Traffic statistics (live rate, session and total usage, per-app usage).
-* Connection view (TCP/UDP sockets of the proxied apps, with records).
 * Routing rules by domain / IP / CIDR: proxy or direct.
+  * One combined rules screen: rules, proxy scope (global / per-app, IPv4/IPv6, UDP over TCP) and DNS.
 * Multiple profiles (up to 13), Quick Settings tile, start on boot.
+
+## Navigation
+
+A single bottom bar with five tabs — **Home · Server · Rules · Apps · Log**. The
+theme picker sits in the Home toolbar (top-right icon).
+
+* **Home** — connect/disconnect, the proxy currently in use, live traffic card.
+* **Server** — list of proxies (add / edit / delete); picking one makes it the
+  active proxy on Home. Each entry keeps its own DNS, scope, apps and rules.
+* **Rules** — domain / IP / CIDR rules (proxy or direct), then proxy scope
+  (global or per-app, IPv4/IPv6, UDP over TCP), DNS, and at the bottom the
+  "unmatched traffic uses the proxy" switch.
+* **Apps** — pick which apps use the tunnel in per-app mode.
+* **Log** — toggle and read the tunnel log.
 
 ## Documents
 
@@ -30,10 +44,11 @@ git clone --recursive https://github.com/xieyuhua/sockstun
 cd sockstun
 gradle assembleDebug
 ```
-docker 
+
+Or build in docker:
 
 ```
-docker pull  mingc/android-build-box
+docker pull mingc/android-build-box
 
 docker run --rm \
   -v "$PWD":/project \

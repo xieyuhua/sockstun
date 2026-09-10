@@ -220,6 +220,32 @@ public class Preferences
 		return prefs.getString(key(NAME), "Default");
 	}
 
+	/* --- Profile fields by index: the server list needs to render every
+	   entry, not only the selected one. --- */
+	public String getProfileName(int index) {
+		return prefs.getString(key(index, NAME), "Default");
+	}
+
+	public String getSocksAddress(int index) {
+		return prefs.getString(key(index, SOCKS_ADDR), "127.0.0.1");
+	}
+
+	public int getSocksPort(int index) {
+		return prefs.getInt(key(index, SOCKS_PORT), 1080);
+	}
+
+	public String getSocksUdpAddress(int index) {
+		return prefs.getString(key(index, SOCKS_UDP_ADDR), "");
+	}
+
+	public String getSocksUsername(int index) {
+		return prefs.getString(key(index, SOCKS_USER), "");
+	}
+
+	public String getSocksPassword(int index) {
+		return prefs.getString(key(index, SOCKS_PASS), "");
+	}
+
 	public void setProfileName(String name) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(NAME), name);
@@ -257,6 +283,52 @@ public class Preferences
 		  editor.putInt(SELECTED, count - 2);
 		editor.commit();
 		return true;
+	}
+
+	/* --- Writers for an arbitrary profile, used by the server editor. --- */
+	public void setProfileName(int index, String name) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(index, NAME), name);
+		editor.commit();
+	}
+
+	public void setSocksAddress(int index, String addr) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(index, SOCKS_ADDR), addr);
+		editor.commit();
+	}
+
+	public void setSocksPort(int index, int port) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putInt(key(index, SOCKS_PORT), port);
+		editor.commit();
+	}
+
+	public void setSocksUdpAddress(int index, String addr) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(index, SOCKS_UDP_ADDR), addr);
+		editor.commit();
+	}
+
+	public void setSocksUsername(int index, String user) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(index, SOCKS_USER), user);
+		editor.commit();
+	}
+
+	public void setSocksPassword(int index, String pass) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(index, SOCKS_PASS), pass);
+		editor.commit();
+	}
+
+	/* Delete an arbitrary profile. deleteProfile() only drops the selected
+	   one, so select it first and reuse that logic. */
+	public boolean removeProfile(int index) {
+		if (getProfileCount() <= 1)
+		  return false;
+		setSelected(index);
+		return deleteProfile();
 	}
 
 	public String getSocksAddress() {
