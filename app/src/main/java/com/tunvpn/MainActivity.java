@@ -72,6 +72,8 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	private Runnable statsTask;
 	private final Handler ui = new Handler(Looper.getMainLooper());
 	private long lastIpQuery = 0;
+	/* Last failure already surfaced as a Toast, so the 1.5s tick stays quiet. */
+	private String lastShownError = "";
 
 	/* Refresh the control state when the tunnel is toggled elsewhere
 	   (e.g. from the Quick Settings tile) while this screen is visible. */
@@ -201,6 +203,9 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		}
 		if (view == button_control) {
 			boolean isEnable = prefs.getEnable();
+			/* A fresh attempt clears the previous failure message. */
+			if (!isEnable)
+			  prefs.clearLastError();
 			prefs.setEnable(!isEnable);
 			updateUI();
 			Intent intent = new Intent(this, TProxyService.class);
@@ -233,6 +238,12 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		textview_apps.setText(appSummary(Preferences.parseAppStats(prefs.getAppTotal())));
 		updateNode();
 		updateExternalIp();
+
+		/* Enable and LastError are written by the :native process, which cannot
+		   notify this one through OnSharedPreferenceChangeListener - so poll.
+		   Without this the card would keep showing "connected" after a failed
+		   start, and the failure would only become visible on the next resume. */
+		updateControlState();
 	}
 
 	/* Ask an echo service through the core's local HTTP port, so the answer
@@ -334,40 +345,72 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	}
 
 	private void updateControlState() {
-		boolean editable = !prefs.getEnable();
-
-		updateStatus(!editable);
+		updateStatus();
 	}
 
-	/* Paint the hero card and the main button for the current tunnel state. */
-	private void updateStatus(boolean connected) {
+	/* Paint the hero card and the main button.
+	   Three states, not two: a start attempt can fail *after* Enable was
+	   already flipped to true (MainActivity does that before asking the service
+	   to start), so "not connected" alone cannot describe what happened. When
+	   the service reports a failure it writes LastError + Enable=false, and we
+	   surface the reason here instead of silently going back to "disconnected". */
+	private void updateStatus() {
+		final boolean connected = prefs.getEnable();
+		final String error = prefs.getLastError();
+		final boolean failed = !connected && !error.isEmpty();
+
 		/* Refresh the public IP right after the tunnel comes up. */
 		if (connected)
 		  lastIpQuery = 0;
-		int bg = getThemeColor(connected ?
-			com.google.android.material.R.attr.colorPrimaryContainer :
-			com.google.android.material.R.attr.colorSurfaceVariant);
-		int fg = getThemeColor(connected ?
-			com.google.android.material.R.attr.colorOnPrimaryContainer :
-			com.google.android.material.R.attr.colorOnSurfaceVariant);
+
+		int bg;
+		int fg;
+		if (connected) {
+			bg = getThemeColor(com.google.android.material.R.attr.colorPrimaryContainer);
+			fg = getThemeColor(com.google.android.material.R.attr.colorOnPrimaryContainer);
+		} else if (failed) {
+			bg = getThemeColor(com.google.android.material.R.attr.colorErrorContainer);
+			fg = getThemeColor(com.google.android.material.R.attr.colorOnErrorContainer);
+		} else {
+			bg = getThemeColor(com.google.android.material.R.attr.colorSurfaceVariant);
+			fg = getThemeColor(com.google.android.material.R.attr.colorOnSurfaceVariant);
+		}
 
 		card_status.setCardBackgroundColor(ColorStateList.valueOf(bg));
 		textview_status_title.setTextColor(fg);
 		textview_status_subtitle.setTextColor(fg);
 		textview_status_node.setTextColor(fg);
-		textview_status_title.setText(connected ?
-			R.string.status_connected : R.string.status_disconnected);
-		textview_status_subtitle.setText(connected ?
-			R.string.status_connected_hint : R.string.status_disconnected_hint);
 
-		card_status_dot.setCardBackgroundColor(ColorStateList.valueOf(getThemeColor(connected ?
-			com.google.android.material.R.attr.colorPrimary :
-			com.google.android.material.R.attr.colorOutline)));
+		if (connected) {
+			textview_status_title.setText(R.string.status_connected);
+			textview_status_subtitle.setText(R.string.status_connected_hint);
+		} else if (failed) {
+			textview_status_title.setText(R.string.status_failed);
+			textview_status_subtitle.setText(error);
+		} else {
+			textview_status_title.setText(R.string.status_disconnected);
+			textview_status_subtitle.setText(R.string.status_disconnected_hint);
+		}
+
+		/* Tell the user once per distinct failure, not on every 1.5s tick. */
+		if (failed && !error.equals(lastShownError)) {
+			lastShownError = error;
+			Toast.makeText(this, getString(R.string.status_failed) + "：" + error,
+				Toast.LENGTH_LONG).show();
+		} else if (!failed) {
+			lastShownError = "";
+		}
+
+		card_status_dot.setCardBackgroundColor(ColorStateList.valueOf(getThemeColor(
+			connected ? com.google.android.material.R.attr.colorPrimary
+				: failed ? com.google.android.material.R.attr.colorError
+				: com.google.android.material.R.attr.colorOutline)));
 		imageview_status_icon.setImageResource(connected ?
 			R.drawable.ic_stop : R.drawable.ic_power);
-		imageview_status_icon.setColorFilter(getThemeColor(connected ?
-			com.google.android.material.R.attr.colorOnPrimary :
-			com.google.android.material.R.attr.colorSurface), PorterDuff.Mode.SRC_IN);
+		imageview_status_icon.setColorFilter(getThemeColor(connected
+			? com.google.android.material.R.attr.colorOnPrimary
+			: failed ? com.google.android.material.R.attr.colorOnError
+			: com.google.android.material.R.attr.colorSurface), PorterDuff.Mode.SRC_IN);
 
 		MaterialButton button = (MaterialButton) button_control;
 		int buttonFg = getThemeColor(connected ?

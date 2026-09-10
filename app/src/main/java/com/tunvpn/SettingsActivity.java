@@ -38,7 +38,7 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		});
 
 		int[] ids = {
-			R.id.settings_apps, R.id.settings_log,
+			R.id.settings_connection, R.id.settings_apps, R.id.settings_log,
 			R.id.settings_theme, R.id.settings_version,
 		};
 		for (int id : ids)
@@ -48,7 +48,9 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 	@Override
 	public void onClick(View view) {
 		int id = view.getId();
-		if (id == R.id.settings_apps)
+		if (id == R.id.settings_connection)
+		  showConnectionDialog();
+		else if (id == R.id.settings_apps)
 		  startActivity(new Intent(this, AppListActivity.class));
 		else if (id == R.id.settings_log)
 		  startActivity(new Intent(this, LogActivity.class));
@@ -56,6 +58,67 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  showThemeDialog();
 		else if (id == R.id.settings_version)
 		  showVersionDialog();
+	}
+
+	/* Live snapshot of the running tunnel: the real state (including a failed
+	   start), the node/server it is on, and the counters as of now. The
+	   Prefs are re-read first because Enable / LastError / stats are written
+	   by the :native process. */
+	private void showConnectionDialog() {
+		prefs = new Preferences(this);
+
+		final boolean connected = prefs.getEnable();
+		final String error = prefs.getLastError();
+
+		String state;
+		if (connected)
+		  state = getString(R.string.status_connected);
+		else if (!error.isEmpty())
+		  state = getString(R.string.status_failed);
+		else
+		  state = getString(R.string.status_disconnected);
+
+		String node = prefs.getCurrentNode();
+		if (node.isEmpty())
+		  node = getString(prefs.hasSubscription() ? R.string.node_default : R.string.node_none);
+
+		SocksServer server = prefs.getActiveSocksServer();
+		String serverText = server != null
+			? server.addr + ":" + server.port
+			: getString(R.string.connection_server_sub);
+
+		StringBuilder sb = new StringBuilder();
+		sb.append(getString(R.string.connection_state)).append(": ").append(state);
+		if (!connected && !error.isEmpty())
+		  sb.append("（").append(error).append("）");
+		sb.append('\n')
+			.append(getString(R.string.connection_node)).append(": ").append(node).append('\n')
+			.append(getString(R.string.connection_server)).append(": ").append(serverText);
+
+		if (connected) {
+			sb.append('\n')
+				.append(getString(R.string.stats_realtime)).append(": ")
+				.append(TProxyService.formatRate(prefs.getRateTx()))
+				.append(" / ")
+				.append(TProxyService.formatRate(prefs.getRateRx()));
+		}
+
+		sb.append('\n')
+			.append(getString(R.string.connection_session)).append(": ")
+			.append(TProxyService.formatBytes(prefs.getSessionTx()))
+			.append(" / ")
+			.append(TProxyService.formatBytes(prefs.getSessionRx()))
+			.append('\n')
+			.append(getString(R.string.connection_total)).append(": ")
+			.append(TProxyService.formatBytes(prefs.getTotalTx()))
+			.append(" / ")
+			.append(TProxyService.formatBytes(prefs.getTotalRx()));
+
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.settings_connection)
+			.setMessage(sb.toString())
+			.setPositiveButton(android.R.string.ok, null)
+			.show();
 	}
 
 	/* Theme picker: choose one of the bundled palettes, then recreate so the

@@ -162,8 +162,9 @@
 		<item name="android:letterSpacing">0.08</item>
 	</style>
 
-	<style name="TextAppearance.TunVPN.Hint" parent="TextAppearance.Material3.BodySmall">
+	<style name="TextAppearance.TunVPN.Hint" parent="TextAppearance.Material3.BodyMedium">
 		<item name="android:textColor">?attr/colorOnSurfaceVariant</item>
+		<item name="android:lineSpacingMultiplier">1.15</item>
 	</style>
 
 	<style name="TextAppearance.TunVPN.Mono" parent="TextAppearance.Material3.BodyMedium">

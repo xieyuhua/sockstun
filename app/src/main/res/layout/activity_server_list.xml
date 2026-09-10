@@ -24,7 +24,7 @@
 			android:padding="16dp"
 			android:text="@string/server_list_hint"
 			android:textAppearance="?attr/textAppearanceBodySmall"
-			android:textColor="?attr/colorOutline"/>
+			android:textColor="?attr/colorOnSurfaceVariant"/>
 	</com.google.android.material.card.MaterialCardView>
 	<TextView
 		android:id="@+id/server_empty"
@@ -34,7 +34,7 @@
 		android:padding="24dp"
 		android:text="@string/server_list_empty"
 		android:textAppearance="?attr/textAppearanceBodyMedium"
-		android:textColor="?attr/colorOutline"/>
+		android:textColor="?attr/colorOnSurfaceVariant"/>
 	<ListView
 		android:id="@+id/server_list"
 		android:layout_width="match_parent"

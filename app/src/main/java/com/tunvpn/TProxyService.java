@@ -187,9 +187,7 @@ public class TProxyService extends VpnService {
 			Clash.INSTANCE.load(getApplicationInfo().nativeLibraryDir);
 			appendLog("mihomo core loaded OK (bridge ABI " + Clash.INSTANCE.bridgeABI() + ")");
 		} catch (Throwable e) {
-			appendLog("FATAL: failed to load mihomo core: " + e);
-			Toast.makeText(this, "内核加载失败，请查看日志", Toast.LENGTH_LONG).show();
-			stopSelf();
+			failStartup("内核加载失败：" + e);
 			return;
 		}
 
@@ -199,9 +197,7 @@ public class TProxyService extends VpnService {
 			configFile = MihomoConfig.build(this, prefs);
 			appendLog("config: " + configFile.getAbsolutePath());
 		} catch (Throwable e) {
-			appendLog("FATAL: build config failed: " + e);
-			Toast.makeText(this, "生成配置失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
-			stopSelf();
+			failStartup("生成配置失败：" + e.getMessage());
 			return;
 		}
 
@@ -250,7 +246,7 @@ public class TProxyService extends VpnService {
 		builder.setSession("tunVPN/mihomo");
 		tunFd = builder.establish();
 		if (tunFd == null) {
-			stopSelf();
+			failStartup("建立 VPN 接口失败（未授权或被其他 VPN 占用）");
 			return;
 		}
 
@@ -274,9 +270,7 @@ public class TProxyService extends VpnService {
 				}
 			});
 		} catch (Throwable e) {
-			appendLog("FATAL: quickSetup failed: " + e);
-			Toast.makeText(this, "启动内核失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
-			stopSelf();
+			failStartup("启动内核失败：" + e.getMessage());
 			return;
 		}
 
@@ -312,21 +306,39 @@ public class TProxyService extends VpnService {
 			}, "tunvpn", stack, address, dns, prefs.getTunnelMtu());
 			appendLog("Clash.startTUN OK (fd=" + tunFd.getFd() + ")");
 		} catch (Throwable e) {
-			appendLog("FATAL: startTUN failed: " + e);
-			Toast.makeText(this, "启动 TUN 失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
-			stopSelf();
+			failStartup("启动 TUN 失败：" + e.getMessage());
 			return;
 		}
 
 		/* Best-effort: apply the node the user picked in the subscription. */
 		applySelectedNode(prefs);
 
+		prefs.clearLastError();
 		prefs.setEnable(true);
 		QSTileService.requestUpdate(this);
 
 		initNotificationChannel(NOTIFY_CHANNEL);
 		createNotification();
 		startStats(prefs);
+	}
+
+	/* Every startup failure funnels through here. Two things matter beyond
+	   stopping the service:
+	     - Enable must go back to false. MainActivity flips it to true before
+	       asking us to start, so without this the UI would happily keep showing
+	       "connected" for a tunnel that never came up.
+	     - The reason is persisted so the UI can say *why* it failed instead of
+	       silently returning to "disconnected". */
+	private void failStartup(String reason) {
+		appendLog("FATAL: " + reason);
+		Preferences p = new Preferences(this);
+		p.setLastError(reason);
+		p.setEnable(false);
+		QSTileService.requestUpdate(this);
+
+		Toast.makeText(this, reason, Toast.LENGTH_LONG).show();
+		stopForeground(true);
+		stopSelf();
 	}
 
 	/* {"<group>":"<node>"} for quickSetup's selected-map; empty when no node

@@ -104,6 +104,17 @@ public class SubscribeActivity extends BaseActivity {
 		setupSpinner(spinner_sort, R.array.sub_sort_options, true);
 		setupSpinner(spinner_filter, R.array.sub_filter_options, false);
 
+		/* Also reachable from the toolbar menu, but that is easy to miss -
+		   the button is what people look for when it says "no subscription". */
+		((MaterialButton) findViewById(R.id.sub_config)).setOnClickListener(
+			new View.OnClickListener() {
+				@Override
+				public void onClick(View v) {
+					startActivity(new Intent(SubscribeActivity.this,
+						SubscribeConfigActivity.class));
+				}
+			});
+
 		button_fetch.setOnClickListener(new View.OnClickListener() {
 			@Override
 			public void onClick(View v) {

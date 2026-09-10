@@ -39,6 +39,7 @@
 
 	<string name="status_connected">Connected</string>
 	<string name="status_disconnected">Disconnected</string>
+	<string name="status_failed">连接失败</string>
 	<string name="status_connected_hint">Tunnel is running, traffic goes through the proxy</string>
 	<string name="status_disconnected_hint">Tap Enable to start the tunnel</string>
 	<string name="section_profile">Profile</string>
@@ -142,10 +143,17 @@
 	<string name="subs_set_default">设为默认</string>
 	<string name="subs_default_badge">默认</string>
 	<string name="subs_current">当前订阅：%s</string>
-	<string name="subs_none">未配置订阅，请先在右上角添加</string>
+	<string name="subs_none">未配置订阅，点右侧「订阅配置」添加</string>
 	<string name="subs_delete_confirm">删除订阅“%s”？</string>
 	<string name="subs_url_required">请填写订阅地址</string>
 	<string name="server_list_hint_sub">可保存多个订阅地址，「设为默认」的那个就是订阅页拉取和使用的来源。删除默认订阅会同时清掉已拉取的节点。</string>
+	<string name="settings_connection">当前连接</string>
+	<string name="connection_state">状态</string>
+	<string name="connection_node">节点</string>
+	<string name="connection_server">服务器</string>
+	<string name="connection_server_sub">由订阅决定</string>
+	<string name="connection_session">本次流量</string>
+	<string name="connection_total">累计流量</string>
 	<string name="settings_version">版本</string>
 	<string name="version_info">版本信息</string>
 	<string name="version_detail">版本：%1$s（%2$d）\n内核：mihomo v1.19.30\nABI：arm64-v8a、armeabi-v7a</string>
@@ -154,7 +162,7 @@
 	<string name="server_list_hint">在此管理 SOCKS5 服务器：可新增、修改、删除，并启用其中一台。启用后即以它为上游并忽略订阅；在订阅里选用节点会自动取消启用。</string>
 	<string name="server_list_empty">暂无服务器，点下方「新增服务器」</string>
 	<string name="server_add">新增服务器</string>
-	<string name="server_edit">编辑服务器</string>
+	<string name="server_edit">编写服务器</string>
 	<string name="server_name">名称（可选）</string>
 	<string name="server_enable">启用</string>
 	<string name="server_enabled">启用中</string>

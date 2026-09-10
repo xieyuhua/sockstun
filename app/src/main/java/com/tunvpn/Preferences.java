@@ -43,6 +43,7 @@ public class Preferences
 	public static final String RULES = "Rules";
 	public static final String RULES_DEFAULT_PROXY = "RulesDefaultProxy";
 	public static final String ENABLE = "Enable";
+	public static final String LAST_ERROR = "LastError";
 	public static final String NAME = "Name";
 	public static final String PROFILE_COUNT = "ProfileCount";
 	public static final String SELECTED = "Selected";
@@ -500,6 +501,23 @@ public class Preferences
 
 	public boolean getEnable() {
 		return prefs.getBoolean(ENABLE, false);
+	}
+
+	/* Why the last start attempt failed. TProxyService writes it together with
+	   Enable=false, so the UI can tell "never started" from "started and died"
+	   instead of showing a stuck "connected". */
+	public String getLastError() {
+		return prefs.getString(LAST_ERROR, "");
+	}
+
+	public void setLastError(String error) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(LAST_ERROR, error == null ? "" : error);
+		editor.commit();
+	}
+
+	public void clearLastError() {
+		setLastError("");
 	}
 
 	public void setEnable(boolean enable) {

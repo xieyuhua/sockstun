@@ -23,14 +23,34 @@
 			android:layout_width="match_parent"
 			android:layout_height="wrap_content"
 			android:padding="16dp">
-			<TextView
-				android:id="@+id/sub_current"
+			<LinearLayout
+				android:orientation="horizontal"
 				android:layout_width="match_parent"
 				android:layout_height="wrap_content"
-				android:ellipsize="end"
-				android:maxLines="2"
-				android:text="@string/subs_none"
-				android:textAppearance="?attr/textAppearanceBodyMedium"/>
+				android:gravity="center_vertical">
+				<TextView
+					android:id="@+id/sub_current"
+					android:layout_width="0dp"
+					android:layout_height="wrap_content"
+					android:layout_weight="1"
+					android:ellipsize="end"
+					android:maxLines="2"
+					android:text="@string/subs_none"
+					android:textAppearance="?attr/textAppearanceBodyMedium"/>
+				<com.google.android.material.button.MaterialButton
+					android:id="@+id/sub_config"
+					style="?attr/materialButtonOutlinedStyle"
+					android:layout_width="wrap_content"
+					android:layout_height="wrap_content"
+					android:layout_marginStart="12dp"
+					android:minHeight="40dp"
+					android:text="@string/subs_config"
+					android:textSize="13sp"
+					app:cornerRadius="20dp"
+					app:icon="@drawable/ic_settings"
+					app:iconGravity="textStart"
+					app:iconPadding="6dp"/>
+			</LinearLayout>
 			<LinearLayout
 				android:orientation="horizontal"
 				android:layout_width="match_parent"
@@ -91,7 +111,7 @@
 				android:layout_height="wrap_content"
 				android:layout_marginTop="10dp"
 				android:textAppearance="?attr/textAppearanceBodySmall"
-				android:textColor="?attr/colorOutline"/>
+				android:textColor="?attr/colorOnSurfaceVariant"/>
 
 		</LinearLayout>
 	</com.google.android.material.card.MaterialCardView>
@@ -103,7 +123,7 @@
 		android:padding="24dp"
 		android:text="@string/sub_empty"
 		android:textAppearance="?attr/textAppearanceBodyMedium"
-		android:textColor="?attr/colorOutline"/>
+		android:textColor="?attr/colorOnSurfaceVariant"/>
 	<ListView
 		android:id="@+id/sub_list"
 		android:layout_width="match_parent"

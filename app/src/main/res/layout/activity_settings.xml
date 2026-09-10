@@ -36,10 +36,23 @@
 					android:layout_height="wrap_content"
 					android:padding="12dp">
 					<com.google.android.material.button.MaterialButton
+						android:id="@+id/settings_connection"
+						style="?attr/materialButtonOutlinedStyle"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:minHeight="52dp"
+						android:text="@string/settings_connection"
+						android:textSize="15sp"
+						app:cornerRadius="26dp"
+						app:icon="@drawable/ic_server"
+						app:iconGravity="textStart"
+						app:iconPadding="8dp"/>
+					<com.google.android.material.button.MaterialButton
 						android:id="@+id/settings_apps"
 						style="?attr/materialButtonOutlinedStyle"
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
+						android:layout_marginTop="10dp"
 						android:minHeight="52dp"
 						android:text="@string/apps"
 						android:textSize="15sp"

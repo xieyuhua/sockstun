@@ -43,41 +43,41 @@
 			android:ellipsize="end"
 			android:maxLines="1"
 			android:textAppearance="?attr/textAppearanceBodySmall"
-			android:textColor="?attr/colorOutline"/>
+			android:textColor="?attr/colorOnSurfaceVariant"/>
 		<LinearLayout
 			android:orientation="horizontal"
 			android:layout_width="match_parent"
 			android:layout_height="wrap_content"
 			android:layout_marginTop="8dp">
-			<Button
+			<com.google.android.material.button.MaterialButton
 				android:id="@+id/item_enable"
 				style="?attr/materialButtonOutlinedStyle"
 				android:layout_width="0dp"
 				android:layout_weight="1"
 				android:layout_height="wrap_content"
-				android:minHeight="44dp"
+				android:minHeight="42dp"
 				android:text="@string/server_enable"
-				android:textSize="14sp"/>
-			<Button
+				android:textSize="13sp"/>
+			<com.google.android.material.button.MaterialButton
 				android:id="@+id/item_edit"
 				style="?attr/materialButtonOutlinedStyle"
 				android:layout_width="0dp"
 				android:layout_weight="1"
 				android:layout_height="wrap_content"
 				android:layout_marginStart="8dp"
-				android:minHeight="44dp"
+				android:minHeight="42dp"
 				android:text="@string/server_edit"
-				android:textSize="14sp"/>
-			<Button
+				android:textSize="13sp"/>
+			<com.google.android.material.button.MaterialButton
 				android:id="@+id/item_delete"
 				style="?attr/materialButtonOutlinedStyle"
 				android:layout_width="0dp"
 				android:layout_weight="1"
 				android:layout_height="wrap_content"
 				android:layout_marginStart="8dp"
-				android:minHeight="44dp"
+				android:minHeight="42dp"
 				android:text="@string/server_delete"
-				android:textSize="14sp"/>
+				android:textSize="13sp"/>
 		</LinearLayout>
 	</LinearLayout>
 </com.google.android.material.card.MaterialCardView>
