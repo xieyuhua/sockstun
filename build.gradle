@@ -1,3 +1,10 @@
+/* Root build script: declares the Android Gradle Plugin on the buildscript
+   classpath for the :app module, and the repositories every module resolves
+   from. Do NOT overwrite this file with app/build.gradle - the root script
+   has no AGP on its classpath, so an "apply plugin: 'com.android.application'"
+   at line 1 makes Gradle fail with
+   "Plugin with id 'com.android.application' not found". */
+
 /**
  * The buildscript block is where you configure the repositories and
  * dependencies for Gradle itself--meaning, you should not include dependencies
