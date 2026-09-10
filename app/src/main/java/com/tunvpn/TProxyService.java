@@ -40,13 +40,9 @@ import android.system.OsConstants;
 import java.lang.reflect.Method;
 
 import java.io.FileDescriptor;
-import java.net.Inet6Address;
-import java.net.InetAddress;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;

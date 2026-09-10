@@ -13,9 +13,7 @@ import java.util.Set;
 import java.util.List;
 import java.util.Arrays;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.Comparator;
-import java.util.Collections;
 import java.util.ArrayList;
 
 import android.Manifest;
@@ -37,7 +35,6 @@ import android.content.pm.PackageManager;
 import android.content.pm.PackageInfo;
 import android.content.pm.ApplicationInfo;
 
-import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.appbar.MaterialToolbar;
 
@@ -86,7 +83,10 @@ public class AppListActivity extends BaseActivity {
 
 		@Override
 		public void sort(Comparator<? super Package> cmp) {
-			Collections.sort(allPackages, (Comparator) cmp);
+			/* List.sort takes Comparator<? super E> directly - the raw
+			   (Comparator) cast that used to be here was an unchecked
+			   operation the compiler warned about. */
+			allPackages.sort(cmp);
 			applyFilter(lastFilter);
 		}
 
