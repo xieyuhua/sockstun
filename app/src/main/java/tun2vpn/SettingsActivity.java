@@ -6,7 +6,7 @@
  ============================================================================
  */
 
-package hev.sockstun;
+package tun2vpn;
 
 import android.content.DialogInterface;
 import android.content.Intent;

@@ -5,7 +5,7 @@
  ============================================================================
  */
 
-package hev.sockstun;
+package tun2vpn;
 
 import org.json.JSONArray;
 import org.json.JSONException;

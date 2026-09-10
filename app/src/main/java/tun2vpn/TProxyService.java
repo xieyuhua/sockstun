@@ -7,7 +7,7 @@
  ============================================================================
  */
 
-package hev.sockstun;
+package tun2vpn;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -58,10 +58,10 @@ import io.github.oviron.libmihomo.TunInterface;
 import io.github.oviron.libmihomo.InvokeInterface;
 
 public class TProxyService extends VpnService {
-	public static final String ACTION_CONNECT = "hev.sockstun.CONNECT";
-	public static final String ACTION_DISCONNECT = "hev.sockstun.DISCONNECT";
+	public static final String ACTION_CONNECT = "tun2vpn.CONNECT";
+	public static final String ACTION_DISCONNECT = "tun2vpn.DISCONNECT";
 	/* Switch the selected node while the tunnel keeps running. */
-	public static final String ACTION_SELECT = "hev.sockstun.SELECT";
+	public static final String ACTION_SELECT = "tun2vpn.SELECT";
 
 	/* Traffic statistics */
 	private static final int NOTIFY_ID = 1;
@@ -176,7 +176,7 @@ public class TProxyService extends VpnService {
 		File tproxy_log = new File(getCacheDir(), "tproxy.log");
 		if (tproxy_log.exists())
 		  tproxy_log.delete();
-		appendLog("=== SocksTun start (pid " + android.os.Process.myPid() +
+		appendLog("=== tun2VPN start (pid " + android.os.Process.myPid() +
 			" logging=" + prefs.getLogEnabled() + ") ===");
 		if (prefs.getLogEnabled()) {
 			redirectStdioToLog(tproxy_log);
@@ -247,7 +247,7 @@ public class TProxyService extends VpnService {
 			} catch (NameNotFoundException e) {
 			}
 		}
-		builder.setSession("SocksTun/mihomo");
+		builder.setSession("tun2VPN/mihomo");
 		tunFd = builder.establish();
 		if (tunFd == null) {
 			stopSelf();

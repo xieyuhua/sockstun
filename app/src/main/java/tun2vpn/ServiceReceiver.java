@@ -7,7 +7,7 @@
  ============================================================================
  */
 
-package hev.sockstun;
+package tun2vpn;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;

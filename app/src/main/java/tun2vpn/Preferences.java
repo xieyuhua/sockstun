@@ -7,7 +7,7 @@
  ============================================================================
  */
 
-package hev.sockstun;
+package tun2vpn;
 
 import java.util.Set;
 import java.util.HashSet;

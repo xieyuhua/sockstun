@@ -6,7 +6,7 @@
  ============================================================================
  */
 
-package hev.sockstun;
+package tun2vpn;
 
 import java.net.Inet6Address;
 import java.net.InetAddress;

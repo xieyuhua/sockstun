@@ -29,11 +29,11 @@ if (isPackageBuild) {
 }
 
 android {
-	namespace "hev.sockstun"
+	namespace "tun2vpn"
 	compileSdkVersion 34
 
 	defaultConfig {
-		applicationId "hev.sockstun"
+		applicationId "tun2vpn"
 		minSdkVersion 24
 		targetSdkVersion 34
 		versionCode pkgVersionCode

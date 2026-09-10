@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<string name="app_name">SocksTun</string>
+	<string name="app_name">tun2VPN</string>
 	<string name="socks_addr">Адрес Socks</string>
 	<string name="socks_udp_addr">UDP-aдрес Socks</string>
 	<string name="socks_port">Порт Socks</string>

@@ -7,7 +7,7 @@
  ============================================================================
  */
 
-package hev.sockstun;
+package tun2vpn;
 
 import android.app.PendingIntent;
 import android.content.ComponentName;

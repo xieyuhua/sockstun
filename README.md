@@ -1,4 +1,4 @@
-# SocksTun
+# tun2VPN
 
 A simple and lightweight VPN proxy client for Android. It embeds [mihomo](https://github.com/MetaCubeX/mihomo) (the Clash.Meta core) so a single `clash.yml` subscription unlocks the **full multi-protocol stack** — vmess / vless / trojan / shadowsocks / shadowsocksr / hysteria2 / tuic / socks5 / wireguard and more. The TUN is owned by mihomo; the app only supplies the VPN file descriptor and a `protect()` callback, so routing, DNS hijacking and rule-providers all run inside the core.
 
