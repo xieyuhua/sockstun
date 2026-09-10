@@ -162,7 +162,7 @@
 	<string name="server_list_hint">在此管理 SOCKS5 服务器：可新增、修改、删除，并启用其中一台。启用后即以它为上游并忽略订阅；在订阅里选用节点会自动取消启用。</string>
 	<string name="server_list_empty">暂无服务器，点下方「新增服务器」</string>
 	<string name="server_add">新增服务器</string>
-	<string name="server_edit">编写服务器</string>
+	<string name="server_edit">编辑</string>
 	<string name="server_name">名称（可选）</string>
 	<string name="server_enable">启用</string>
 	<string name="server_enabled">启用中</string>
