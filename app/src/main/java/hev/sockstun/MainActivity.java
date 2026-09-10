@@ -53,6 +53,9 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	private static final int MAX_APPS_SHOWN = 3;
 	private Handler statsHandler;
 	private Runnable statsTask;
+	/* Last state painted on the hero card, to avoid redundant redraws. */
+	private boolean statusPainted = false;
+	private boolean statusConnected = false;
 
 	/* Refresh the control state when the tunnel is toggled elsewhere
 	   (e.g. from the Quick Settings tile) while this screen is visible. */
@@ -191,6 +194,12 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 			TProxyService.formatBytes(prefs.getTotalTx()),
 			TProxyService.formatBytes(prefs.getTotalRx())));
 		textview_apps.setText(appSummary(Preferences.parseAppStats(prefs.getAppTotal())));
+
+		/* Enable is written by the :native process, which cannot notify this
+		   one through OnSharedPreferenceChangeListener. Polling it here keeps
+		   the card honest, e.g. after switching servers while connected: the
+		   tunnel is down for ~1s, then comes back with Enable=true. */
+		updateControlState();
 	}
 
 	private String statsLine(int labelId, String up, String down) {
@@ -237,8 +246,15 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		updateStatus(prefs.getEnable());
 	}
 
-	/* Paint the hero card and the main button for the current tunnel state. */
+	/* Paint the hero card and the main button for the current tunnel state.
+	   Called from the 1.5s stats tick too, so skip the work when nothing
+	   changed (the colors and texts would be rewritten every tick). */
 	private void updateStatus(boolean connected) {
+		if (statusPainted && statusConnected == connected)
+		  return;
+		statusPainted = true;
+		statusConnected = connected;
+
 		int bg = getThemeColor(connected ?
 			com.google.android.material.R.attr.colorPrimaryContainer :
 			com.google.android.material.R.attr.colorSurfaceVariant);

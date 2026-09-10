@@ -151,6 +151,13 @@ public class ServerActivity extends BaseActivity {
 	   with System.exit(0), so the connect has to wait until it is gone. */
 	private static final long RESTART_DELAY = 1000;
 
+	private final Handler handler = new Handler(Looper.getMainLooper());
+	private Runnable pendingConnect = null;
+	/* True between DISCONNECT and the delayed CONNECT. Enable is already
+	   false in that window (stopService() clears it), so it cannot be used
+	   on its own to decide whether the tunnel is meant to be up. */
+	private boolean switching = false;
+
 	private void select(int index) {
 		if (index == prefs.getSelected())
 		  return;
@@ -158,33 +165,59 @@ public class ServerActivity extends BaseActivity {
 		prefs.setSelected(index);
 		renderList();
 
-		if (!prefs.getEnable()) {
+		boolean running = prefs.getEnable() || switching;
+		if (!running) {
 			Toast.makeText(this, R.string.server_selected_hint, Toast.LENGTH_SHORT).show();
 			return;
 		}
 
-		Toast.makeText(this, R.string.server_switching, Toast.LENGTH_SHORT).show();
+		restartTunnel();
+	}
+
+	private void restartTunnel() {
 		final Context app = getApplicationContext();
+
+		switching = true;
+		Toast.makeText(this, R.string.server_switching, Toast.LENGTH_SHORT).show();
+
+		/* Tapping a second server during the hand-over: drop the queued
+		   connect, the one scheduled below already carries the new choice
+		   because it reads Selected when it runs. */
+		if (pendingConnect != null) {
+			handler.removeCallbacks(pendingConnect);
+			pendingConnect = null;
+		}
+
 		Intent stop = new Intent(app, TProxyService.class)
 			.setAction(TProxyService.ACTION_DISCONNECT);
 		startService(stop);
 
-		new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+		pendingConnect = new Runnable() {
 			@Override
 			public void run() {
+				pendingConnect = null;
+				switching = false;
 				Intent start = new Intent(app, TProxyService.class)
 					.setAction(TProxyService.ACTION_CONNECT);
 				app.startService(start);
 			}
-		}, RESTART_DELAY);
+		};
+		handler.postDelayed(pendingConnect, RESTART_DELAY);
 	}
+
+	/* Deliberately NOT cancelled in onDestroy: switching tab finishes this
+	   screen, and the queued connect must still run or the tunnel would be
+	   left down. It only touches the application context, so it is safe
+	   after the activity is gone (the handler holds it for ~1s). */
 
 	private void addServer() {
 		if (prefs.getProfileCount() >= Preferences.MAX_PROFILES) {
 			Toast.makeText(this, R.string.server_limit, Toast.LENGTH_SHORT).show();
 			return;
 		}
-		if (prefs.getEnable()) {
+		/* Also block while the tunnel hand-over is in flight: adding or
+		   removing entries renumbers the list and would move Selected. */
+		if (prefs.getEnable() || switching) {
 			Toast.makeText(this, R.string.server_busy, Toast.LENGTH_SHORT).show();
 			return;
 		}
@@ -200,7 +233,7 @@ public class ServerActivity extends BaseActivity {
 			Toast.makeText(this, R.string.server_last, Toast.LENGTH_SHORT).show();
 			return;
 		}
-		if (prefs.getEnable()) {
+		if (prefs.getEnable() || switching) {
 			Toast.makeText(this, R.string.server_busy, Toast.LENGTH_SHORT).show();
 			return;
 		}
