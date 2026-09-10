@@ -2,8 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
 		package="tun2vpn"
 		xmlns:tools="http://schemas.android.com/tools">
-	<application android:label="@string/app_name" android:icon="@mipmap/sockstun"
-		android:theme="@style/Theme.SocksTun"
+	<application android:label="@string/app_name" android:icon="@mipmap/tun2vpn"
+		android:theme="@style/Theme.Tun2VPN"
 		android:extractNativeLibs="true"
 		tools:replace="android:extractNativeLibs">
 		<service android:name=".TProxyService" android:process=":native"

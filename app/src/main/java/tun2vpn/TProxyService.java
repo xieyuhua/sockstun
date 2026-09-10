@@ -309,7 +309,7 @@ public class TProxyService extends VpnService {
 				public String resolverProcess(int protocol, String source, String target, int uid) {
 					return "";
 				}
-			}, "sockstun", stack, address, dns, prefs.getTunnelMtu());
+			}, "tun2vpn", stack, address, dns, prefs.getTunnelMtu());
 			appendLog("Clash.startTUN OK (fd=" + tunFd.getFd() + ")");
 		} catch (Throwable e) {
 			appendLog("FATAL: startTUN failed: " + e);

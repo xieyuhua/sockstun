@@ -11,7 +11,7 @@
 		android:layout_height="?attr/actionBarSize"
 		app:navigationIcon="?attr/homeAsUpIndicator"
 		app:title="@string/subscribe"
-		app:titleTextAppearance="@style/TextAppearance.SocksTun.Toolbar"/>
+		app:titleTextAppearance="@style/TextAppearance.Tun2VPN.Toolbar"/>
 	<com.google.android.material.card.MaterialCardView
 		style="@style/Widget.Material3.CardView.Outlined"
 		android:layout_width="match_parent"
