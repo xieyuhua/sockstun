@@ -75,11 +75,15 @@ android {
 		}
 	}
 
-	/* The manifest sets android:extractNativeLibs="true" and that is required:
-	   Clash.load() is handed getApplicationInfo().nativeLibraryDir, so the
-	   .so files must really be extracted there. AGP 8 refuses to package
-	   unless this flag matches the manifest. */
-	packagingOptions {
+	/* The .so files must really be extracted on install: Clash.load() is
+	   handed getApplicationInfo().nativeLibraryDir, which only contains them
+	   when extractNativeLibs ends up true. useLegacyPackaging = true is
+	   exactly that, and it is the ONLY place to say it - AGP 8 ignores
+	   android:extractNativeLibs in the source manifest (and warns about it),
+	   and leaving both in place makes :app:packageDebug fail inside
+	   PackageAndroidArtifact$IncrementalSplitterRunnable.
+	   So the attribute was removed from AndroidManifest.xml on purpose. */
+	packaging {
 		jniLibs {
 			useLegacyPackaging = true
 		}
