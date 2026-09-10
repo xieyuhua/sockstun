@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<string name="app_name">tun2VPN</string>
+	<string name="app_name">tunVPN</string>
 	<string name="home">Home</string>
 	<string name="home_hint">Use the bottom tabs to open subscription, server, per-app and more settings</string>
 	<string name="log">Log</string>

@@ -7,7 +7,7 @@
  ============================================================================
  */
 
-package tun2vpn;
+package com.tunvpn;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -58,10 +58,10 @@ import io.github.oviron.libmihomo.TunInterface;
 import io.github.oviron.libmihomo.InvokeInterface;
 
 public class TProxyService extends VpnService {
-	public static final String ACTION_CONNECT = "tun2vpn.CONNECT";
-	public static final String ACTION_DISCONNECT = "tun2vpn.DISCONNECT";
+	public static final String ACTION_CONNECT = "tunvpn.CONNECT";
+	public static final String ACTION_DISCONNECT = "tunvpn.DISCONNECT";
 	/* Switch the selected node while the tunnel keeps running. */
-	public static final String ACTION_SELECT = "tun2vpn.SELECT";
+	public static final String ACTION_SELECT = "tunvpn.SELECT";
 
 	/* Traffic statistics */
 	private static final int NOTIFY_ID = 1;
@@ -176,7 +176,7 @@ public class TProxyService extends VpnService {
 		File tproxy_log = new File(getCacheDir(), "tproxy.log");
 		if (tproxy_log.exists())
 		  tproxy_log.delete();
-		appendLog("=== tun2VPN start (pid " + android.os.Process.myPid() +
+		appendLog("=== tunVPN start (pid " + android.os.Process.myPid() +
 			" logging=" + prefs.getLogEnabled() + ") ===");
 		if (prefs.getLogEnabled()) {
 			redirectStdioToLog(tproxy_log);
@@ -247,7 +247,7 @@ public class TProxyService extends VpnService {
 			} catch (NameNotFoundException e) {
 			}
 		}
-		builder.setSession("tun2VPN/mihomo");
+		builder.setSession("tunVPN/mihomo");
 		tunFd = builder.establish();
 		if (tunFd == null) {
 			stopSelf();
@@ -309,7 +309,7 @@ public class TProxyService extends VpnService {
 				public String resolverProcess(int protocol, String source, String target, int uid) {
 					return "";
 				}
-			}, "tun2vpn", stack, address, dns, prefs.getTunnelMtu());
+			}, "tunvpn", stack, address, dns, prefs.getTunnelMtu());
 			appendLog("Clash.startTUN OK (fd=" + tunFd.getFd() + ")");
 		} catch (Throwable e) {
 			appendLog("FATAL: startTUN failed: " + e);

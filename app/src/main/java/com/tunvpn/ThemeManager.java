@@ -5,7 +5,7 @@
  ============================================================================
  */
 
-package tun2vpn;
+package com.tunvpn;
 
 import android.app.Activity;
 
@@ -19,11 +19,11 @@ public final class ThemeManager {
 	public static final int LIGHT = 4;
 
 	private static final int[] STYLES = {
-		R.style.Theme_Tun2VPN,        /* Neon Green */
-		R.style.Theme_Tun2VPN_Cyan,   /* Cyber Cyan */
-		R.style.Theme_Tun2VPN_Purple, /* Midnight Purple */
-		R.style.Theme_Tun2VPN_Amber,  /* Amber */
-		R.style.Theme_Tun2VPN_Light,  /* Paper Light */
+		R.style.Theme_TunVPN,        /* Neon Green */
+		R.style.Theme_TunVPN_Cyan,   /* Cyber Cyan */
+		R.style.Theme_TunVPN_Purple, /* Midnight Purple */
+		R.style.Theme_TunVPN_Amber,  /* Amber */
+		R.style.Theme_TunVPN_Light,  /* Paper Light */
 	};
 
 	private ThemeManager() {}

@@ -5,7 +5,7 @@
  ============================================================================
  */
 
-package tun2vpn;
+package com.tunvpn;
 
 import android.os.Bundle;
 import android.os.Handler;

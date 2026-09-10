@@ -7,7 +7,7 @@
  ============================================================================
  */
 
-package tun2vpn;
+package com.tunvpn;
 
 import java.util.Set;
 import java.util.List;

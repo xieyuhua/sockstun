@@ -7,7 +7,7 @@
  ============================================================================
  */
 
-package tun2vpn;
+package com.tunvpn;
 
 import android.content.Intent;
 import android.graphics.Color;
@@ -310,7 +310,7 @@ public class SubscribeActivity extends BaseActivity {
 			conn.setConnectTimeout(10000);
 			conn.setReadTimeout(10000);
 			conn.setInstanceFollowRedirects(true);
-			conn.setRequestProperty("User-Agent", "tun2VPN");
+			conn.setRequestProperty("User-Agent", "tunVPN");
 			int code = conn.getResponseCode();
 			if (code != HttpURLConnection.HTTP_OK)
 			  throw new Exception("HTTP " + code);

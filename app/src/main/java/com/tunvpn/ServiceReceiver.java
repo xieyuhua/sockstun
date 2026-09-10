@@ -7,7 +7,7 @@
  ============================================================================
  */
 
-package tun2vpn;
+package com.tunvpn;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;

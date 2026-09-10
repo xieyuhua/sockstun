@@ -12,7 +12,7 @@
 		android:layout_height="?attr/actionBarSize"
 		app:title="@string/app_name"
 		app:titleCentered="true"
-		app:titleTextAppearance="@style/TextAppearance.Tun2VPN.Toolbar"/>
+		app:titleTextAppearance="@style/TextAppearance.TunVPN.Toolbar"/>
 	<ScrollView
 		android:layout_width="match_parent"
 		android:layout_height="0dp"
@@ -30,7 +30,7 @@
 			android:paddingBottom="24dp">
 			<com.google.android.material.card.MaterialCardView
 				android:id="@+id/status_card"
-				style="@style/Widget.Tun2VPN.Card"
+				style="@style/Widget.TunVPN.Card"
 				android:layout_width="match_parent"
 				android:layout_height="wrap_content"
 				android:layout_marginTop="16dp"
@@ -44,7 +44,7 @@
 					android:padding="24dp">
 					<com.google.android.material.card.MaterialCardView
 						android:id="@+id/status_dot"
-						style="@style/Widget.Tun2VPN.Card"
+						style="@style/Widget.TunVPN.Card"
 						android:layout_width="72dp"
 						android:layout_height="72dp"
 						app:cardBackgroundColor="?attr/colorPrimary"
@@ -74,7 +74,7 @@
 						android:layout_marginTop="4dp"
 						android:gravity="center"
 						android:text="@string/status_disconnected_hint"
-						android:textAppearance="@style/TextAppearance.Tun2VPN.Hint"/>
+						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 					<TextView
 						android:id="@+id/status_node"
 						android:layout_width="match_parent"
@@ -83,7 +83,7 @@
 						android:ellipsize="end"
 						android:gravity="center"
 						android:maxLines="2"
-						android:textAppearance="@style/TextAppearance.Tun2VPN.Hint"/>
+						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 					<TextView
 						android:id="@+id/status_ip"
 						android:layout_width="match_parent"
@@ -94,7 +94,7 @@
 						android:gravity="center"
 						android:maxLines="1"
 						android:text="@string/ip_unknown"
-						android:textAppearance="@style/TextAppearance.Tun2VPN.Hint"/>
+						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 					<com.google.android.material.button.MaterialButton
 						android:id="@+id/control"
 						android:layout_width="match_parent"
@@ -112,7 +112,7 @@
 				</LinearLayout>
 			</com.google.android.material.card.MaterialCardView>
 			<com.google.android.material.card.MaterialCardView
-				style="@style/Widget.Tun2VPN.Card"
+				style="@style/Widget.TunVPN.Card"
 				android:layout_width="match_parent"
 				android:layout_height="wrap_content"
 				android:layout_marginTop="16dp">
@@ -131,7 +131,7 @@
 							android:layout_height="wrap_content"
 							android:layout_weight="1"
 							android:text="@string/traffic"
-							android:textAppearance="@style/TextAppearance.Tun2VPN.Section"/>
+							android:textAppearance="@style/TextAppearance.TunVPN.Section"/>
 						<com.google.android.material.button.MaterialButton
 							android:id="@+id/traffic_reset"
 							style="?attr/materialButtonOutlinedStyle"
@@ -171,13 +171,13 @@
 						android:ellipsize="end"
 						android:fontFamily="monospace"
 						android:maxLines="1"
-						android:textAppearance="@style/TextAppearance.Tun2VPN.Hint"/>
+						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 					<TextView
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
 						android:layout_marginTop="10dp"
 						android:text="@string/traffic_hint"
-						android:textAppearance="@style/TextAppearance.Tun2VPN.Hint"/>
+						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 				</LinearLayout>
 			</com.google.android.material.card.MaterialCardView>
 			<TextView
@@ -188,7 +188,7 @@
 				android:paddingLeft="24dp"
 				android:paddingRight="24dp"
 				android:text="@string/home_hint"
-				android:textAppearance="@style/TextAppearance.Tun2VPN.Hint"/>
+				android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 		</LinearLayout>
 	</ScrollView>
 	<com.google.android.material.bottomnavigation.BottomNavigationView

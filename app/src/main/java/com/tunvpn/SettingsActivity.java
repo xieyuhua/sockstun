@@ -6,7 +6,7 @@
  ============================================================================
  */
 
-package tun2vpn;
+package com.tunvpn;
 
 import android.content.DialogInterface;
 import android.content.Intent;

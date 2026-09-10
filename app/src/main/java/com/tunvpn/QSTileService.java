@@ -7,7 +7,7 @@
  ============================================================================
  */
 
-package tun2vpn;
+package com.tunvpn;
 
 import android.app.PendingIntent;
 import android.content.ComponentName;

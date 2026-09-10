@@ -6,7 +6,7 @@
  ============================================================================
  */
 
-package tun2vpn;
+package com.tunvpn;
 
 import java.net.Inet6Address;
 import java.net.InetAddress;

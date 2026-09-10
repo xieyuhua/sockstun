@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 	<!-- ===== Neon Green (default, near-black + neon green) ===== -->
-	<style name="Theme.Tun2VPN" parent="Theme.Material3.Dark.NoActionBar">
+	<style name="Theme.TunVPN" parent="Theme.Material3.Dark.NoActionBar">
 		<item name="colorPrimary">#00E5A0</item>
 		<item name="colorOnPrimary">#060A09</item>
 		<item name="colorPrimaryContainer">#10261F</item>
@@ -28,7 +28,7 @@
 	</style>
 
 	<!-- ===== Cyber Cyan ===== -->
-	<style name="Theme.Tun2VPN.Cyan" parent="Theme.Material3.Dark.NoActionBar">
+	<style name="Theme.TunVPN.Cyan" parent="Theme.Material3.Dark.NoActionBar">
 		<item name="colorPrimary">#22D3EE</item>
 		<item name="colorOnPrimary">#04181C</item>
 		<item name="colorPrimaryContainer">#04333B</item>
@@ -55,7 +55,7 @@
 	</style>
 
 	<!-- ===== Midnight Purple ===== -->
-	<style name="Theme.Tun2VPN.Purple" parent="Theme.Material3.Dark.NoActionBar">
+	<style name="Theme.TunVPN.Purple" parent="Theme.Material3.Dark.NoActionBar">
 		<item name="colorPrimary">#A78BFA</item>
 		<item name="colorOnPrimary">#160C33</item>
 		<item name="colorPrimaryContainer">#2E1F5C</item>
@@ -82,7 +82,7 @@
 	</style>
 
 	<!-- ===== Amber ===== -->
-	<style name="Theme.Tun2VPN.Amber" parent="Theme.Material3.Dark.NoActionBar">
+	<style name="Theme.TunVPN.Amber" parent="Theme.Material3.Dark.NoActionBar">
 		<item name="colorPrimary">#FFB020</item>
 		<item name="colorOnPrimary">#2B1700</item>
 		<item name="colorPrimaryContainer">#4A2E00</item>
@@ -109,7 +109,7 @@
 	</style>
 
 	<!-- ===== Paper Light ===== -->
-	<style name="Theme.Tun2VPN.Light" parent="Theme.Material3.Light.NoActionBar">
+	<style name="Theme.TunVPN.Light" parent="Theme.Material3.Light.NoActionBar">
 		<item name="colorPrimary">#0A7D5A</item>
 		<item name="colorOnPrimary">#FFFFFF</item>
 		<item name="colorPrimaryContainer">#C7F3E2</item>
@@ -135,43 +135,43 @@
 		<item name="android:windowBackground">#F4F7F6</item>
 	</style>
 
-	<style name="Widget.Tun2VPN.Card" parent="Widget.Material3.CardView.Outlined">
+	<style name="Widget.TunVPN.Card" parent="Widget.Material3.CardView.Outlined">
 		<item name="cardCornerRadius">18dp</item>
 		<item name="cardBackgroundColor">?attr/colorSurface</item>
 		<item name="strokeColor">?attr/colorOutline</item>
 		<item name="strokeWidth">1dp</item>
 	</style>
 
-	<style name="Widget.Tun2VPN.TextInputLayout" parent="Widget.Material3.TextInputLayout.OutlinedBox">
+	<style name="Widget.TunVPN.TextInputLayout" parent="Widget.Material3.TextInputLayout.OutlinedBox">
 		<item name="boxCornerRadiusTopStart">12dp</item>
 		<item name="boxCornerRadiusTopEnd">12dp</item>
 		<item name="boxCornerRadiusBottomStart">12dp</item>
 		<item name="boxCornerRadiusBottomEnd">12dp</item>
 	</style>
 
-	<style name="TextAppearance.Tun2VPN.Toolbar" parent="TextAppearance.Material3.TitleMedium">
+	<style name="TextAppearance.TunVPN.Toolbar" parent="TextAppearance.Material3.TitleMedium">
 		<item name="fontFamily">monospace</item>
 		<item name="android:fontFamily">monospace</item>
 		<item name="android:letterSpacing">0.12</item>
 	</style>
 
-	<style name="TextAppearance.Tun2VPN.Section" parent="TextAppearance.Material3.TitleSmall">
+	<style name="TextAppearance.TunVPN.Section" parent="TextAppearance.Material3.TitleSmall">
 		<item name="android:textColor">?attr/colorPrimary</item>
 		<item name="fontFamily">monospace</item>
 		<item name="android:fontFamily">monospace</item>
 		<item name="android:letterSpacing">0.08</item>
 	</style>
 
-	<style name="TextAppearance.Tun2VPN.Hint" parent="TextAppearance.Material3.BodySmall">
+	<style name="TextAppearance.TunVPN.Hint" parent="TextAppearance.Material3.BodySmall">
 		<item name="android:textColor">?attr/colorOnSurfaceVariant</item>
 	</style>
 
-	<style name="TextAppearance.Tun2VPN.Mono" parent="TextAppearance.Material3.BodyMedium">
+	<style name="TextAppearance.TunVPN.Mono" parent="TextAppearance.Material3.BodyMedium">
 		<item name="fontFamily">monospace</item>
 		<item name="android:fontFamily">monospace</item>
 	</style>
 
-	<style name="TextAppearance.Tun2VPN.MonoSmall" parent="TextAppearance.Material3.BodySmall">
+	<style name="TextAppearance.TunVPN.MonoSmall" parent="TextAppearance.Material3.BodySmall">
 		<item name="fontFamily">monospace</item>
 		<item name="android:fontFamily">monospace</item>
 	</style>

@@ -1,4 +1,3 @@
 .gradle
 app/.externalNativeBuild
 app/build
-app/thirdparty/

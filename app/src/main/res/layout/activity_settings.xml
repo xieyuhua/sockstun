@@ -11,7 +11,7 @@
 		android:layout_height="?attr/actionBarSize"
 		app:navigationIcon="?attr/homeAsUpIndicator"
 		app:title="@string/settings"
-		app:titleTextAppearance="@style/TextAppearance.Tun2VPN.Toolbar"/>
+		app:titleTextAppearance="@style/TextAppearance.TunVPN.Toolbar"/>
 	<ScrollView
 		android:layout_width="match_parent"
 		android:layout_height="0dp"
@@ -27,7 +27,7 @@
 			android:paddingTop="8dp"
 			android:paddingBottom="24dp">
 			<com.google.android.material.card.MaterialCardView
-				style="@style/Widget.Tun2VPN.Card"
+				style="@style/Widget.TunVPN.Card"
 				android:layout_width="match_parent"
 				android:layout_height="wrap_content">
 				<LinearLayout

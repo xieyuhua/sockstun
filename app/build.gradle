@@ -29,16 +29,15 @@ if (isPackageBuild) {
 }
 
 android {
-	namespace "tun2vpn"
+	namespace "com.tunvpn"
 	compileSdkVersion 34
 
 	defaultConfig {
-		applicationId "tun2vpn"
+		applicationId "com.tunvpn"
 		minSdkVersion 24
 		targetSdkVersion 34
 		versionCode pkgVersionCode
 		versionName pkgVersionName
-		setProperty("archivesBaseName", "$applicationId-$versionName")
 		ndk {
 			/* libmihomo ships arm64-v8a + armeabi-v7a; keep the APK aligned to
 			   what the core actually provides so Clash.load() never misses a .so. */
@@ -99,6 +98,13 @@ android {
 		// Disables dependency metadata when building Android App Bundles.
 		includeInBundle = false
 	}
+}
+
+/* APK/AAB name: "<applicationId>-<versionName>".
+   archivesBaseName is deprecated (removed in Gradle 9), the base extension's
+   archivesName is the replacement. */
+base {
+	archivesName = "${android.defaultConfig.applicationId}-${android.defaultConfig.versionName}"
 }
 
 /* ---------------------------------------------------------------------------

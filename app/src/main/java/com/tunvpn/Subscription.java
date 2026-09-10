@@ -6,7 +6,7 @@
  ============================================================================
  */
 
-package tun2vpn;
+package com.tunvpn;
 
 import org.json.JSONArray;
 import org.json.JSONException;
