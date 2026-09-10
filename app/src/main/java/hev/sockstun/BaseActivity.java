@@ -18,10 +18,27 @@ import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.navigation.NavigationBarView;
 
 public abstract class BaseActivity extends AppCompatActivity {
+	/* Theme that is currently painted on this instance. */
+	private int appliedTheme = -1;
+
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		ThemeManager.applyTheme(this);
 		super.onCreate(savedInstanceState);
+		appliedTheme = Preferences.getTheme(this);
+	}
+
+	/* The theme can be changed on the Settings tab, and switching back with
+	   the bottom bar reuses this instance instead of recreating it (see
+	   setupBottomNav), so pick the change up here. */
+	@Override
+	protected void onResume() {
+		super.onResume();
+		int theme = Preferences.getTheme(this);
+		if (appliedTheme != -1 && appliedTheme != theme) {
+			appliedTheme = theme;
+			recreate();
+		}
 	}
 
 	/* Attach the horizontal bottom menu. Call it after setContentView()
@@ -86,8 +103,8 @@ public abstract class BaseActivity extends AppCompatActivity {
 		  return RulesActivity.class;
 		if (itemId == R.id.nav_apps)
 		  return AppListActivity.class;
-		if (itemId == R.id.nav_log)
-		  return LogActivity.class;
+		if (itemId == R.id.nav_settings)
+		  return SettingsActivity.class;
 		return null;
 	}
 }

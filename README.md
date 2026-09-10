@@ -18,8 +18,7 @@ A simple and lightweight VPN over socks5 proxy for Android. It is based on a hig
 
 ## Navigation
 
-A single bottom bar with five tabs — **Home · Server · Rules · Apps · Log**. The
-theme picker sits in the Home toolbar (top-right icon).
+A single bottom bar with five tabs — **Home · Server · Rules · Apps · Settings**.
 
 * **Home** — connect/disconnect, the proxy currently in use, live traffic card.
 * **Server** — list of proxies (add / edit / delete). Tapping one makes it the
@@ -29,7 +28,8 @@ theme picker sits in the Home toolbar (top-right icon).
   TCP), DNS, then one rules card holding the "unmatched traffic uses the proxy"
   switch on top of the domain / IP / CIDR list.
 * **Apps** — pick which apps use the tunnel in per-app mode.
-* **Log** — toggle and read the tunnel log.
+* **Settings** — theme picker (5 palettes), logging toggle plus the log viewer,
+  and the app version info.
 
 ## Documents
 

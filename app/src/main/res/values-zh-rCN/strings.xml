@@ -33,6 +33,7 @@
 	<string name="status_connected_hint">隧道正在运行，流量已通过代理转发</string>
 	<string name="status_disconnected_hint">点击「连接」启动隧道</string>
 	<string name="section_server">服务器</string>
+	<string name="section_settings">设置</string>
 	<string name="section_rules">规则</string>
 	<string name="section_dns">DNS</string>
 	<string name="section_scope">代理范围</string>
@@ -93,4 +94,18 @@
 		<item>@string/rule_action_direct</item>
 	</string-array>
 
+	<string name="theme">主题</string>
+	<string name="theme_hint">选择后立即应用到所有页面</string>
+	<string name="theme_neon">霓虹绿</string>
+	<string name="theme_cyan">赛博青</string>
+	<string name="theme_purple">暗夜紫</string>
+	<string name="theme_amber">琥珀橙</string>
+	<string name="theme_light">极简白</string>
+
+	<string name="settings_view_log">查看日志</string>
+	<string name="settings_about">关于</string>
+	<string name="settings_app">应用</string>
+	<string name="settings_version">版本</string>
+	<string name="settings_build">版本号</string>
+	<string name="settings_package">包名</string>
 </resources>

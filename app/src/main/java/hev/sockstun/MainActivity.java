@@ -20,7 +20,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.content.Intent;
-import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.graphics.PorterDuff;
@@ -29,8 +28,6 @@ import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.net.VpnService;
-
-import androidx.appcompat.app.AlertDialog;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
@@ -76,17 +73,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 
 		MaterialToolbar toolbar = (MaterialToolbar) findViewById(R.id.toolbar);
 		setSupportActionBar(toolbar);
-		toolbar.inflateMenu(R.menu.home_menu);
-		toolbar.setOnMenuItemClickListener(new MaterialToolbar.OnMenuItemClickListener() {
-			@Override
-			public boolean onMenuItemClick(android.view.MenuItem item) {
-				if (item.getItemId() == R.id.action_theme) {
-					showThemeDialog();
-					return true;
-				}
-				return false;
-			}
-		});
 
 		setupBottomNav(R.id.nav_home);
 
@@ -130,31 +116,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		  startActivityForResult(intent, 0);
 		else
 		  onActivityResult(0, RESULT_OK, null);
-	}
-
-	/* Theme picker: choose one of the bundled palettes, then recreate
-	   so every activity picks up the new theme on next creation. */
-	private void showThemeDialog() {
-		final int current = prefs.getTheme();
-		final String[] names = new String[ThemeManager.count()];
-		for (int i = 0; i < names.length; i++)
-			names[i] = getString(ThemeManager.nameRes(i));
-
-		new AlertDialog.Builder(this)
-			.setTitle(R.string.theme)
-			.setSingleChoiceItems(names, current, null)
-			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface d, int which) {
-					int sel = ((AlertDialog) d).getListView().getCheckedItemPosition();
-					if (sel >= 0 && sel != current) {
-						prefs.setTheme(sel);
-						recreate();
-					}
-				}
-			})
-			.setNegativeButton(android.R.string.cancel, null)
-			.show();
 	}
 
 	@Override
