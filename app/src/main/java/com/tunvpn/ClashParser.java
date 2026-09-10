@@ -39,6 +39,90 @@ public class ClashParser {
 		return collect(raw);
 	}
 
+	/* One entry under "proxies:", kept as its original YAML text so that
+	   re-emitting it into the merged config cannot drop fields we do not
+	   understand (uuid / ws-opts / sni / fingerprint / ...). */
+	public static class ProxyDef {
+		public String name;
+		public String type;
+		public String text;   /* the "- ..." block, indented by 2 spaces */
+
+		ProxyDef(String name, String type, String text) {
+			this.name = name;
+			this.type = type;
+			this.text = text;
+		}
+	}
+
+	/* Every proxy definition of one subscription, in file order. */
+	public static List<ProxyDef> extractProxies(String raw) {
+		List<ProxyDef> out = new ArrayList<ProxyDef>();
+		if (raw == null || raw.isEmpty())
+		  return out;
+		String text = decodeRaw(raw);
+		if (text == null || !containsProxies(text))
+		  return out;
+
+		String[] lines = text.split("\\r?\\n", -1);
+		int start = -1;
+		for (int i = 0; i < lines.length; i++) {
+			if (leadingSpaces(lines[i]) != 0)
+			  continue;
+			if (lines[i].trim().startsWith("proxies:")) {
+				start = i;
+				break;
+			}
+		}
+		if (start < 0)
+		  return out;
+
+		int i = start + 1;
+		while (i < lines.length) {
+			String line = lines[i];
+			if (line.trim().isEmpty()) {
+				i++;
+				continue;
+			}
+			int indent = leadingSpaces(line);
+			if (indent <= 0 && !line.trim().startsWith("- "))
+			  break; /* reached the next top-level key */
+			if (!line.trim().startsWith("- ")) {
+				i++;
+				continue;
+			}
+			int baseIndent = indent;
+			StringBuilder block = new StringBuilder("  ").append(line.trim());
+			i++;
+			while (i < lines.length) {
+				String l2 = lines[i];
+				if (l2.trim().isEmpty()) {
+					i++;
+					continue;
+				}
+				if (leadingSpaces(l2) <= baseIndent)
+				  break;
+				block.append('\n').append("  ").append(l2.trim());
+				i++;
+			}
+			/* Re-read the block with the same key/value helpers parseAll()
+			   uses, so the name/type line up with the node list. */
+			Map<String, String> m = new HashMap<String, String>();
+			String[] blockLines = block.toString().split("\\r?\\n");
+			String head = blockLines[0].trim().substring(2);
+			if (head.trim().startsWith("{"))
+			  parseFlowMap(m, head);
+			else
+			  putKV(m, head);
+			for (int k = 1; k < blockLines.length; k++)
+			  putKV(m, blockLines[k].trim());
+			String name = m.get("name");
+			String type = m.get("type");
+			if (name != null && !name.isEmpty())
+			  out.add(new ProxyDef(name, type == null ? "" : type, block.toString()));
+		}
+		return out;
+	}
+
 	private static List<ClashNode> collect(String raw) {
 		List<ClashNode> result = new ArrayList<ClashNode>();
 		if (raw == null || raw.isEmpty())
@@ -204,84 +288,4 @@ public class ClashParser {
 		return null;
 	}
 
-	/* Name of the proxy-group a picked node must be selected in.
-	   Subscriptions name it freely ("GLOBAL", "节点选择", ...), so prefer a
-	   group called GLOBAL, else the first switchable group (select /
-	   url-test / fallback / load-balance), else simply the first group. */
-	public static String parseSelectorGroup(String raw) {
-		if (raw == null || raw.isEmpty())
-		  return "";
-		String text = raw;
-		if (!containsProxies(text)) {
-			String dec = tryBase64(text);
-			if (dec != null && containsProxies(dec))
-			  text = dec;
-		}
-		String[] lines = text.split("\\r?\\n");
-		int start = -1;
-		for (int i = 0; i < lines.length; i++) {
-			if (leadingSpaces(lines[i]) != 0)
-			  continue;
-			String t = lines[i].trim();
-			if (t.equals("proxy-groups:") || t.startsWith("proxy-groups:")) {
-				start = i;
-				break;
-			}
-		}
-		if (start < 0)
-		  return "";
-
-		String firstSelect = "";
-		String firstAny = "";
-		int i = start + 1;
-		while (i < lines.length) {
-			String line = lines[i];
-			if (line.trim().isEmpty()) {
-				i++;
-				continue;
-			}
-			String trimmed = line.trim();
-			int indent = leadingSpaces(line);
-			if (indent <= 0 && !trimmed.startsWith("- "))
-			  break;
-			if (trimmed.startsWith("- ")) {
-				int baseIndent = indent;
-				Map<String, String> m = new HashMap<String, String>();
-				String first = trimmed.substring(2);
-				if (first.trim().startsWith("{"))
-				  parseFlowMap(m, first);
-				else
-				  putKV(m, first);
-				i++;
-				while (i < lines.length) {
-					String l2 = lines[i];
-					if (l2.trim().isEmpty()) {
-						i++;
-						continue;
-					}
-					if (leadingSpaces(l2) <= baseIndent)
-					  break;
-					putKV(m, l2.trim());
-					i++;
-				}
-				String name = m.get("name");
-				String type = m.get("type");
-				if (name != null && !name.isEmpty()) {
-					if ("GLOBAL".equalsIgnoreCase(name))
-					  return name;
-					if (firstSelect.isEmpty() && type != null &&
-						("select".equalsIgnoreCase(type) ||
-						 "url-test".equalsIgnoreCase(type) ||
-						 "fallback".equalsIgnoreCase(type) ||
-						 "load-balance".equalsIgnoreCase(type)))
-					  firstSelect = name;
-					if (firstAny.isEmpty())
-					  firstAny = name;
-				}
-			} else {
-				i++;
-			}
-		}
-		return !firstSelect.isEmpty() ? firstSelect : firstAny;
-	}
 }

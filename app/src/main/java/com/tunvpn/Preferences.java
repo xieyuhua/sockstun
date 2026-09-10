@@ -57,6 +57,15 @@ public class Preferences
 	public static final String STATS_APP_BASE = "StatsAppBase";
 	public static final String STATS_APP_TOTAL = "StatsAppTotal";
 	public static final String THEME = "Theme";
+	/* Per-subscription caches (key + subscription id) so several
+	   subscriptions can be fetched and merged into one node pool. */
+	public static final String SUB_RAW_PREFIX = "SubRaw.";
+	public static final String SUB_NODES_PREFIX = "SubNodes.";
+	/* Auto-select: the core's url-test group picks the fastest node. */
+	public static final String AUTO_SELECT = "AutoSelect";
+	public static final String AUTO_SELECT_INTERVAL = "AutoSelectInterval";
+	/* mihomo's own default for url-test. */
+	public static final int DEFAULT_AUTO_INTERVAL = 300;
 
 	public static final int MAX_PROFILES = 13;
 
@@ -97,6 +106,30 @@ public class Preferences
 	public Preferences(Context context) {
 		prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_MULTI_PROCESS);
 		migrate();
+		migrateSubCache();
+	}
+
+	/* Older builds kept exactly one fetched subscription in a single cache.
+	   Move it onto the active subscription so the merged node list still
+	   shows what the user had before upgrading. */
+	private void migrateSubCache() {
+		String activeId = getActiveSubId();
+		if (activeId == null || activeId.isEmpty())
+		  return;
+		String legacyNodes = prefs.getString(key(SUB_NODES), "");
+		String legacyRaw = prefs.getString(key(SUB_RAW), "");
+		if (legacyNodes.isEmpty() && legacyRaw.isEmpty())
+		  return;
+		if (!prefs.getString(key(SUB_NODES_PREFIX + activeId), "").isEmpty())
+		  return; /* already on the per-subscription layout */
+		SharedPreferences.Editor editor = prefs.edit();
+		if (!legacyRaw.isEmpty())
+		  editor.putString(key(SUB_RAW_PREFIX + activeId), legacyRaw);
+		if (!legacyNodes.isEmpty())
+		  editor.putString(key(SUB_NODES_PREFIX + activeId), legacyNodes);
+		editor.remove(key(SUB_NODES));
+		editor.remove(key(SUB_RAW));
+		editor.commit();
 	}
 
 	/* Profile-scoped key: all per-server settings live under "P<index>." */
@@ -293,6 +326,9 @@ public class Preferences
 	}
 
 	public String getSubNodes() {
+		Subscription sub = getActiveSubscription();
+		if (sub != null)
+		  return getSubNodes(sub.id);
 		return prefs.getString(key(SUB_NODES), "");
 	}
 
@@ -370,15 +406,80 @@ public class Preferences
 		return "socks5://" + addr + ":" + s.port;
 	}
 
-	/* Raw clash.yml text of the subscription (already base64-decoded if the
-	   provider shipped it that way). Fed verbatim to mihomo. */
+	/* Raw clash.yml text of the active subscription (already base64-decoded
+	   if the provider shipped it that way). */
 	public String getSubRaw() {
+		Subscription sub = getActiveSubscription();
+		if (sub != null)
+		  return getSubRaw(sub.id);
 		return prefs.getString(key(SUB_RAW), "");
 	}
 
 	public void setSubRaw(String yaml) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(SUB_RAW), yaml);
+		editor.commit();
+	}
+
+	/* Per-subscription cache: each subscription keeps its own fetched YAML
+	   and node list, so several can be pulled and merged into one pool. */
+	public String getSubRaw(String id) {
+		if (id == null || id.isEmpty())
+		  return "";
+		return prefs.getString(key(SUB_RAW_PREFIX + id), "");
+	}
+
+	public void setSubRaw(String id, String yaml) {
+		if (id == null || id.isEmpty())
+		  return;
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SUB_RAW_PREFIX + id), yaml == null ? "" : yaml);
+		editor.commit();
+	}
+
+	public String getSubNodes(String id) {
+		if (id == null || id.isEmpty())
+		  return "";
+		return prefs.getString(key(SUB_NODES_PREFIX + id), "");
+	}
+
+	public void setSubNodes(String id, String json) {
+		if (id == null || id.isEmpty())
+		  return;
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SUB_NODES_PREFIX + id), json == null ? "" : json);
+		editor.commit();
+	}
+
+	public void clearSubCache(String id) {
+		if (id == null || id.isEmpty())
+		  return;
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.remove(key(SUB_RAW_PREFIX + id));
+		editor.remove(key(SUB_NODES_PREFIX + id));
+		editor.commit();
+	}
+
+	/* Auto-select: the core's url-test group picks the fastest node by
+	   itself, re-testing every `interval` seconds. Off means "use exactly
+	   the node the user tapped". */
+	public boolean getAutoSelect() {
+		return prefs.getBoolean(key(AUTO_SELECT), true);
+	}
+
+	public void setAutoSelect(boolean enable) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putBoolean(key(AUTO_SELECT), enable);
+		editor.commit();
+	}
+
+	public int getAutoSelectInterval() {
+		return prefs.getInt(key(AUTO_SELECT_INTERVAL), DEFAULT_AUTO_INTERVAL);
+	}
+
+	public void setAutoSelectInterval(int seconds) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putInt(key(AUTO_SELECT_INTERVAL), seconds);
 		editor.commit();
 	}
 

@@ -7,13 +7,10 @@
 
 package com.tunvpn;
 
-import android.content.DialogInterface;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.Toast;
-
-import androidx.appcompat.app.AlertDialog;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
@@ -62,14 +59,7 @@ public class ServerEditActivity extends BaseActivity {
 				save();
 			}
 		});
-		MaterialButton delete = (MaterialButton) findViewById(R.id.server_delete);
-		delete.setVisibility(id.isEmpty() ? View.GONE : View.VISIBLE);
-		delete.setOnClickListener(new View.OnClickListener() {
-			@Override
-			public void onClick(View v) {
-				confirmDelete();
-			}
-		});
+		/* Deleting is handled from the server list, not from the editor. */
 
 		if (id.isEmpty())
 		  edit_port.setText("1080");
@@ -125,19 +115,5 @@ public class ServerEditActivity extends BaseActivity {
 		prefs.setSocksServers(list);
 		Toast.makeText(this, R.string.server_saved, Toast.LENGTH_SHORT).show();
 		finish();
-	}
-
-	private void confirmDelete() {
-		new AlertDialog.Builder(this)
-			.setMessage(R.string.server_delete_confirm_short)
-			.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface d, int which) {
-					ServerListActivity.removeServer(prefs, id);
-					finish();
-				}
-			})
-			.setNegativeButton(android.R.string.cancel, null)
-			.show();
 	}
 }

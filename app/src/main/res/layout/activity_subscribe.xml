@@ -16,103 +16,109 @@
 		style="@style/Widget.Material3.CardView.Outlined"
 		android:layout_width="match_parent"
 		android:layout_height="wrap_content"
-		android:layout_margin="16dp"
-		app:cardCornerRadius="20dp">
+		android:layout_marginLeft="16dp"
+		android:layout_marginRight="16dp"
+		android:layout_marginTop="8dp"
+		app:cardCornerRadius="16dp">
 		<LinearLayout
 			android:orientation="vertical"
 			android:layout_width="match_parent"
 			android:layout_height="wrap_content"
-			android:padding="16dp">
+			android:padding="12dp">
 			<LinearLayout
 				android:orientation="horizontal"
 				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:gravity="center_vertical">
-				<TextView
-					android:id="@+id/sub_current"
-					android:layout_width="0dp"
-					android:layout_height="wrap_content"
-					android:layout_weight="1"
-					android:ellipsize="end"
-					android:maxLines="2"
-					android:text="@string/subs_none"
-					android:textAppearance="?attr/textAppearanceBodyMedium"/>
-				<com.google.android.material.button.MaterialButton
-					android:id="@+id/sub_config"
-					style="?attr/materialButtonOutlinedStyle"
-					android:layout_width="wrap_content"
-					android:layout_height="wrap_content"
-					android:layout_marginStart="12dp"
-					android:minHeight="40dp"
-					android:text="@string/subs_config"
-					android:textSize="13sp"
-					app:cornerRadius="20dp"
-					app:icon="@drawable/ic_settings"
-					app:iconGravity="textStart"
-					app:iconPadding="6dp"/>
-			</LinearLayout>
-			<LinearLayout
-				android:orientation="horizontal"
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="12dp">
+				android:layout_height="wrap_content">
 				<com.google.android.material.button.MaterialButton
 					android:id="@+id/sub_fetch"
 					style="?attr/materialButtonOutlinedStyle"
 					android:layout_width="0dp"
 					android:layout_weight="1"
 					android:layout_height="wrap_content"
-					android:minHeight="52dp"
+					android:minHeight="40dp"
 					android:text="@string/sub_fetch"
-					android:textSize="15sp"
-					app:cornerRadius="26dp"
+					android:textSize="13sp"
+					app:cornerRadius="20dp"
 					app:icon="@drawable/ic_subscribe"
 					app:iconGravity="textStart"
-					app:iconPadding="8dp"/>
+					app:iconPadding="4dp"
+					app:iconSize="16dp"/>
 				<com.google.android.material.button.MaterialButton
 					android:id="@+id/sub_test_all"
 					style="?attr/materialButtonOutlinedStyle"
 					android:layout_width="0dp"
 					android:layout_weight="1"
 					android:layout_height="wrap_content"
-					android:layout_marginStart="12dp"
-					android:minHeight="52dp"
+					android:layout_marginStart="10dp"
+					android:minHeight="40dp"
 					android:text="@string/sub_test_all"
-					android:textSize="15sp"
-					app:cornerRadius="26dp"
+					android:textSize="13sp"
+					app:cornerRadius="20dp"
 					app:icon="@drawable/ic_speed"
 					app:iconGravity="textStart"
-					app:iconPadding="8dp"/>
+					app:iconPadding="4dp"
+					app:iconSize="16dp"/>
 			</LinearLayout>
 			<LinearLayout
 				android:orientation="horizontal"
 				android:layout_width="match_parent"
 				android:layout_height="wrap_content"
-				android:layout_marginTop="12dp">
+				android:layout_marginTop="6dp">
 				<Spinner
 					android:id="@+id/sub_sort"
 					android:layout_width="0dp"
 					android:layout_weight="1"
 					android:layout_height="wrap_content"
-					android:minHeight="48dp"
+					android:minHeight="30dp"
 					android:spinnerMode="dropdown"/>
 				<Spinner
 					android:id="@+id/sub_filter"
 					android:layout_width="0dp"
 					android:layout_weight="1"
 					android:layout_height="wrap_content"
-					android:layout_marginStart="12dp"
-					android:minHeight="48dp"
+					android:layout_marginStart="10dp"
+					android:minHeight="30dp"
 					android:spinnerMode="dropdown"/>
+			</LinearLayout>
+			<LinearLayout
+				android:orientation="horizontal"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="6dp"
+				android:gravity="center_vertical">
+				<LinearLayout
+					android:orientation="vertical"
+					android:layout_width="0dp"
+					android:layout_height="wrap_content"
+					android:layout_weight="1">
+					<TextView
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:text="@string/sub_auto"
+						android:textAppearance="?attr/textAppearanceBodyMedium"
+						android:textColor="?attr/colorOnSurface"/>
+					<TextView
+						android:id="@+id/sub_auto_hint"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:paddingTop="2dp"
+						android:paddingBottom="2dp"
+						android:textAppearance="?attr/textAppearanceBodySmall"
+						android:textColor="?attr/colorPrimary"/>
+				</LinearLayout>
+				<com.google.android.material.switchmaterial.SwitchMaterial
+					android:id="@+id/sub_auto"
+					android:layout_width="wrap_content"
+					android:layout_height="wrap_content"
+					android:layout_marginStart="8dp"/>
 			</LinearLayout>
 			<TextView
 				android:id="@+id/sub_stats"
 				android:layout_width="match_parent"
 				android:layout_height="wrap_content"
-				android:layout_marginTop="10dp"
+				android:layout_marginTop="4dp"
 				android:textAppearance="?attr/textAppearanceBodySmall"
 				android:textColor="?attr/colorOnSurfaceVariant"/>
-
 		</LinearLayout>
 	</com.google.android.material.card.MaterialCardView>
 	<TextView
@@ -133,6 +139,7 @@
 		android:dividerHeight="8dp"
 		android:paddingLeft="16dp"
 		android:paddingRight="16dp"
+		android:paddingTop="8dp"
 		android:paddingBottom="16dp"
 		android:scrollbarStyle="outsideOverlay"/>
 </LinearLayout>

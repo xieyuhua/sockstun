@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Compact spinner item: the sort / filter row is meant to stay small. -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+	android:id="@android:id/text1"
+	android:layout_width="match_parent"
+	android:layout_height="wrap_content"
+	android:minHeight="30dp"
+	android:gravity="center_vertical"
+	android:ellipsize="end"
+	android:maxLines="1"
+	android:paddingLeft="6dp"
+	android:paddingRight="6dp"
+	android:textSize="13sp"
+	android:textColor="?attr/colorOnSurface"/>

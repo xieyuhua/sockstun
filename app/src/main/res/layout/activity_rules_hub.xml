@@ -151,6 +151,12 @@
 						android:layout_height="wrap_content"
 						android:text="@string/rules"
 						android:textAppearance="@style/TextAppearance.TunVPN.Section"/>
+					<TextView
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:layout_marginTop="4dp"
+						android:text="@string/rules_hint"
+						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 					<androidx.appcompat.widget.SwitchCompat
 						android:id="@+id/rules_default_proxy"
 						android:layout_width="match_parent"

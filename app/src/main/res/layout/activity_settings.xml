@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Sectioned settings list. Each card is an empty container here; the rows
+     themselves are inflated from settings_item.xml in SettingsActivity. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
 	xmlns:app="http://schemas.android.com/apk/res-auto"
 	android:orientation="vertical"
@@ -24,82 +26,86 @@
 			android:layout_height="wrap_content"
 			android:paddingLeft="16dp"
 			android:paddingRight="16dp"
-			android:paddingTop="8dp"
 			android:paddingBottom="24dp">
+			<TextView
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:paddingLeft="4dp"
+				android:paddingTop="14dp"
+				android:paddingBottom="6dp"
+				android:text="@string/settings_group_connection"
+				android:textAppearance="?attr/textAppearanceTitleSmall"
+				android:textColor="?attr/colorPrimary"
+				android:textStyle="bold"/>
 			<com.google.android.material.card.MaterialCardView
 				style="@style/Widget.TunVPN.Card"
 				android:layout_width="match_parent"
 				android:layout_height="wrap_content">
 				<LinearLayout
+					android:id="@+id/settings_group_connection"
 					android:orientation="vertical"
 					android:layout_width="match_parent"
-					android:layout_height="wrap_content"
-					android:padding="12dp">
-					<com.google.android.material.button.MaterialButton
-						android:id="@+id/settings_connection"
-						style="?attr/materialButtonOutlinedStyle"
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:minHeight="52dp"
-						android:text="@string/settings_connection"
-						android:textSize="15sp"
-						app:cornerRadius="26dp"
-						app:icon="@drawable/ic_server"
-						app:iconGravity="textStart"
-						app:iconPadding="8dp"/>
-					<com.google.android.material.button.MaterialButton
-						android:id="@+id/settings_apps"
-						style="?attr/materialButtonOutlinedStyle"
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:layout_marginTop="10dp"
-						android:minHeight="52dp"
-						android:text="@string/apps"
-						android:textSize="15sp"
-						app:cornerRadius="26dp"
-						app:icon="@drawable/ic_apps"
-						app:iconGravity="textStart"
-						app:iconPadding="8dp"/>
-					<com.google.android.material.button.MaterialButton
-						android:id="@+id/settings_log"
-						style="?attr/materialButtonOutlinedStyle"
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:layout_marginTop="10dp"
-						android:minHeight="52dp"
-						android:text="@string/log"
-						android:textSize="15sp"
-						app:cornerRadius="26dp"
-						app:icon="@drawable/ic_log"
-						app:iconGravity="textStart"
-						app:iconPadding="8dp"/>
-					<com.google.android.material.button.MaterialButton
-						android:id="@+id/settings_theme"
-						style="?attr/materialButtonOutlinedStyle"
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:layout_marginTop="10dp"
-						android:minHeight="52dp"
-						android:text="@string/theme"
-						android:textSize="15sp"
-						app:cornerRadius="26dp"
-						app:icon="@drawable/ic_palette"
-						app:iconGravity="textStart"
-						app:iconPadding="8dp"/>
-					<com.google.android.material.button.MaterialButton
-						android:id="@+id/settings_version"
-						style="?attr/materialButtonOutlinedStyle"
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:layout_marginTop="10dp"
-						android:minHeight="52dp"
-						android:text="@string/settings_version"
-						android:textSize="15sp"
-						app:cornerRadius="26dp"
-						app:icon="@drawable/ic_traffic"
-						app:iconGravity="textStart"
-						app:iconPadding="8dp"/>
-				</LinearLayout>
+					android:layout_height="wrap_content"/>
+			</com.google.android.material.card.MaterialCardView>
+			<TextView
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:paddingLeft="4dp"
+				android:paddingTop="14dp"
+				android:paddingBottom="6dp"
+				android:text="@string/settings_group_subscription"
+				android:textAppearance="?attr/textAppearanceTitleSmall"
+				android:textColor="?attr/colorPrimary"
+				android:textStyle="bold"/>
+			<com.google.android.material.card.MaterialCardView
+				style="@style/Widget.TunVPN.Card"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content">
+				<LinearLayout
+					android:id="@+id/settings_group_subscription"
+					android:orientation="vertical"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"/>
+			</com.google.android.material.card.MaterialCardView>
+			<TextView
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:paddingLeft="4dp"
+				android:paddingTop="14dp"
+				android:paddingBottom="6dp"
+				android:text="@string/settings_group_general"
+				android:textAppearance="?attr/textAppearanceTitleSmall"
+				android:textColor="?attr/colorPrimary"
+				android:textStyle="bold"/>
+			<com.google.android.material.card.MaterialCardView
+				style="@style/Widget.TunVPN.Card"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content">
+				<LinearLayout
+					android:id="@+id/settings_group_general"
+					android:orientation="vertical"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"/>
+			</com.google.android.material.card.MaterialCardView>
+			<TextView
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:paddingLeft="4dp"
+				android:paddingTop="14dp"
+				android:paddingBottom="6dp"
+				android:text="@string/settings_group_about"
+				android:textAppearance="?attr/textAppearanceTitleSmall"
+				android:textColor="?attr/colorPrimary"
+				android:textStyle="bold"/>
+			<com.google.android.material.card.MaterialCardView
+				style="@style/Widget.TunVPN.Card"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content">
+				<LinearLayout
+					android:id="@+id/settings_group_about"
+					android:orientation="vertical"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"/>
 			</com.google.android.material.card.MaterialCardView>
 		</LinearLayout>
 	</ScrollView>

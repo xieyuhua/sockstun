@@ -23,6 +23,10 @@ public class ClashNode {
 	public int port;
 	public String username;
 	public String password;
+	/* Id of the subscription this node was parsed from. Needed because the
+	   subscribe page shows one merged list but each node's latency has to be
+	   written back to the subscription it belongs to. */
+	public String subId;
 
 	public ClashNode(String name, String type, String server, int port,
 			String username, String password) {
@@ -47,6 +51,7 @@ public class ClashNode {
 				o.put("user", n.username);
 				o.put("pass", n.password);
 				o.put("lat", n.latency);
+				o.put("sub", n.subId == null ? "" : n.subId);
 				arr.put(o);
 			}
 		} catch (JSONException e) {
@@ -70,6 +75,7 @@ public class ClashNode {
 					o.optString("user"),
 					o.optString("pass"));
 				n.latency = o.optLong("lat", -1);
+				n.subId = o.optString("sub");
 				out.add(n);
 			}
 		} catch (JSONException e) {

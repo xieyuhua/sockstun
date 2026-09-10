@@ -103,11 +103,12 @@ public class SubscribeConfigActivity extends BaseActivity {
 						}
 					}
 					prefs.setSubscriptions(list);
+					/* Drop this subscription's fetched YAML + node cache,
+					   otherwise a recreate with the same id would inherit it. */
+					prefs.clearSubCache(s.id);
 					if (s.id.equals(prefs.getActiveSubId())) {
 						prefs.setActiveSubId("");
 						prefs.setSubUrl("");
-						prefs.setSubRaw("");
-						prefs.setSubNodes("");
 						prefs.setSubSelected("");
 					}
 					load();
@@ -197,7 +198,11 @@ public class SubscribeConfigActivity extends BaseActivity {
 			Button delete = (Button) convertView.findViewById(R.id.item_delete);
 
 			name.setText(s.label());
-			detail.setText(s.url);
+			/* Which subscriptions still need a fetch becomes obvious here. */
+			int cached = ClashNode.decode(prefs.getSubNodes(s.id)).size();
+			detail.setText(cached > 0
+				? getString(R.string.subs_cached, s.url, cached)
+				: getString(R.string.subs_not_fetched, s.url));
 
 			boolean active = s.id.equals(prefs.getActiveSubId());
 			badge.setVisibility(active ? View.VISIBLE : View.GONE);

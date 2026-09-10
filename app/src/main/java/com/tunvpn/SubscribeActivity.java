@@ -9,16 +9,20 @@
 
 package com.tunvpn;
 
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.InputType;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CompoundButton;
+import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -30,6 +34,7 @@ import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.color.MaterialColors;
+import com.google.android.material.switchmaterial.SwitchMaterial;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -52,7 +57,6 @@ public class SubscribeActivity extends BaseActivity {
 	private static final int FILTER_BAD = 2;
 
 	private Preferences prefs;
-	private TextView textview_current;
 	private MaterialButton button_fetch;
 	private MaterialButton button_test_all;
 	private ListView listview;
@@ -60,6 +64,8 @@ public class SubscribeActivity extends BaseActivity {
 	private TextView textview_stats;
 	private Spinner spinner_sort;
 	private Spinner spinner_filter;
+	private SwitchMaterial switch_auto;
+	private TextView textview_auto_hint;
 
 	/* nodes = everything we parsed (source of truth, persisted)
 	   shown = what the list displays after filtering + sorting */
@@ -87,7 +93,6 @@ public class SubscribeActivity extends BaseActivity {
 			}
 		});
 
-		textview_current = (TextView) findViewById(R.id.sub_current);
 		button_fetch = (MaterialButton) findViewById(R.id.sub_fetch);
 		button_test_all = (MaterialButton) findViewById(R.id.sub_test_all);
 		listview = (ListView) findViewById(R.id.sub_list);
@@ -95,6 +100,8 @@ public class SubscribeActivity extends BaseActivity {
 		textview_stats = (TextView) findViewById(R.id.sub_stats);
 		spinner_sort = (Spinner) findViewById(R.id.sub_sort);
 		spinner_filter = (Spinner) findViewById(R.id.sub_filter);
+		switch_auto = (SwitchMaterial) findViewById(R.id.sub_auto);
+		textview_auto_hint = (TextView) findViewById(R.id.sub_auto_hint);
 
 
 		adapter = new NodeAdapter();
@@ -103,17 +110,6 @@ public class SubscribeActivity extends BaseActivity {
 
 		setupSpinner(spinner_sort, R.array.sub_sort_options, true);
 		setupSpinner(spinner_filter, R.array.sub_filter_options, false);
-
-		/* Also reachable from the toolbar menu, but that is easy to miss -
-		   the button is what people look for when it says "no subscription". */
-		((MaterialButton) findViewById(R.id.sub_config)).setOnClickListener(
-			new View.OnClickListener() {
-				@Override
-				public void onClick(View v) {
-					startActivity(new Intent(SubscribeActivity.this,
-						SubscribeConfigActivity.class));
-				}
-			});
 
 		button_fetch.setOnClickListener(new View.OnClickListener() {
 			@Override
@@ -134,43 +130,22 @@ public class SubscribeActivity extends BaseActivity {
 			@Override
 			public boolean onMenuItemClick(android.view.MenuItem item) {
 				int id = item.getItemId();
-				if (id == R.id.action_subs)
-				  startActivity(new Intent(SubscribeActivity.this, SubscribeConfigActivity.class));
-				else if (id == R.id.action_help)
+				if (id == R.id.action_help)
 				  showHelp();
 				return true;
 			}
 		});
 
+		setupAutoSelect();
 		loadNodes();
-		updateCurrent();
-	}
-
-	@Override
-	protected void onResume() {
-		super.onResume();
-		updateCurrent();
-	}
-
-	/* Which subscription the node list below belongs to. */
-	private void updateCurrent() {
-		Subscription sub = prefs.getActiveSubscription();
-		if (sub != null) {
-			textview_current.setText(getString(R.string.subs_current, sub.label()));
-			return;
-		}
-		String url = prefs.getSubUrl();
-		if (url == null || url.trim().isEmpty()) {
-			textview_current.setText(R.string.subs_none);
-			return;
-		}
-		textview_current.setText(getString(R.string.subs_current, url.trim()));
 	}
 
 	private void setupSpinner(Spinner spinner, int arrayRes, final boolean isSort) {
+		/* The sort / filter row is deliberately compact, hence our own
+		   small-font item layouts instead of the platform defaults. */
 		ArrayAdapter<CharSequence> a = ArrayAdapter.createFromResource(this,
-			arrayRes, android.R.layout.simple_spinner_item);
-		a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+			arrayRes, R.layout.spinner_item_small);
+		a.setDropDownViewResource(R.layout.spinner_dropdown_item_small);
 		spinner.setAdapter(a);
 		spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
 			@Override
@@ -187,9 +162,17 @@ public class SubscribeActivity extends BaseActivity {
 		});
 	}
 
+	/* One merged list, built from every subscription's own cache. */
 	private void loadNodes() {
 		nodes.clear();
-		nodes.addAll(ClashNode.decode(prefs.getSubNodes()));
+		for (Subscription sub : prefs.getSubscriptions()) {
+			for (ClashNode n : ClashNode.decode(prefs.getSubNodes(sub.id))) {
+				/* Caches written before the merge carry no owner yet. */
+				if (n.subId == null || n.subId.isEmpty())
+				  n.subId = sub.id;
+				nodes.add(n);
+			}
+		}
 		applyView();
 	}
 
@@ -251,61 +234,74 @@ public class SubscribeActivity extends BaseActivity {
 		textview_stats.setText(getString(R.string.sub_stats, ok, bad, nodes.size()));
 	}
 
+	/* Latency results belong to the subscription a node came from, so write
+	   each group back to its own cache. */
 	private void saveNodes() {
-		prefs.setSubNodes(ClashNode.encode(nodes));
+		for (Subscription sub : prefs.getSubscriptions()) {
+			List<ClashNode> mine = new ArrayList<ClashNode>();
+			for (ClashNode n : nodes) {
+				if (sub.id.equals(n.subId))
+				  mine.add(n);
+			}
+			prefs.setSubNodes(sub.id, ClashNode.encode(mine));
+		}
 	}
 
+	/* Fetch every subscription, so the list really is the merged pool the
+	   tunnel will run on. One failing provider does not stop the others. */
 	private void fetch() {
-		Subscription sub = prefs.getActiveSubscription();
-		final String url = (sub != null) ? sub.url : prefs.getSubUrl();
-		if (url == null || url.trim().isEmpty()) {
+		final List<Subscription> subs = prefs.getSubscriptions();
+		if (subs.isEmpty()) {
 			Toast.makeText(this, R.string.subs_none, Toast.LENGTH_SHORT).show();
 			return;
 		}
-		prefs.setSubUrl(url.trim());
 		button_fetch.setEnabled(false);
 		button_fetch.setText(R.string.sub_fetching);
 		new Thread(new Runnable() {
 			@Override
 			public void run() {
+				int total = 0;
+				String firstError = null;
 				try {
-					final String content = download(url);
-					/* Keep the raw clash.yml (base64-decoded) for the mihomo
-					   core, and also list every proxy for display + testing. */
-					final String yaml = ClashParser.decodeRaw(content);
-					final List<ClashNode> parsed = ClashParser.parseAll(yaml);
-					ui.post(new Runnable() {
-						@Override
-						public void run() {
-							nodes.clear();
-							nodes.addAll(parsed);
-							prefs.setSubRaw(yaml);
-							saveNodes();
-							applyView();
-							if (parsed.isEmpty())
-								Toast.makeText(SubscribeActivity.this,
-									R.string.sub_no_nodes, Toast.LENGTH_LONG).show();
-							else
-								Toast.makeText(SubscribeActivity.this,
-									getString(R.string.sub_fetched, parsed.size()),
-									Toast.LENGTH_SHORT).show();
+					for (Subscription sub : subs) {
+						String url = sub.url == null ? "" : sub.url.trim();
+						if (url.isEmpty())
+						  continue;
+						try {
+							/* Keep the raw clash.yml (base64-decoded) for the
+							   core, and the parsed list for display + tests. */
+							String yaml = ClashParser.decodeRaw(download(url));
+							List<ClashNode> parsed = ClashParser.parseAll(yaml);
+							for (ClashNode n : parsed)
+							  n.subId = sub.id;
+							prefs.setSubRaw(sub.id, yaml);
+							prefs.setSubNodes(sub.id, ClashNode.encode(parsed));
+							total += parsed.size();
+						} catch (Exception e) {
+							if (firstError == null)
+							  firstError = sub.label() + ": " + e.getMessage();
 						}
-					});
-				} catch (final Exception e) {
-					ui.post(new Runnable() {
-						@Override
-						public void run() {
-							Toast.makeText(SubscribeActivity.this,
-								getString(R.string.sub_fetch_failed, e.getMessage()),
-								Toast.LENGTH_LONG).show();
-						}
-					});
+					}
 				} finally {
+					final int fetched = total;
+					final String error = firstError;
 					ui.post(new Runnable() {
 						@Override
 						public void run() {
 							button_fetch.setEnabled(true);
 							button_fetch.setText(R.string.sub_fetch);
+							loadNodes();
+							if (fetched > 0)
+							  Toast.makeText(SubscribeActivity.this,
+								getString(R.string.sub_fetched, fetched),
+								Toast.LENGTH_SHORT).show();
+							else if (error != null)
+							  Toast.makeText(SubscribeActivity.this,
+								getString(R.string.sub_fetch_failed, error),
+								Toast.LENGTH_LONG).show();
+							else
+							  Toast.makeText(SubscribeActivity.this,
+								R.string.sub_no_nodes, Toast.LENGTH_LONG).show();
 						}
 					});
 				}
@@ -381,18 +377,21 @@ public class SubscribeActivity extends BaseActivity {
 	}
 
 	private void useNode(final ClashNode n) {
-		/* The mihomo core consumes the whole subscription, so "use" just
-		   remembers which node the user picked; TProxyService asks mihomo to
-		   select it in the subscription's proxy group when the tunnel starts. */
+		/* Tapping a node means the user wants exactly that one, so auto-select
+		   has to go off - otherwise the url-test group would switch away from
+		   it on the next health check. */
+		if (prefs.getAutoSelect()) {
+			prefs.setAutoSelect(false);
+			updateAutoUi();
+		}
+		/* The app owns the routing, so "use" just remembers the pick;
+		   TProxyService selects it in our own group when the tunnel starts. */
 		prefs.setSubSelected(n.name);
 		/* Picking a subscription node hands the upstream back to the
 		   subscription, so any enabled SOCKS5 server is disabled. */
 		prefs.setActiveSocksId("");
-		String group = ClashParser.parseSelectorGroup(prefs.getSubRaw());
 		String msg;
-		if (group == null || group.isEmpty())
-			msg = getString(R.string.sub_no_group);
-		else if (prefs.getEnable()) {
+		if (prefs.getEnable()) {
 			startService(new Intent(this, TProxyService.class)
 				.setAction(TProxyService.ACTION_SELECT));
 			msg = getString(R.string.sub_switched, n.name);
@@ -400,6 +399,85 @@ public class SubscribeActivity extends BaseActivity {
 			msg = getString(R.string.sub_applied_hint, n.name);
 		Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
 		adapter.notifyDataSetChanged();
+	}
+
+	/* Auto-select: mihomo's url-test group picks the fastest node and
+	   re-tests it every `interval` seconds. Off means "use exactly the node
+	   tapped in the list". */
+	private void setupAutoSelect() {
+		switch_auto.setChecked(prefs.getAutoSelect());
+		switch_auto.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+			@Override
+			public void onCheckedChanged(CompoundButton button, boolean checked) {
+				prefs.setAutoSelect(checked);
+				updateAutoUi();
+				/* The group type is baked in when the tunnel starts, so a
+				   running tunnel keeps its old behaviour until reconnected. */
+				if (prefs.getEnable())
+				  Toast.makeText(SubscribeActivity.this,
+					R.string.sub_auto_restart, Toast.LENGTH_LONG).show();
+			}
+		});
+		textview_auto_hint.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				editInterval();
+			}
+		});
+		updateAutoUi();
+	}
+
+	private void updateAutoUi() {
+		boolean auto = prefs.getAutoSelect();
+		/* setChecked() only fires the listener when the value actually
+		   changes, so this cannot recurse. */
+		switch_auto.setChecked(auto);
+		textview_auto_hint.setEnabled(auto);
+		textview_auto_hint.setText(auto
+			? getString(R.string.sub_auto_hint, intervalLabel())
+			: getString(R.string.sub_manual_hint));
+	}
+
+	private String intervalLabel() {
+		int minutes = Math.max(1, Math.round(prefs.getAutoSelectInterval() / 60f));
+		return getString(R.string.sub_minutes, minutes);
+	}
+
+	private void editInterval() {
+		if (!prefs.getAutoSelect())
+		  return;
+		final EditText input = new EditText(this);
+		input.setInputType(InputType.TYPE_CLASS_NUMBER);
+		input.setText(Integer.toString(Math.max(1,
+			Math.round(prefs.getAutoSelectInterval() / 60f))));
+		input.setSelection(input.getText().length());
+		int pad = (int) (20 * getResources().getDisplayMetrics().density);
+		input.setPadding(pad, pad / 2, pad, 0);
+
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.sub_interval_title)
+			.setView(input)
+			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface d, int which) {
+					int minutes = 5;
+					try {
+						minutes = Integer.parseInt(input.getText().toString().trim());
+					} catch (NumberFormatException e) {
+					}
+					if (minutes < 1)
+					  minutes = 1;
+					if (minutes > 1440)
+					  minutes = 1440;
+					prefs.setAutoSelectInterval(minutes * 60);
+					updateAutoUi();
+					if (prefs.getEnable())
+					  Toast.makeText(SubscribeActivity.this,
+						R.string.sub_auto_restart, Toast.LENGTH_LONG).show();
+				}
+			})
+			.setNegativeButton(android.R.string.cancel, null)
+			.show();
 	}
 
 	private void showHelp() {
@@ -438,13 +516,22 @@ public class SubscribeActivity extends BaseActivity {
 			MaterialCardView card = (MaterialCardView) convertView;
 			TextView name = (TextView) convertView.findViewById(R.id.item_name);
 			TextView detail = (TextView) convertView.findViewById(R.id.item_detail);
+			TextView proto = (TextView) convertView.findViewById(R.id.item_proto);
 			TextView status = (TextView) convertView.findViewById(R.id.item_status);
 			TextView badge = (TextView) convertView.findViewById(R.id.item_badge);
 			Button use = (Button) convertView.findViewById(R.id.item_use);
 			Button test = (Button) convertView.findViewById(R.id.item_test);
 
 			name.setText(n.name);
-			detail.setText(n.server + ":" + n.port + "  ·  " + n.type);
+			detail.setText(n.server + ":" + n.port);
+			/* The protocol gets its own tag: sharing a line with the address
+			   meant a long host name would ellipsize it away. */
+			if (n.type == null || n.type.isEmpty()) {
+				proto.setVisibility(View.GONE);
+			} else {
+				proto.setText(n.type);
+				proto.setVisibility(View.VISIBLE);
+			}
 
 			if (n.latency >= 0) {
 				status.setText(n.latency + " ms");

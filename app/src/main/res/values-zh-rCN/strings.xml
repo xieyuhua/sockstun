@@ -65,7 +65,7 @@
 	<string name="traffic_hint">应用数据取自系统统计，其中也包含未走隧道的流量，仅供参考。</string>
 
 	<string name="rules">路由规则</string>
-	<string name="rules_hint">按域名、IP 或 IP 段匹配。域名在连接时解析为 IP；「直连」规则需要 Android 13 及以上系统。</string>
+	<string name="rules_hint">按域名、IP 或 IP 段匹配。域名规则同时匹配其子域；改动在下次连接时生效。</string>
 	<string name="rules_default_proxy">未命中的流量走代理</string>
 	<string name="rule_add">添加</string>
 	<string name="rule_delete">删除</string>

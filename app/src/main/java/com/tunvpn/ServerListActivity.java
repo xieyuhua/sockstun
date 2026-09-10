@@ -107,8 +107,8 @@ public class ServerListActivity extends BaseActivity {
 			.show();
 	}
 
-	/* Shared by the list and the editor: drop the entry and, if it was the
-	   enabled one, hand the upstream back to the subscription. */
+	/* Drop the entry and, if it was the enabled one, hand the upstream back
+	   to the subscription. */
 	public static void removeServer(Preferences prefs, String id) {
 		List<SocksServer> list = prefs.getSocksServers();
 		for (int i = 0; i < list.size(); i++) {

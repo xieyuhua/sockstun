@@ -72,6 +72,7 @@ public class TProxyService extends VpnService {
 	private long baseTx, baseRx, totalTx, totalRx;
 	private long txRate, rxRate;
 	private String lastNotifyText = null;
+	private int trafficSamples = 0;
 
 	/* Append a line to the log file directly (bypassing the fd-1/2
 	   redirection), so startup diagnostics are always captured even if the
@@ -192,6 +193,9 @@ public class TProxyService extends VpnService {
 		try {
 			configFile = MihomoConfig.build(this, prefs);
 			appendLog("config: " + configFile.getAbsolutePath());
+			appendLog("routing: " + (prefs.getAutoSelect()
+				? "auto (url-test, " + prefs.getAutoSelectInterval() + "s)"
+				: "manual") + ", " + prefs.getRules().size() + " rule(s)");
 		} catch (Throwable e) {
 			failStartup("生成配置失败：" + e.getMessage());
 			return;
@@ -337,43 +341,40 @@ public class TProxyService extends VpnService {
 		stopSelf();
 	}
 
-	/* {"<group>":"<node>"} for quickSetup's selected-map; empty when no node
-	   has been picked yet. */
+	/* {"<group>":"<node>"} for quickSetup's selected-map. Empty when no node
+	   has been picked yet, and in auto-select mode where the group's url-test
+	   logic owns the choice. */
 	private String selectedMap(Preferences prefs) {
+		if (prefs.getAutoSelect())
+		  return "{}";
 		String sel = prefs.getSubSelected();
 		if (sel == null || sel.isEmpty())
 		  return "{}";
-		String group = ClashParser.parseSelectorGroup(prefs.getSubRaw());
-		if (group == null || group.isEmpty())
-		  return "{}";
 		try {
 			JSONObject map = new JSONObject();
-			map.put(group, sel);
+			map.put(MihomoConfig.GROUP, sel);
 			return map.toString();
 		} catch (JSONException e) {
 			return "{}";
 		}
 	}
 
-	/* Ask mihomo to select the chosen proxy inside its proxy group. The exact
-	   group name varies between subscriptions; failures are non-fatal (the
-	   subscription's own default stays in effect). */
+	/* Ask mihomo to select the chosen proxy inside the group we built. In
+	   auto-select mode a manual pick would be undone by the next health
+	   check, so leave the choice to url-test. */
 	private void applySelectedNode(Preferences prefs) {
+		if (prefs.getAutoSelect()) {
+			appendLog("selector skipped: auto-select is on");
+			return;
+		}
 		String sel = prefs.getSubSelected();
 		if (sel == null || sel.isEmpty())
 		  return;
-		/* The group is named by the subscription, so look it up instead of
-		   assuming it is called GLOBAL. */
-		String group = ClashParser.parseSelectorGroup(prefs.getSubRaw());
-		if (group == null || group.isEmpty()) {
-			appendLog("selector skipped: subscription has no switchable proxy-group");
-			return;
-		}
 		/* An action document is {"id","method","data"}; changeProxy expects
 		   data to be a *string* holding {"group-name","proxy-name"}. */
 		try {
 			JSONObject data = new JSONObject();
-			data.put("group-name", group);
+			data.put("group-name", MihomoConfig.GROUP);
 			data.put("proxy-name", sel);
 			JSONObject action = new JSONObject();
 			action.put("id", "select");
@@ -385,7 +386,7 @@ public class TProxyService extends VpnService {
 					appendLog("selector set: " + (result == null ? "ok" : result));
 				}
 			});
-			appendLog("selected node: " + sel + " in group " + group);
+			appendLog("selected node: " + sel + " in group " + MihomoConfig.GROUP);
 		} catch (JSONException e) {
 			appendLog("selector set skipped: " + e);
 		} catch (Throwable e) {
@@ -483,6 +484,7 @@ public class TProxyService extends VpnService {
 		totalRx = baseRx;
 		lastTime = SystemClock.elapsedRealtime();
 		lastNotifyText = null;
+		trafficSamples = 0;
 
 		prefs.setStats(totalTx, totalRx, 0, 0, 0, 0);
 		prefs.setAppStats(snapshotApps(this, prefs), prefs.getAppTotal());
@@ -503,17 +505,40 @@ public class TProxyService extends VpnService {
 		long dt = now - lastTime;
 		lastTime = now;
 
+		/* These must come from the since-the-core-started total. getTraffic()
+		   only carries the last second's delta, so treating it as a running
+		   total makes both the rate (a delta of a delta) and the session
+		   figure meaningless. */
 		long tx = -1, rx = -1;
+		String raw = null;
+		Throwable error = null;
 		try {
-			String s = Clash.INSTANCE.getTraffic();
-			if (s != null) {
-				tx = jsonLong(s, "up");
-				if (tx < 0) tx = jsonLong(s, "Upload");
-				rx = jsonLong(s, "down");
-				if (rx < 0) rx = jsonLong(s, "Download");
-			}
+			raw = Clash.INSTANCE.getTotalTraffic();
+			tx = jsonBytes(raw, "uploadTotal", "up", "Upload");
+			rx = jsonBytes(raw, "downloadTotal", "down", "Download");
 		} catch (Throwable e) {
+			error = e;
 		}
+		if (tx < 0 || rx < 0) {
+			/* Fall back to the delta counter, for a bridge that has no
+			   total one. */
+			try {
+				String s = Clash.INSTANCE.getTraffic();
+				if (s != null) {
+					if (tx < 0)
+					  tx = jsonBytes(s, "up", "Upload", "uploadTotal");
+					if (rx < 0)
+					  rx = jsonBytes(s, "down", "Download", "downloadTotal");
+					if (raw == null)
+					  raw = s;
+				}
+			} catch (Throwable e) {
+				if (error == null)
+				  error = e;
+			}
+		}
+		logTraffic(raw, tx, rx, error);
+
 		if (tx >= 0 && rx >= 0) {
 			if (dt > 0) {
 				txRate = Math.max((tx - lastTx) * 1000 / dt, 0);
@@ -533,13 +558,33 @@ public class TProxyService extends VpnService {
 		saveStats();
 	}
 
-	private static long jsonLong(String json, String key) {
-		try {
-			Pattern p = Pattern.compile("\"" + key + "\"\\s*:\\s*(\\d+)");
-			Matcher m = p.matcher(json);
-			if (m.find())
-			  return Long.parseLong(m.group(1));
-		} catch (Exception e) {
+	/* A stuck traffic counter is invisible from the UI - it just keeps
+	   showing 0 - so record what the core actually returned. The first few
+	   samples plus one a minute, otherwise the log floods. */
+	private void logTraffic(String raw, long tx, long rx, Throwable error) {
+		trafficSamples++;
+		if (error != null) {
+			if (trafficSamples <= 5)
+			  appendLog("traffic: sample failed: " + error);
+			return;
+		}
+		if (trafficSamples <= 3 || (trafficSamples % 60) == 0)
+		  appendLog("traffic: raw=" + raw + " tx=" + tx + " rx=" + rx);
+	}
+
+	/* mihomo reports the running totals as uploadTotal/downloadTotal and the
+	   per-second deltas as up/down; accept every spelling seen in the wild. */
+	private static long jsonBytes(String json, String... keys) {
+		if (json == null)
+		  return -1;
+		for (String key : keys) {
+			try {
+				Pattern p = Pattern.compile("\"" + key + "\"\\s*:\\s*(-?\\d+)");
+				Matcher m = p.matcher(json);
+				if (m.find())
+				  return Long.parseLong(m.group(1));
+			} catch (Exception e) {
+			}
 		}
 		return -1;
 	}

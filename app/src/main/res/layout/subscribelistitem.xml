@@ -35,15 +35,39 @@
 				android:textAppearance="?attr/textAppearanceLabelLarge"
 				android:textStyle="bold"/>
 		</LinearLayout>
-		<TextView
-			android:id="@+id/item_detail"
+		<!-- Protocol sits in its own tag so a long server address can never
+		     push it out of view; the address itself is the one that ellipsizes. -->
+		<LinearLayout
+			android:orientation="horizontal"
 			android:layout_width="match_parent"
 			android:layout_height="wrap_content"
-			android:layout_marginTop="4dp"
-			android:ellipsize="end"
-			android:maxLines="1"
-			android:textAppearance="?attr/textAppearanceBodySmall"
-			android:textColor="?attr/colorOnSurfaceVariant"/>
+			android:layout_marginTop="6dp"
+			android:gravity="center_vertical">
+			<TextView
+				android:id="@+id/item_proto"
+				android:layout_width="wrap_content"
+				android:layout_height="wrap_content"
+				android:background="@drawable/bg_chip"
+				android:maxLines="1"
+				android:paddingLeft="8dp"
+				android:paddingRight="8dp"
+				android:paddingTop="2dp"
+				android:paddingBottom="2dp"
+				android:textSize="11sp"
+				android:textStyle="bold"
+				android:textColor="?attr/colorOnPrimaryContainer"
+				android:visibility="gone"/>
+			<TextView
+				android:id="@+id/item_detail"
+				android:layout_width="0dp"
+				android:layout_height="wrap_content"
+				android:layout_weight="1"
+				android:layout_marginStart="8dp"
+				android:ellipsize="end"
+				android:maxLines="1"
+				android:textAppearance="?attr/textAppearanceBodySmall"
+				android:textColor="?attr/colorOnSurfaceVariant"/>
+		</LinearLayout>
 		<TextView
 			android:id="@+id/item_badge"
 			android:layout_width="wrap_content"
@@ -64,9 +88,9 @@
 				android:layout_width="0dp"
 				android:layout_weight="1"
 				android:layout_height="wrap_content"
-				android:minHeight="42dp"
+				android:minHeight="38dp"
 				android:text="@string/sub_test"
-				android:textSize="13sp"/>
+				android:textSize="12sp"/>
 			<com.google.android.material.button.MaterialButton
 				android:id="@+id/item_use"
 				style="?attr/materialButtonOutlinedStyle"
@@ -74,9 +98,9 @@
 				android:layout_weight="1"
 				android:layout_height="wrap_content"
 				android:layout_marginStart="12dp"
-				android:minHeight="42dp"
+				android:minHeight="38dp"
 				android:text="@string/sub_use"
-				android:textSize="13sp"/>
+				android:textSize="12sp"/>
 		</LinearLayout>
 	</LinearLayout>
 </com.google.android.material.card.MaterialCardView>

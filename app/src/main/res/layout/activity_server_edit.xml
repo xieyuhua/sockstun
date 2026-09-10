@@ -102,20 +102,7 @@
 					</com.google.android.material.textfield.TextInputLayout>
 				</LinearLayout>
 			</com.google.android.material.card.MaterialCardView>
-			<com.google.android.material.button.MaterialButton
-				android:id="@+id/server_delete"
-				style="?attr/materialButtonOutlinedStyle"
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="16dp"
-				android:minHeight="48dp"
-				android:text="@string/server_delete"
-				android:textSize="14sp"
-				app:cornerRadius="24dp"
-				app:icon="@drawable/ic_delete"
-				app:iconGravity="textStart"
-				app:iconPadding="8dp"/>
-		</LinearLayout>
+			</LinearLayout>
 	</ScrollView>
 	<com.google.android.material.button.MaterialButton
 		android:id="@+id/save"

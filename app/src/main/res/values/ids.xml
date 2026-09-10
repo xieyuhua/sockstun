@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ids for the settings rows. The rows are inflated from settings_item.xml
+     and get their id assigned in code, so the ids cannot live in a layout. -->
+<resources>
+	<item name="settings_connection" type="id"/>
+	<item name="settings_apps" type="id"/>
+	<item name="settings_subscription" type="id"/>
+	<item name="settings_log" type="id"/>
+	<item name="settings_theme" type="id"/>
+	<item name="settings_version" type="id"/>
+</resources>
