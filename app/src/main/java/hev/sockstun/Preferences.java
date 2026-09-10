@@ -52,12 +52,6 @@ public class Preferences
 	public static final String STATS_RATE_RX = "StatsRateRx";
 	public static final String STATS_APP_BASE = "StatsAppBase";
 	public static final String STATS_APP_TOTAL = "StatsAppTotal";
-	public static final String CONN_TCP = "ConnTcp";
-	public static final String CONN_UDP = "ConnUdp";
-	public static final String CONN_TOTAL = "ConnTotal";
-	public static final String CONN_APP_TOTAL = "ConnAppTotal";
-	public static final String CONN_LIST = "ConnList";
-	public static final String CONN_UNREADABLE = "ConnUnreadable";
 	public static final String THEME = "Theme";
 
 	public static final int MAX_PROFILES = 13;
@@ -627,56 +621,6 @@ public class Preferences
 			sb.append(e.getKey()).append(':').append(v[0]).append(':').append(v[1]);
 		}
 		return sb.toString();
-	}
-
-	/* Connection snapshot taken from /proc/net, refreshed once a second by
-	   the tunnel service. ConnList holds "proto|local|remote|state|pkg;...". */
-	public int getConnTcp() {
-		return prefs.getInt(CONN_TCP, 0);
-	}
-
-	public int getConnUdp() {
-		return prefs.getInt(CONN_UDP, 0);
-	}
-
-	public long getConnTotal() {
-		return prefs.getLong(CONN_TOTAL, 0);
-	}
-
-	public String getConnAppTotal() {
-		return prefs.getString(CONN_APP_TOTAL, "");
-	}
-
-	public String getConnList() {
-		return prefs.getString(CONN_LIST, "");
-	}
-
-	public void setConnections(int tcp, int udp, long total, String appTotal, String list) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putInt(CONN_TCP, tcp);
-		editor.putInt(CONN_UDP, udp);
-		editor.putLong(CONN_TOTAL, total);
-		editor.putString(CONN_APP_TOTAL, appTotal);
-		editor.putString(CONN_LIST, list);
-		editor.commit();
-	}
-
-	public void resetConnections() {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putLong(CONN_TOTAL, 0);
-		editor.putString(CONN_APP_TOTAL, "");
-		editor.commit();
-	}
-
-	/* True when /proc/net could not be read on this device (Android 10+). */
-	public boolean getConnUnreadable() {
-		return prefs.getBoolean(CONN_UNREADABLE, false);
-	}
-
-	public void setConnUnreadable(boolean v) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putBoolean(CONN_UNREADABLE, v);
-		editor.commit();
 	}
 
 	/* The set of packages whose traffic goes through the tunnel:

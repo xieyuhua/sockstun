@@ -26,8 +26,8 @@ theme picker sits in the Home toolbar (top-right icon).
   active proxy right away, reconnecting the tunnel if it is running. Each entry
   keeps its own DNS, scope, apps and rules.
 * **Rules** — three cards: proxy scope (global / per-app, IPv4/IPv6, UDP over
-  TCP), DNS, then the rules card holding the domain / IP / CIDR list together
-  with the "unmatched traffic uses the proxy" switch below it.
+  TCP), DNS, then one rules card holding the "unmatched traffic uses the proxy"
+  switch on top of the domain / IP / CIDR list.
 * **Apps** — pick which apps use the tunnel in per-app mode.
 * **Log** — toggle and read the tunnel log.
 

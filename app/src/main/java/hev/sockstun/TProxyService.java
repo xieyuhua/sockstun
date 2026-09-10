@@ -39,19 +39,15 @@ import android.system.OsConstants;
 import java.lang.reflect.Method;
 
 import java.io.FileDescriptor;
-import java.io.BufferedReader;
-import java.io.FileReader;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import android.widget.Toast;
 
 public class TProxyService extends VpnService {
@@ -92,8 +88,6 @@ public class TProxyService extends VpnService {
 	private long baseTx, baseRx, totalTx, totalRx;
 	private long txRate, rxRate;
 	private String lastNotifyText = null;
-	private final Set<String> seenConns = new HashSet<String>();
-	private boolean connLogged = false;
 
 	/* Append a line to the log file directly (bypassing the fd-1/2
 	   redirection), so startup diagnostics are always captured even if the
@@ -414,8 +408,6 @@ public class TProxyService extends VpnService {
 		totalRx = baseRx;
 		lastTime = SystemClock.elapsedRealtime();
 		lastNotifyText = null;
-		seenConns.clear();
-		connLogged = false;
 
 		/* Baseline of the per-app counters, so the traffic screen can show
 		   what each app used during this session. */
@@ -427,7 +419,6 @@ public class TProxyService extends VpnService {
 			@Override
 			public void run() {
 				sampleStats(true);
-				sampleConnections();
 				statsHandler.postDelayed(this, STATS_INTERVAL);
 			}
 		};
@@ -625,14 +616,14 @@ public class TProxyService extends VpnService {
 					try {
 						addTarget(target, rule.value.substring(0, slash),
 							Integer.parseInt(rule.value.substring(slash + 1)));
-						} catch (NumberFormatException e) {
-						}
-						} else {
-						addTarget(target, rule.value, -1);
-						}
-						} else {
-						addTarget(target, rule.value, -1);
-						}
+					} catch (NumberFormatException e) {
+					}
+				} else {
+					addTarget(target, rule.value, -1);
+				}
+			} else {
+				addTarget(target, rule.value, -1);
+			}
 		}
 
 		boolean defaultProxy = prefs.getRulesDefaultProxy();
@@ -694,163 +685,6 @@ public class TProxyService extends VpnService {
 		boolean v6 = ia instanceof Inet6Address;
 		int length = prefix < 0 ? (v6 ? 128 : 32) : prefix;
 		routes.add(new Route(addr, length, v6));
-	}
-
-	/* ------------------------------------------------------------------
-	   Connections
-
-	   The native engine exposes no connection table, so the sockets are
-	   read from /proc/net (tcp / tcp6 / udp / udp6). Only the sockets of
-	   the apps routed through the tunnel are kept. Some Android versions
-	   hide /proc/net from apps, in which case everything stays empty.
-	   ------------------------------------------------------------------ */
-	private void sampleConnections() {
-		Preferences prefs = new Preferences(this);
-		List<String[]> rows = readConnections(prefs);
-
-		int tcp = 0;
-		int udp = 0;
-		long total = prefs.getConnTotal();
-		Map<String, long[]> appTotal = Preferences.parseAppStats(prefs.getConnAppTotal());
-		StringBuilder sb = new StringBuilder();
-
-		for (String[] row : rows) {
-			String proto = row[0];
-			if (proto.startsWith("udp"))
-			  udp++;
-			else
-			  tcp++;
-
-			String key = proto + "|" + row[1] + "|" + row[2];
-			if (seenConns.add(key)) {
-				total++;
-				long[] count = appTotal.get(row[4]);
-				if (count == null)
-				  appTotal.put(row[4], new long[] { 1, 0 });
-				else
-				  count[0]++;
-			}
-
-			if (sb.length() < 6000) {
-				if (sb.length() > 0)
-				  sb.append(';');
-				sb.append(proto).append('|').append(row[1]).append('|')
-				  .append(row[2]).append('|').append(row[3]).append('|').append(row[4]);
-			}
-		}
-
-		prefs.setConnections(tcp, udp, total, Preferences.formatAppStats(appTotal), sb.toString());
-	}
-
-	private List<String[]> readConnections(Preferences prefs) {
-		List<String[]> rows = new ArrayList<String[]>();
-		Map<Integer, String> uids = new HashMap<Integer, String>();
-		PackageManager pm = getPackageManager();
-
-		for (String pkg : prefs.getRoutedApps(this)) {
-			int uid = uidOf(pm, pkg);
-			if (uid >= 0)
-			  uids.put(uid, pkg);
-		}
-		if (uids.isEmpty()) {
-			logConn("conn: no routed app, nothing to scan");
-			return rows;
-		}
-
-		String[] files = { "/proc/net/tcp", "/proc/net/tcp6", "/proc/net/udp", "/proc/net/udp6" };
-		int scanned = 0;
-		boolean openedAny = false;
-		for (String file : files) {
-			String proto = file.substring(file.lastIndexOf('/') + 1);
-			boolean v6 = proto.endsWith("6");
-			BufferedReader reader = null;
-			try {
-				reader = new BufferedReader(new FileReader(file));
-				if (reader.readLine() != null)
-				  openedAny = true;
-				String line;
-				while ((line = reader.readLine()) != null) {
-					scanned++;
-					String[] f = line.trim().split("\\s+");
-					if (f.length < 10)
-					  continue;
-					String pkg = uids.get(parseUid(f[7]));
-					if (pkg == null)
-					  continue;
-					if ("0A".equalsIgnoreCase(f[3]))
-					  continue;
-					String local = parseAddr(f[1], v6);
-					String remote = parseAddr(f[2], v6);
-					if (local == null || remote == null)
-					  continue;
-					rows.add(new String[] { proto, local, remote, f[3], pkg });
-				}
-			} catch (Exception e) {
-			} finally {
-				if (reader != null) {
-					try {
-						reader.close();
-					} catch (Exception e) {
-					}
-				}
-			}
-		}
-		if (!uids.isEmpty())
-		  prefs.setConnUnreadable(!openedAny);
-		if (!openedAny)
-		  logConn("conn: /proc/net is not readable (blocked by the system?)");
-		else
-		  logConn("conn: " + rows.size() + " sockets of " + uids.size() + " apps (" + scanned + " scanned)");
-		return rows;
-	}
-
-	/* Write the connection diagnostic only once per session. */
-	private void logConn(String text) {
-		if (!connLogged) {
-			connLogged = true;
-			appendLog(text);
-		}
-	}
-
-	private static int parseUid(String text) {
-		try {
-			return Integer.parseInt(text);
-		} catch (NumberFormatException e) {
-			return -1;
-		}
-	}
-
-	private static String parseAddr(String field, boolean v6) {
-		int colon = field.lastIndexOf(':');
-		if (colon < 0)
-		  return null;
-		String addr;
-		int port;
-		try {
-			addr = v6 ? hexToIpv6(field.substring(0, colon)) : hexToIpv4(field.substring(0, colon));
-			port = Integer.parseInt(field.substring(colon + 1), 16);
-		} catch (Exception e) {
-			return null;
-		}
-		return addr + ":" + port;
-	}
-
-	private static String hexToIpv4(String hex) {
-		long v = Long.parseLong(hex, 16);
-		return (v & 0xff) + "." + ((v >> 8) & 0xff) + "." +
-			((v >> 16) & 0xff) + "." + ((v >> 24) & 0xff);
-	}
-
-	private static String hexToIpv6(String hex) {
-		StringBuilder sb = new StringBuilder();
-		for (int i = 0; i < 4; i++) {
-			long word = Long.parseLong(hex.substring(i * 8, i * 8 + 8), 16);
-			if (i > 0)
-			  sb.append(':');
-			sb.append(Long.toHexString(word & 0xffff)).append(':')
-			  .append(Long.toHexString((word >> 16) & 0xffff));
-		}
-		return sb.toString();
 	}
 
 	/* Resolve the domains of the rules on a worker thread with a bounded

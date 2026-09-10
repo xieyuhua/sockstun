@@ -25,36 +25,56 @@ public abstract class BaseActivity extends AppCompatActivity {
 	}
 
 	/* Attach the horizontal bottom menu. Call it after setContentView()
-	   from every screen that shows the bar (see @layout/bottom_nav). */
+	   from every screen that shows the bar (see @layout/bottom_nav).
+
+	   Both callbacks are wired on purpose. BottomNavigationView decides
+	   between "selected" and "reselected" using its own internal
+	   selectedItemId, which is not reliably updated by setSelectedItemId()
+	   below - it can stay on the first menu entry. Without the reselected
+	   callback, tapping Home from another tab is treated as re-tapping the
+	   current tab and never reaches onNavigationItemSelected(). */
 	protected void setupBottomNav(int selectedId) {
 		final BottomNavigationView nav = (BottomNavigationView) findViewById(R.id.bottom_nav);
 		if (nav == null)
 		  return;
 
+		/* Mark the current tab first, so registering the listeners does not
+		   immediately fire a navigation. */
 		nav.setSelectedItemId(selectedId);
+
 		nav.setOnItemSelectedListener(new NavigationBarView.OnItemSelectedListener() {
 			@Override
 			public boolean onNavigationItemSelected(MenuItem item) {
-				int id = item.getItemId();
-				if (id == selectedId)
-				  return true;
-
-				Class<?> target = activityFor(id);
-				if (target == null)
-				  return false;
-
-				Intent intent = new Intent(BaseActivity.this, target);
-				intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP |
-					Intent.FLAG_ACTIVITY_SINGLE_TOP);
-				startActivity(intent);
-				/* No transition: the bar must feel like switching tabs
-				   inside a single screen, not like opening a new page. */
-				overridePendingTransition(0, 0);
-				if (!(BaseActivity.this instanceof MainActivity))
-				  finish();
-				return true;
+				return navigateTo(item.getItemId());
 			}
 		});
+		nav.setOnItemReselectedListener(new NavigationBarView.OnItemReselectedListener() {
+			@Override
+			public void onNavigationItemReselected(MenuItem item) {
+				navigateTo(item.getItemId());
+			}
+		});
+	}
+
+	private boolean navigateTo(int itemId) {
+		Class<?> target = activityFor(itemId);
+		if (target == null)
+		  return false;
+		/* Compare activity types, not the id passed to setupBottomNav():
+		   that is what actually decides whether we are already there. */
+		if (getClass() == target)
+		  return true;
+
+		Intent intent = new Intent(this, target);
+		intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP |
+			Intent.FLAG_ACTIVITY_SINGLE_TOP);
+		startActivity(intent);
+		/* No transition: the bar must feel like switching tabs inside a
+		   single screen, not like opening a new page. */
+		overridePendingTransition(0, 0);
+		if (!(this instanceof MainActivity))
+		  finish();
+		return true;
 	}
 
 	private static Class<?> activityFor(int itemId) {

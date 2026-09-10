@@ -13,6 +13,7 @@ import java.util.List;
 
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -26,10 +27,10 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
-import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.color.MaterialColors;
 
 public class ServerActivity extends BaseActivity {
 	public static final String EXTRA_INDEX = "index";
@@ -56,10 +57,24 @@ public class ServerActivity extends BaseActivity {
 			View row = inflater.inflate(R.layout.serveritem, parent, false);
 
 			final Entry entry = getItem(position);
+			final boolean selected = prefs.getSelected() == entry.index;
+
 			((TextView) row.findViewById(R.id.name)).setText(entry.name);
 			((TextView) row.findViewById(R.id.detail)).setText(entry.addr + ":" + entry.port);
-			row.findViewById(R.id.badge).setVisibility(
-				prefs.getSelected() == entry.index ? View.VISIBLE : View.GONE);
+			row.findViewById(R.id.badge).setVisibility(selected ? View.VISIBLE : View.GONE);
+			row.setBackgroundColor(selected
+				? MaterialColors.getColor(row,
+					com.google.android.material.R.attr.colorPrimaryContainer, 0)
+				: Color.TRANSPARENT);
+
+			/* The row itself handles the click: the ImageButtons inside would
+			   otherwise swallow it, and ListView.onItemClick never fires. */
+			row.setOnClickListener(new View.OnClickListener() {
+				@Override
+				public void onClick(View v) {
+					select(entry.index);
+				}
+			});
 
 			ImageButton edit = (ImageButton) row.findViewById(R.id.edit);
 			edit.setOnClickListener(new View.OnClickListener() {
@@ -96,13 +111,6 @@ public class ServerActivity extends BaseActivity {
 		adapter = new ServerAdapter();
 		listView = (ListView) findViewById(R.id.list);
 		listView.setAdapter(adapter);
-		listView.setOnItemClickListener(new android.widget.AdapterView.OnItemClickListener() {
-			@Override
-			public void onItemClick(android.widget.AdapterView<?> parent, View view,
-					int position, long id) {
-				select(adapter.getItem(position).index);
-			}
-		});
 
 		((MaterialButton) findViewById(R.id.add)).setOnClickListener(new View.OnClickListener() {
 			@Override

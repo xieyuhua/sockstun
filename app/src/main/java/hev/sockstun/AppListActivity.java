@@ -13,7 +13,6 @@ import java.util.Set;
 import java.util.List;
 import java.util.Arrays;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.Comparator;
 import java.util.Collections;
 import java.util.ArrayList;
@@ -36,8 +35,6 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageInfo;
 import android.content.pm.ApplicationInfo;
-
-import androidx.appcompat.app.AppCompatActivity;
 
 import com.google.android.material.appbar.MaterialToolbar;
 

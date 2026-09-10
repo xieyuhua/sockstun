@@ -174,10 +174,28 @@
 						android:layout_height="wrap_content"
 						android:text="@string/section_rules"
 						android:textAppearance="@style/TextAppearance.SocksTun.Section"/>
+					<com.google.android.material.materialswitch.MaterialSwitch
+						android:id="@+id/rules_default_proxy"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:minHeight="48dp"
+						android:text="@string/rules_default_proxy"
+						android:textAppearance="?attr/textAppearanceBodyLarge"/>
 					<TextView
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
-						android:layout_marginTop="4dp"
+						android:layout_marginLeft="4dp"
+						android:text="@string/rules_default_proxy_hint"
+						android:textAppearance="@style/TextAppearance.SocksTun.Hint"/>
+					<View
+						android:layout_width="match_parent"
+						android:layout_height="1dp"
+						android:layout_marginTop="12dp"
+						android:layout_marginBottom="8dp"
+						android:background="?attr/colorOutline"/>
+					<TextView
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
 						android:text="@string/rules_hint"
 						android:textAppearance="@style/TextAppearance.SocksTun.Hint"/>
 					<LinearLayout
@@ -238,25 +256,6 @@
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
 						android:layout_marginTop="4dp"/>
-					<View
-						android:layout_width="match_parent"
-						android:layout_height="1dp"
-						android:layout_marginTop="12dp"
-						android:layout_marginBottom="8dp"
-						android:background="?attr/colorOutline"/>
-					<com.google.android.material.materialswitch.MaterialSwitch
-						android:id="@+id/rules_default_proxy"
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:minHeight="48dp"
-						android:text="@string/rules_default_proxy"
-						android:textAppearance="?attr/textAppearanceBodyLarge"/>
-					<TextView
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:layout_marginLeft="4dp"
-						android:text="@string/rules_default_proxy_hint"
-						android:textAppearance="@style/TextAppearance.SocksTun.Hint"/>
 				</LinearLayout>
 			</com.google.android.material.card.MaterialCardView>
 		</LinearLayout>
