@@ -792,7 +792,11 @@ public class Preferences
 		editor.commit();
 	}
 
+	/* VPN interface MTU. This used to be 8500 - a jumbo-frame value - which
+	   is far above the 1500 the physical link actually carries. Small packets
+	   (the TCP handshake, DNS) still get through, so the tunnel looks
+	   connected, while every real data transfer is silently dropped. */
 	public int getTunnelMtu() {
-		return 8500;
+		return 1500;
 	}
 }

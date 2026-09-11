@@ -53,11 +53,14 @@ public class MihomoConfig {
 				.append("  enable: true\n")
 				.append("  enhanced-mode: fake-ip\n")
 				.append("  fake-ip-range: 198.18.0.1/16\n")
+				/* No DoH fallback: 1.1.1.1 is unreachable from a lot of
+				   networks, and an unreachable fallback makes every lookup
+				   wait for its timeout. With fake-ip the real hostname is
+				   handed to the proxy anyway, so foreign names do not need a
+				   local resolver at all. */
 				.append("  nameserver:\n")
 				.append("    - 223.5.5.5\n")
-				.append("    - 119.29.29.29\n")
-				.append("  fallback:\n")
-				.append("    - https://1.1.1.1/dns-query\n");
+				.append("    - 119.29.29.29\n");
 
 		if (!sectionExists(cfg, "log:"))
 			cfg.append("log:\n  level: info\n  report: false\n");

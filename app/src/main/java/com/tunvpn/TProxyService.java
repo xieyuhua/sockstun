@@ -300,27 +300,44 @@ public class TProxyService extends VpnService {
 		/* Bring the TUN up on the VPN fd we just established. The TunInterface
 		   forwards socket protection to VpnService.protect() so the core's
 		   outbound traffic never loops back into the VPN. */
-		String stack = "system";
 		String address = (ipv4 ? tunAddr + "/" + tunPrefix : "") +
 			(ipv6 ? (ipv4 ? "," : "") + tunAddr6 + "/64" : "");
 		String dns = "223.5.5.5,119.29.29.29";
-		try {
-			Clash.INSTANCE.startTUN(tunFd.getFd(), new TunInterface() {
-				@Override
-				public void protect(int fd) {
-					TProxyService.this.protect(fd);
-				}
-				@Override
-				public String resolverProcess(int protocol, String source, String target, int uid) {
-					return "";
-				}
-			}, "tunvpn", stack, address, dns, prefs.getTunnelMtu());
-			appendLog("Clash.startTUN OK (fd=" + tunFd.getFd() + ", stack=" + stack
-				+ ", addr=" + address + ")");
-		} catch (Throwable e) {
-			failStartup("启动 TUN 失败：" + e.getMessage());
+		final TunInterface tunInterface = new TunInterface() {
+			@Override
+			public void protect(int fd) {
+				TProxyService.this.protect(fd);
+			}
+			@Override
+			public String resolverProcess(int protocol, String source, String target, int uid) {
+				return "";
+			}
+		};
+
+		/* gvisor first: it keeps the whole stack in userspace and is what the
+		   other Android clients ship by default. The system stack leans on
+		   tun features that are not dependable on every Android kernel, so
+		   fall back to it instead of failing the whole tunnel. */
+		String[] stacks = { "gvisor", "system" };
+		String started = null;
+		Throwable lastError = null;
+		for (String candidate : stacks) {
+			try {
+				Clash.INSTANCE.startTUN(tunFd.getFd(), tunInterface, "tunvpn",
+					candidate, address, dns, prefs.getTunnelMtu());
+				started = candidate;
+				break;
+			} catch (Throwable e) {
+				lastError = e;
+				appendLog("startTUN with stack=" + candidate + " failed: " + e);
+			}
+		}
+		if (started == null) {
+			failStartup("启动 TUN 失败：" + lastError);
 			return;
 		}
+		appendLog("Clash.startTUN OK (fd=" + tunFd.getFd() + ", stack=" + started
+			+ ", addr=" + address + ", mtu=" + prefs.getTunnelMtu() + ")");
 
 		/* Best-effort: apply the node the user picked in the subscription. */
 		applySelectedNode(prefs);
