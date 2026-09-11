@@ -34,6 +34,8 @@ import java.net.Proxy;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.InetSocketAddress;
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
 
 
 import com.google.android.material.appbar.MaterialToolbar;
@@ -64,6 +66,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	/* How often to check that traffic really reaches the internet through the
 	   core. "Connected" only means the tunnel came up. */
 	private static final long PROBE_INTERVAL = 20000;
+	private static final int PROBE_TIMEOUT = 10000;
 	private long lastProbe = 0;
 	private Handler statsHandler;
 	private Runnable statsTask;
@@ -274,37 +277,61 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		new Thread(new Runnable() {
 			@Override
 			public void run() {
-				final boolean ok = probeThroughCore();
+				/* One retry. Straight after CONNECT the group may not have
+				   settled on a node yet, so a single unlucky timeout should not
+				   be reported as "not proxied". */
+				String problem = probeThroughCore();
+				if (problem != null) {
+					try {
+						Thread.sleep(2000);
+					} catch (InterruptedException ignored) {
+					}
+					problem = probeThroughCore();
+				}
+				final String reason = problem;
 				ui.post(new Runnable() {
 					@Override
 					public void run() {
 						if (isFinishing() || isDestroyed())
 						  return;
-						textview_status_proxy.setText(ok
-							? R.string.proxy_state_ok : R.string.proxy_state_fail);
-						textview_status_proxy.setTextColor(getThemeColor(ok
-							? com.google.android.material.R.attr.colorPrimary
-							: com.google.android.material.R.attr.colorError));
+						if (reason == null) {
+							textview_status_proxy.setText(R.string.proxy_state_ok);
+							textview_status_proxy.setTextColor(getThemeColor(
+								com.google.android.material.R.attr.colorPrimary));
+						} else {
+							textview_status_proxy.setText(getString(
+								R.string.proxy_state_fail_reason, reason));
+							textview_status_proxy.setTextColor(getThemeColor(
+								com.google.android.material.R.attr.colorError));
+						}
 					}
 				});
 			}
 		}).start();
 	}
 
-	/* Reach the internet through the core's local HTTP port. */
-	private boolean probeThroughCore() {
+	/* null when the core can reach the check URL, otherwise why it cannot.
+	   Telling these apart is the point: a closed port means the core never
+	   came up, a timeout means it is up but the node is not carrying traffic. */
+	private String probeThroughCore() {
 		HttpURLConnection conn = null;
 		try {
 			Proxy proxy = new Proxy(Proxy.Type.HTTP,
 				new InetSocketAddress("127.0.0.1", prefs.getProxyPort()));
 			conn = (HttpURLConnection) new URL(prefs.getAutoTestUrl()).openConnection(proxy);
-			conn.setConnectTimeout(6000);
-			conn.setReadTimeout(6000);
+			conn.setConnectTimeout(PROBE_TIMEOUT);
+			conn.setReadTimeout(PROBE_TIMEOUT);
 			conn.setInstanceFollowRedirects(false);
 			int code = conn.getResponseCode();
-			return code > 0 && code < 400;
+			if (code > 0 && code < 400)
+			  return null;
+			return "HTTP " + code;
+		} catch (SocketTimeoutException e) {
+			return getString(R.string.proxy_fail_timeout);
+		} catch (ConnectException e) {
+			return getString(R.string.proxy_fail_closed);
 		} catch (Exception e) {
-			return false;
+			return e.getMessage();
 		} finally {
 			if (conn != null)
 			  conn.disconnect();

@@ -147,7 +147,9 @@
 	<string name="sub_switched_restart">已选择：%1$s\n自动选择已关闭，重新连接后固定使用该节点</string>
 	<string name="proxy_state_probing">代理连通：检测中…</string>
 	<string name="proxy_state_ok">代理连通：正常</string>
-	<string name="proxy_state_fail">代理不通：节点可能已失效，或需要重新连接</string>
+	<string name="proxy_state_fail_reason">代理不通（%1$s）</string>
+	<string name="proxy_fail_timeout">超时</string>
+	<string name="proxy_fail_closed">端口未监听</string>
 	<string name="sub_invalid_url">请输入有效的订阅地址</string>
 	<string name="server_manual_hint">未配置订阅时，这里填写的 SOCKS5 会作为手动上游生效；已配置订阅时以订阅为准。</string>
 	<string name="server_use_as_upstream">使用此 SOCKS5 作为上游（忽略订阅）</string>
