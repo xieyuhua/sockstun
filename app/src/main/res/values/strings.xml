@@ -54,6 +54,7 @@
 	<string name="profile_next_desc">Next profile</string>
 	<string name="profile_menu">Profile options</string>
 	<string name="app_list_empty">No matching apps</string>
+	<string name="app_list_loading">正在读取应用…</string>
 	<string name="apps_selected">%d selected</string>
 
 	<string name="stats_realtime">Live</string>
@@ -126,13 +127,21 @@
 	<string name="sub_manual_hint">手动模式：使用你点选的那个节点</string>
 	<string name="sub_minutes">%1$d 分钟</string>
 	<string name="sub_interval_title">自动测速间隔（分钟）</string>
+	<string name="sub_interval_custom">自定义…（当前 %1$d 分钟）</string>
+	<string name="sub_interval_custom_title">自定义间隔</string>
+	<string name="sub_interval_hint">分钟数，范围 1 – 1440</string>
+	<string name="sub_interval_clamped">已调整为 %1$d 分钟</string>
 	<string name="sub_auto_restart">设置已保存，重新连接后生效</string>
+	<string name="sub_test_url">测试地址：%1$s</string>
+	<string name="sub_test_url_title">测速测试地址</string>
+	<string name="sub_test_url_hint">自动选择时用它判断节点快慢，需为可正常访问的 http 或 https 地址；清空则恢复默认。</string>
+	<string name="sub_test_url_invalid">请输入 http 或 https 开头的地址</string>
 	<string name="sub_status_ok">可用</string>
 	<string name="sub_status_fail">不可用</string>
 	<string name="sub_status_untested">未测速</string>
 	<string name="sub_help">使用说明</string>
 	<string name="sub_help_title">订阅怎么用？</string>
-	<string name="sub_help_text">1. 可以保存多个订阅（设置 → 订阅配置）。点「拉取订阅」会更新全部订阅，节点合并成一个池，再排序、筛选、测速。\n\n2. 「自动选择最快节点」：打开后由内核定时测速，自动使用延迟最低的那个，测速间隔点下方那行文字修改。关掉即为手动模式，点哪个节点就用哪个。\n\n3. 测速全部：绿色 = 可连通，红色 = 连不上，数字是 TCP 握手延迟，只代表链路快慢，不代表实际带宽。\n\n4. 分流由「路由规则」页统一决定（域名 / IP / IP 段 → 代理或直连），未命中的按该页顶部的开关处理；订阅自带的规则不参与。\n\n5. 与「服务器」页的关系：有订阅就用订阅；没有订阅时，「服务器」里启用的 SOCKS5 会作为手动上游生效。</string>
+	<string name="sub_help_text">1. 可以保存多个订阅（设置 → 订阅配置）。点「拉取订阅」会更新全部订阅，节点合并成一个池，再排序、筛选、测速。\n\n2. 「自动选择最快节点」：打开后由内核定时测速，自动使用延迟最低的那个，测速间隔和测试地址点下方文字修改。关掉即为手动模式，点哪个节点就用哪个。\n\n3. 测速全部：绿色 = 可连通，红色 = 连不上，数字是 TCP 握手延迟，只代表链路快慢，不代表实际带宽。\n\n4. 分流由「路由规则」页统一决定（域名 / IP / IP 段 → 代理或直连），未命中的按该页顶部的开关处理；订阅自带的规则不参与。\n\n5. 与「服务器」页的关系：有订阅就用订阅；没有订阅时，「服务器」里启用的 SOCKS5 会作为手动上游生效。</string>
 	<string name="sub_applied_hint">已选择：%s\n下次启动隧道时生效</string>
 	<string name="sub_switched">已切换到：%s\n立即生效，无需重启</string>
 	<string name="sub_invalid_url">请输入有效的订阅地址</string>
@@ -172,8 +181,6 @@
 	<string name="settings_version">版本</string>
 	<string name="version_info">版本信息</string>
 	<string name="version_detail">版本：%1$s（%2$d）\n内核：mihomo v1.19.30\nABI：arm64-v8a、armeabi-v7a</string>
-	<string name="ip_unknown">IP：未获取</string>
-	<string name="ip_label">IP：%s</string>
 	<string name="server_list_hint">在此管理 SOCKS5 服务器：可新增、修改、删除，并启用其中一台。启用后即以它为上游并忽略订阅；在订阅里选用节点会自动取消启用。</string>
 	<string name="server_list_empty">暂无服务器，点下方「新增服务器」</string>
 	<string name="server_add">新增服务器</string>

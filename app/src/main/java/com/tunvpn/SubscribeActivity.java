@@ -37,7 +37,6 @@ import com.google.android.material.color.MaterialColors;
 import com.google.android.material.switchmaterial.SwitchMaterial;
 
 import java.io.BufferedReader;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
@@ -48,6 +47,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class SubscribeActivity extends BaseActivity {
 	private static final int SORT_DEFAULT = 0;
@@ -55,6 +56,9 @@ public class SubscribeActivity extends BaseActivity {
 	private static final int FILTER_ALL = 0;
 	private static final int FILTER_OK = 1;
 	private static final int FILTER_BAD = 2;
+	/* Bounds for the auto re-test interval, in minutes. */
+	private static final int MIN_INTERVAL_MIN = 1;
+	private static final int MAX_INTERVAL_MIN = 1440;
 
 	private Preferences prefs;
 	private MaterialButton button_fetch;
@@ -66,6 +70,10 @@ public class SubscribeActivity extends BaseActivity {
 	private Spinner spinner_filter;
 	private SwitchMaterial switch_auto;
 	private TextView textview_auto_hint;
+	private TextView textview_test_url;
+	/* Bounded pool for latency tests. "Test all" on a large subscription would
+	   otherwise fire one thread - and one socket - per node at once. */
+	private final ExecutorService testPool = Executors.newFixedThreadPool(8);
 
 	/* nodes = everything we parsed (source of truth, persisted)
 	   shown = what the list displays after filtering + sorting */
@@ -102,6 +110,7 @@ public class SubscribeActivity extends BaseActivity {
 		spinner_filter = (Spinner) findViewById(R.id.sub_filter);
 		switch_auto = (SwitchMaterial) findViewById(R.id.sub_auto);
 		textview_auto_hint = (TextView) findViewById(R.id.sub_auto_hint);
+		textview_test_url = (TextView) findViewById(R.id.sub_test_url);
 
 
 		adapter = new NodeAdapter();
@@ -138,6 +147,14 @@ public class SubscribeActivity extends BaseActivity {
 
 		setupAutoSelect();
 		loadNodes();
+	}
+
+	@Override
+	protected void onDestroy() {
+		/* Drop queued tests: they hold this activity and would otherwise keep
+		   running (and posting) after it is gone. */
+		testPool.shutdownNow();
+		super.onDestroy();
 	}
 
 	private void setupSpinner(Spinner spinner, int arrayRes, final boolean isSort) {
@@ -288,6 +305,8 @@ public class SubscribeActivity extends BaseActivity {
 					ui.post(new Runnable() {
 						@Override
 						public void run() {
+							if (isFinishing() || isDestroyed())
+							  return;
 							button_fetch.setEnabled(true);
 							button_fetch.setText(R.string.sub_fetch);
 							loadNodes();
@@ -321,13 +340,15 @@ public class SubscribeActivity extends BaseActivity {
 			int code = conn.getResponseCode();
 			if (code != HttpURLConnection.HTTP_OK)
 			  throw new Exception("HTTP " + code);
-			InputStream in = conn.getInputStream();
-			BufferedReader reader = new BufferedReader(
-				new InputStreamReader(in, StandardCharsets.UTF_8));
 			StringBuilder sb = new StringBuilder();
-			String line;
-			while ((line = reader.readLine()) != null)
-				sb.append(line).append('\n');
+			/* Close the reader, not just the connection: disconnect() alone
+			   leaves the decoded stream alive until GC. */
+			try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+					conn.getInputStream(), StandardCharsets.UTF_8))) {
+				String line;
+				while ((line = reader.readLine()) != null)
+				  sb.append(line).append('\n');
+			}
 			return sb.toString();
 		} finally {
 			if (conn != null)
@@ -346,14 +367,14 @@ public class SubscribeActivity extends BaseActivity {
 	/* batch = part of "test all": only refresh + persist once the last one
 	   finishes, otherwise we would rewrite the whole cache per node. */
 	private void testNode(final ClashNode n, final boolean batch) {
-		new Thread(new Runnable() {
+		testPool.execute(new Runnable() {
 			@Override
 			public void run() {
 				long t = System.currentTimeMillis();
-				try {
-					Socket s = new Socket();
+				/* try-with-resources: a failed connect() used to leave the
+				   socket - and its fd - behind. */
+				try (Socket s = new Socket()) {
 					s.connect(new InetSocketAddress(n.server, n.port), 3000);
-					s.close();
 					n.latency = System.currentTimeMillis() - t;
 				} catch (Exception e) {
 					n.latency = -2;
@@ -361,6 +382,8 @@ public class SubscribeActivity extends BaseActivity {
 				ui.post(new Runnable() {
 					@Override
 					public void run() {
+						if (isFinishing() || isDestroyed())
+						  return;
 						if (batch) {
 							pendingTests--;
 							if (pendingTests > 0) {
@@ -373,7 +396,7 @@ public class SubscribeActivity extends BaseActivity {
 					}
 				});
 			}
-		}).start();
+		});
 	}
 
 	private void useNode(final ClashNode n) {
@@ -424,6 +447,12 @@ public class SubscribeActivity extends BaseActivity {
 				editInterval();
 			}
 		});
+		textview_test_url.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				editTestUrl();
+			}
+		});
 		updateAutoUi();
 	}
 
@@ -436,48 +465,145 @@ public class SubscribeActivity extends BaseActivity {
 		textview_auto_hint.setText(auto
 			? getString(R.string.sub_auto_hint, intervalLabel())
 			: getString(R.string.sub_manual_hint));
+		/* The check target only matters while url-test is in charge. */
+		textview_test_url.setVisibility(auto ? View.VISIBLE : View.GONE);
+		textview_test_url.setText(getString(R.string.sub_test_url,
+			prefs.getAutoTestUrl()));
+	}
+
+	private int intervalMinutes() {
+		return Math.max(MIN_INTERVAL_MIN,
+			Math.round(prefs.getAutoSelectInterval() / 60f));
 	}
 
 	private String intervalLabel() {
-		int minutes = Math.max(1, Math.round(prefs.getAutoSelectInterval() / 60f));
-		return getString(R.string.sub_minutes, minutes);
+		return getString(R.string.sub_minutes, intervalMinutes());
 	}
 
+	/* Presets cover what people actually use; "custom" falls through to a
+	   free-form field for everything else. */
 	private void editInterval() {
 		if (!prefs.getAutoSelect())
 		  return;
+
+		final int[] presets = { 1, 5, 10, 30, 60 };
+		final int current = intervalMinutes();
+		int checked = presets.length;
+		final String[] labels = new String[presets.length + 1];
+		for (int i = 0; i < presets.length; i++) {
+			labels[i] = getString(R.string.sub_minutes, presets[i]);
+			if (presets[i] == current)
+			  checked = i;
+		}
+		labels[presets.length] = getString(R.string.sub_interval_custom, current);
+
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.sub_interval_title)
+			.setSingleChoiceItems(labels, checked, null)
+			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface d, int which) {
+					int sel = ((AlertDialog) d).getListView().getCheckedItemPosition();
+					if (sel < 0)
+					  return;
+					if (sel >= presets.length) {
+						askCustomInterval();
+						return;
+					}
+					prefs.setAutoSelectInterval(presets[sel] * 60);
+					afterAutoSelectChange();
+				}
+			})
+			.setNegativeButton(android.R.string.cancel, null)
+			.show();
+	}
+
+	/* Free-form fallback. The value is clamped instead of rejected, so a
+	   stray keypress cannot silently throw the setting away. */
+	private void askCustomInterval() {
 		final EditText input = new EditText(this);
 		input.setInputType(InputType.TYPE_CLASS_NUMBER);
-		input.setText(Integer.toString(Math.max(1,
-			Math.round(prefs.getAutoSelectInterval() / 60f))));
+		input.setHint(R.string.sub_interval_hint);
+		input.setText(Integer.toString(intervalMinutes()));
 		input.setSelection(input.getText().length());
 		int pad = (int) (20 * getResources().getDisplayMetrics().density);
 		input.setPadding(pad, pad / 2, pad, 0);
 
 		new AlertDialog.Builder(this)
-			.setTitle(R.string.sub_interval_title)
+			.setTitle(R.string.sub_interval_custom_title)
+			.setMessage(R.string.sub_interval_hint)
 			.setView(input)
 			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
 				@Override
 				public void onClick(DialogInterface d, int which) {
-					int minutes = 5;
+					int minutes;
 					try {
 						minutes = Integer.parseInt(input.getText().toString().trim());
 					} catch (NumberFormatException e) {
+						minutes = intervalMinutes();
 					}
-					if (minutes < 1)
-					  minutes = 1;
-					if (minutes > 1440)
-					  minutes = 1440;
-					prefs.setAutoSelectInterval(minutes * 60);
-					updateAutoUi();
-					if (prefs.getEnable())
+					int clamped = Math.max(MIN_INTERVAL_MIN,
+						Math.min(MAX_INTERVAL_MIN, minutes));
+					if (clamped != minutes)
 					  Toast.makeText(SubscribeActivity.this,
-						R.string.sub_auto_restart, Toast.LENGTH_LONG).show();
+						getString(R.string.sub_interval_clamped, clamped),
+						Toast.LENGTH_SHORT).show();
+					prefs.setAutoSelectInterval(clamped * 60);
+					afterAutoSelectChange();
 				}
 			})
 			.setNegativeButton(android.R.string.cancel, null)
 			.show();
+	}
+
+	/* Shared tail of every auto-select edit: the group is written when the
+	   tunnel starts, so a running tunnel keeps the old setting. */
+	private void afterAutoSelectChange() {
+		updateAutoUi();
+		if (prefs.getEnable())
+		  Toast.makeText(SubscribeActivity.this,
+			R.string.sub_auto_restart, Toast.LENGTH_LONG).show();
+	}
+
+	/* The URL url-test measures against. Worth exposing: if a provider treats
+	   this particular host badly, every node would score poorly even though
+	   normal traffic is fine. */
+	private void editTestUrl() {
+		if (!prefs.getAutoSelect())
+		  return;
+		final EditText input = new EditText(this);
+		input.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
+		input.setSingleLine(true);
+		input.setHint(R.string.sub_test_url_title);
+		input.setText(prefs.getAutoTestUrl());
+		input.setSelection(input.getText().length());
+		int pad = (int) (20 * getResources().getDisplayMetrics().density);
+		input.setPadding(pad, pad / 2, pad, 0);
+
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.sub_test_url_title)
+			.setMessage(R.string.sub_test_url_hint)
+			.setView(input)
+			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface d, int which) {
+					String url = input.getText().toString().trim();
+					if (!url.isEmpty() && !isHttpUrl(url)) {
+						Toast.makeText(SubscribeActivity.this,
+							R.string.sub_test_url_invalid, Toast.LENGTH_LONG).show();
+						return;
+					}
+					prefs.setAutoTestUrl(url);
+					afterAutoSelectChange();
+				}
+			})
+			.setNegativeButton(android.R.string.cancel, null)
+			.show();
+	}
+
+	private static boolean isHttpUrl(String url) {
+		String u = url.toLowerCase();
+		return u.startsWith("http://") || u.startsWith("https://");
 	}
 
 	private void showHelp() {

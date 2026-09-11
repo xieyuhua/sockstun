@@ -64,8 +64,12 @@ public class Preferences
 	/* Auto-select: the core's url-test group picks the fastest node. */
 	public static final String AUTO_SELECT = "AutoSelect";
 	public static final String AUTO_SELECT_INTERVAL = "AutoSelectInterval";
+	public static final String AUTO_TEST_URL = "AutoTestUrl";
 	/* mihomo's own default for url-test. */
 	public static final int DEFAULT_AUTO_INTERVAL = 300;
+	/* Health-check target for url-test: a 204 endpoint is cheap and most
+	   networks do not intercept it. */
+	public static final String DEFAULT_TEST_URL = "http://www.gstatic.com/generate_204";
 
 	public static final int MAX_PROFILES = 13;
 
@@ -325,19 +329,6 @@ public class Preferences
 		editor.commit();
 	}
 
-	public String getSubNodes() {
-		Subscription sub = getActiveSubscription();
-		if (sub != null)
-		  return getSubNodes(sub.id);
-		return prefs.getString(key(SUB_NODES), "");
-	}
-
-	public void setSubNodes(String json) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putString(key(SUB_NODES), json);
-		editor.commit();
-	}
-
 	public String getSubSelected() {
 		return prefs.getString(key(SUB_SELECTED), "");
 	}
@@ -415,12 +406,6 @@ public class Preferences
 		return prefs.getString(key(SUB_RAW), "");
 	}
 
-	public void setSubRaw(String yaml) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putString(key(SUB_RAW), yaml);
-		editor.commit();
-	}
-
 	/* Per-subscription cache: each subscription keeps its own fetched YAML
 	   and node list, so several can be pulled and merged into one pool. */
 	public String getSubRaw(String id) {
@@ -480,6 +465,20 @@ public class Preferences
 	public void setAutoSelectInterval(int seconds) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putInt(key(AUTO_SELECT_INTERVAL), seconds);
+		editor.commit();
+	}
+
+	/* url-test health-check target. Empty means "use the default". */
+	public String getAutoTestUrl() {
+		String url = prefs.getString(key(AUTO_TEST_URL), "");
+		if (url == null || url.trim().isEmpty())
+		  return DEFAULT_TEST_URL;
+		return url.trim();
+	}
+
+	public void setAutoTestUrl(String url) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(AUTO_TEST_URL), url == null ? "" : url.trim());
 		editor.commit();
 	}
 

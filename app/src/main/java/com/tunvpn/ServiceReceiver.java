@@ -18,7 +18,9 @@ import android.os.Build;
 public class ServiceReceiver extends BroadcastReceiver {
 	@Override
 	public void onReceive(Context context, Intent intent) {
-		if (intent.getAction().equals(Intent.ACTION_BOOT_COMPLETED)) {
+		/* A broadcast intent may carry no action, so compare the other way
+		   round instead of dereferencing getAction() unguarded. */
+		if (intent != null && Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
 			Preferences prefs = new Preferences(context);
 
 			/* Auto-start */

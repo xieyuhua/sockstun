@@ -15,8 +15,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ClashNode {
-	/* -1 = never tested, -2 = unreachable, >=0 = latency in ms */
-	public long latency = -1;
+	/* -1 = never tested, -2 = unreachable, >=0 = latency in ms.
+	   Written from the latency-test pool thread, read from the UI thread. */
+	public volatile long latency = -1;
 	public String name;
 	public String type;
 	public String server;

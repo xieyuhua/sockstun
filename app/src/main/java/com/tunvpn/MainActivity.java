@@ -19,7 +19,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -30,12 +29,6 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.net.VpnService;
-import java.net.Proxy;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.InetSocketAddress;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 
 
 import com.google.android.material.appbar.MaterialToolbar;
@@ -54,7 +47,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	private TextView textview_status_title;
 	private TextView textview_status_subtitle;
 	private TextView textview_status_node;
-	private TextView textview_status_ip;
 	private Button button_control;
 	private TextView textview_realtime;
 	private TextView textview_session;
@@ -63,13 +55,9 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 
 	private static final long STATS_INTERVAL = 1500;
 	private static final int MAX_APPS_SHOWN = 3;
-	/* Local HTTP port of the core, and how often to refresh the public IP. */
-	private static final int PROXY_PORT = 7890;
-	private static final long IP_QUERY_INTERVAL = 60000;
 	private Handler statsHandler;
 	private Runnable statsTask;
 	private final Handler ui = new Handler(Looper.getMainLooper());
-	private long lastIpQuery = 0;
 	/* Last failure already surfaced as a Toast, so the 1.5s tick stays quiet. */
 	private String lastShownError = "";
 
@@ -126,7 +114,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		textview_status_title = (TextView) findViewById(R.id.status_title);
 		textview_status_subtitle = (TextView) findViewById(R.id.status_subtitle);
 		textview_status_node = (TextView) findViewById(R.id.status_node);
-		textview_status_ip = (TextView) findViewById(R.id.status_ip);
 		button_control = (Button) findViewById(R.id.control);
 		textview_realtime = (TextView) findViewById(R.id.stats_realtime);
 		textview_session = (TextView) findViewById(R.id.stats_session);
@@ -235,61 +222,12 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 			TProxyService.formatBytes(prefs.getTotalRx())));
 		textview_apps.setText(appSummary(Preferences.parseAppStats(prefs.getAppTotal())));
 		updateNode();
-		updateExternalIp();
 
 		/* Enable and LastError are written by the :native process, which cannot
 		   notify this one through OnSharedPreferenceChangeListener - so poll.
 		   Without this the card would keep showing "connected" after a failed
 		   start, and the failure would only become visible on the next resume. */
 		updateControlState();
-	}
-
-	/* Ask an echo service through the core's local HTTP port, so the answer
-	   is the address the proxy exposes rather than the device's own one. */
-	private void updateExternalIp() {
-		if (!prefs.getEnable()) {
-			textview_status_ip.setText(getString(R.string.ip_unknown));
-			return;
-		}
-		long now = SystemClock.elapsedRealtime();
-		if (now - lastIpQuery < IP_QUERY_INTERVAL)
-		  return;
-		lastIpQuery = now;
-		new Thread(new Runnable() {
-			@Override
-			public void run() {
-				final String ip = queryExternalIp();
-				ui.post(new Runnable() {
-					@Override
-					public void run() {
-						textview_status_ip.setText(ip == null || ip.isEmpty()
-							? getString(R.string.ip_unknown)
-							: getString(R.string.ip_label, ip));
-					}
-				});
-			}
-		}).start();
-	}
-
-	private String queryExternalIp() {
-		HttpURLConnection conn = null;
-		try {
-			Proxy proxy = new Proxy(Proxy.Type.HTTP,
-				new InetSocketAddress("127.0.0.1", PROXY_PORT));
-			conn = (HttpURLConnection) new URL("http://api.ipify.org").openConnection(proxy);
-			conn.setConnectTimeout(5000);
-			conn.setReadTimeout(5000);
-			BufferedReader reader = new BufferedReader(
-				new InputStreamReader(conn.getInputStream()));
-			String line = reader.readLine();
-			reader.close();
-			return line == null ? null : line.trim();
-		} catch (Exception e) {
-			return null;
-		} finally {
-			if (conn != null)
-			  conn.disconnect();
-		}
 	}
 
 	/* Which node the tunnel is using: the picked subscription node, the manual
@@ -356,10 +294,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		final boolean connected = prefs.getEnable();
 		final String error = prefs.getLastError();
 		final boolean failed = !connected && !error.isEmpty();
-
-		/* Refresh the public IP right after the tunnel comes up. */
-		if (connected)
-		  lastIpQuery = 0;
 
 		int bg;
 		int fg;

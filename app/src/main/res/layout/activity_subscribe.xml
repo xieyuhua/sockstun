@@ -102,6 +102,14 @@
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
 						android:paddingTop="2dp"
+						android:textAppearance="?attr/textAppearanceBodySmall"
+						android:textColor="?attr/colorPrimary"/>
+					<TextView
+						android:id="@+id/sub_test_url"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:ellipsize="middle"
+						android:maxLines="1"
 						android:paddingBottom="2dp"
 						android:textAppearance="?attr/textAppearanceBodySmall"
 						android:textColor="?attr/colorPrimary"/>

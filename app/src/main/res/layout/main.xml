@@ -84,17 +84,6 @@
 						android:gravity="center"
 						android:maxLines="2"
 						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
-					<TextView
-						android:id="@+id/status_ip"
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:layout_marginTop="4dp"
-						android:ellipsize="end"
-						android:fontFamily="monospace"
-						android:gravity="center"
-						android:maxLines="1"
-						android:text="@string/ip_unknown"
-						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 					<com.google.android.material.button.MaterialButton
 						android:id="@+id/control"
 						android:layout_width="match_parent"

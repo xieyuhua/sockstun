@@ -154,6 +154,10 @@ public class TProxyService extends VpnService {
 
 	@Override
 	public void onDestroy() {
+		/* The system can tear the service down without a disconnect command,
+		   so make sure the stats poller does not outlive it. stopStats() is
+		   idempotent, so this is harmless after a normal stop. */
+		stopStats();
 		super.onDestroy();
 	}
 
@@ -193,9 +197,7 @@ public class TProxyService extends VpnService {
 		try {
 			configFile = MihomoConfig.build(this, prefs);
 			appendLog("config: " + configFile.getAbsolutePath());
-			appendLog("routing: " + (prefs.getAutoSelect()
-				? "auto (url-test, " + prefs.getAutoSelectInterval() + "s)"
-				: "manual") + ", " + prefs.getRules().size() + " rule(s)");
+			appendLog("routing: " + MihomoConfig.describe(prefs));
 		} catch (Throwable e) {
 			failStartup("生成配置失败：" + e.getMessage());
 			return;
@@ -205,9 +207,12 @@ public class TProxyService extends VpnService {
 		   the tunnel and let its rule engine decide proxy vs direct. */
 		boolean ipv4 = prefs.getIpv4();
 		boolean ipv6 = prefs.getIpv6();
-		String tunAddr = "198.18.0.1";
+		/* Keep the interface address outside the fake-ip pool (198.18.0.0/16),
+		   otherwise a domain can be handed an address that is already the
+		   tunnel's own. */
+		String tunAddr = "172.19.0.1";
 		String tunAddr6 = "fc00::1";
-		int tunPrefix = 24;
+		int tunPrefix = 30;
 
 		VpnService.Builder builder = new VpnService.Builder();
 		builder.setBlocking(false);
@@ -244,6 +249,12 @@ public class TProxyService extends VpnService {
 			}
 		}
 		builder.setSession("tunVPN/mihomo");
+		/* Worth logging: if ipv4/ipv6 are both off there is no route into the
+		   tunnel at all, and if the scope is "N app(s)" only those apps are
+		   captured - both look exactly like "connected but not proxied". */
+		appendLog("vpn: ipv4=" + ipv4 + " ipv6=" + ipv6 + " mtu=" + prefs.getTunnelMtu()
+			+ " scope=" + (prefs.getGlobal() ? "all apps" : prefs.getApps().size() + " app(s)")
+			+ " excludeSelf=" + disallowSelf);
 		tunFd = builder.establish();
 		if (tunFd == null) {
 			failStartup("建立 VPN 接口失败（未授权或被其他 VPN 占用）");
@@ -304,7 +315,8 @@ public class TProxyService extends VpnService {
 					return "";
 				}
 			}, "tunvpn", stack, address, dns, prefs.getTunnelMtu());
-			appendLog("Clash.startTUN OK (fd=" + tunFd.getFd() + ")");
+			appendLog("Clash.startTUN OK (fd=" + tunFd.getFd() + ", stack=" + stack
+				+ ", addr=" + address + ")");
 		} catch (Throwable e) {
 			failStartup("启动 TUN 失败：" + e.getMessage());
 			return;

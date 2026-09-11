@@ -99,9 +99,14 @@ public class ClashParser {
 					i++;
 					continue;
 				}
-				if (leadingSpaces(l2) <= baseIndent)
+				int inner = leadingSpaces(l2) - baseIndent;
+				if (inner <= 0)
 				  break;
-				block.append('\n').append("  ").append(l2.trim());
+				/* Re-indent relative to the "- ", not to column 0. Flattening
+				   every continuation to a single level would destroy nested
+				   maps (ws-opts / headers / reality-opts / ...) and make
+				   mihomo drop the whole proxy. */
+				block.append('\n').append("  ").append(spaces(inner)).append(l2.trim());
 				i++;
 			}
 			/* Re-read the block with the same key/value helpers parseAll()
@@ -272,6 +277,15 @@ public class ClashParser {
 		while (n < line.length() && line.charAt(n) == ' ')
 		  n++;
 		return n;
+	}
+
+	private static String spaces(int n) {
+		if (n <= 0)
+		  return "";
+		StringBuilder sb = new StringBuilder(n);
+		for (int i = 0; i < n; i++)
+		  sb.append(' ');
+		return sb.toString();
 	}
 
 	private static boolean containsProxies(String s) {

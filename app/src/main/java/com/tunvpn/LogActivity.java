@@ -132,8 +132,8 @@ public class LogActivity extends BaseActivity implements View.OnClickListener {
 	/* Truncate the log file (effective when the tunnel is stopped). */
 	private void clearLog() {
 		File log = new File(getCacheDir(), LOG_NAME);
-		try {
-			new RandomAccessFile(log, "rw").setLength(0);
+		try (RandomAccessFile raf = new RandomAccessFile(log, "rw")) {
+			raf.setLength(0);
 		} catch (IOException e) {
 			log.delete();
 		}

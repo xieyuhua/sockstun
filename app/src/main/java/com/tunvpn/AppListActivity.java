@@ -32,8 +32,8 @@ import android.text.TextWatcher;
 import android.text.Editable;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.drawable.Drawable;
 import android.content.pm.PackageInfo;
-import android.content.pm.ApplicationInfo;
 
 
 import com.google.android.material.appbar.MaterialToolbar;
@@ -49,11 +49,15 @@ public class AppListActivity extends BaseActivity {
 		public PackageInfo info;
 		public boolean selected;
 		public String label;
+		/* Resolved once while the list is built: loadIcon()/loadLabel() hit the
+		   PackageManager and are far too slow to call from getView(). */
+		public Drawable icon;
 
-		public Package(PackageInfo info, boolean selected, String label) {
+		public Package(PackageInfo info, boolean selected, String label, Drawable icon) {
 			this.info = info;
 			this.selected = selected;
 			this.label = label;
+			this.icon = icon;
 		}
 	}
 
@@ -134,24 +138,40 @@ public class AppListActivity extends BaseActivity {
 			notifyDataSetChanged();
 		}
 
+		/* Bulk swap, used because the list is assembled off the UI thread. */
+		public void setAll(List<Package> list) {
+			allPackages.clear();
+			allPackages.addAll(list);
+			sortPackages();
+			applyFilter(lastFilter);
+		}
+
+		/* Selected apps first, then alphabetically. */
+		public void sortPackages() {
+			allPackages.sort(new Comparator<Package>() {
+				@Override
+				public int compare(Package a, Package b) {
+					if (a.selected != b.selected)
+					  return a.selected ? -1 : 1;
+					return a.label.compareTo(b.label);
+				}
+			});
+		}
+
 		@Override
 		public View getView(int position, View convertView, ViewGroup parent) {
-			LayoutInflater inflater = (LayoutInflater) getContext()
-				.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
-			View rowView = inflater.inflate(R.layout.appitem, parent, false);
-			ImageView imageView = (ImageView) rowView.findViewById(R.id.icon);
-			TextView textView = (TextView) rowView.findViewById(R.id.name);
-			TextView packageView = (TextView) rowView.findViewById(R.id.package_name);
-			CompoundButton checkBox = (CompoundButton) rowView.findViewById(R.id.checked);
-
+			View rowView = convertView;
+			if (rowView == null) {
+				LayoutInflater inflater = (LayoutInflater) getContext()
+					.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+				rowView = inflater.inflate(R.layout.appitem, parent, false);
+			}
 			Package pkg = getItem(position);
-			PackageManager pm = getContext().getPackageManager();
-			ApplicationInfo appinfo = pkg.info.applicationInfo;
-			imageView.setImageDrawable(appinfo.loadIcon(pm));
-			textView.setText(appinfo.loadLabel(pm).toString());
-			packageView.setText(pkg.info.packageName);
-			checkBox.setChecked(pkg.selected);
-
+			((ImageView) rowView.findViewById(R.id.icon)).setImageDrawable(pkg.icon);
+			((TextView) rowView.findViewById(R.id.name)).setText(pkg.label);
+			((TextView) rowView.findViewById(R.id.package_name))
+				.setText(pkg.info.packageName);
+			((CompoundButton) rowView.findViewById(R.id.checked)).setChecked(pkg.selected);
 			return rowView;
 		}
 	}
@@ -174,35 +194,12 @@ public class AppListActivity extends BaseActivity {
 		listView.setEmptyView(findViewById(R.id.empty));
 
 		prefs = new Preferences(this);
-		Set<String> apps = prefs.getApps();
-		PackageManager pm = getPackageManager();
 		adapter = new AppArrayAdapter(this);
-
-		for (PackageInfo info : pm.getInstalledPackages(PackageManager.GET_PERMISSIONS)) {
-			if (info.packageName.equals(getPackageName()))
-			  continue;
-			if (info.requestedPermissions == null)
-			  continue;
-			if (!Arrays.asList(info.requestedPermissions).contains(Manifest.permission.INTERNET))
-			  continue;
-			boolean selected = apps.contains(info.packageName);
-			String label = info.applicationInfo.loadLabel(pm).toString();
-			Package pkg = new Package(info, selected, label);
-			adapter.add(pkg);
-		}
+		listView.setAdapter(adapter);
 
 		EditText searchBox = (EditText) findViewById(R.id.search);
+		loadApps();
 
-		adapter.sort(new Comparator<Package>() {
-			public int compare(Package a, Package b) {
-				if (a.selected != b.selected)
-				  return a.selected ? -1 : 1;
-				return a.label.compareTo(b.label);
-			}
-		});
-
-		listView.setAdapter(adapter);
-		updateSubtitle();
 		listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
 			@Override
 			public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
@@ -228,6 +225,43 @@ public class AppListActivity extends BaseActivity {
 			@Override
 			public void afterTextChanged(Editable s) { }
 		});
+	}
+
+	/* Walking every installed package - and loading its icon and label - takes
+	   long enough to jank onCreate, so build the list on a worker thread and
+	   swap it in once. */
+	private void loadApps() {
+		toolbar.setSubtitle(R.string.app_list_loading);
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				final Set<String> apps = prefs.getApps();
+				final PackageManager pm = getPackageManager();
+				final List<Package> found = new ArrayList<Package>();
+				for (PackageInfo info : pm.getInstalledPackages(PackageManager.GET_PERMISSIONS)) {
+					if (info.packageName.equals(getPackageName()))
+					  continue;
+					if (info.requestedPermissions == null)
+					  continue;
+					if (!Arrays.asList(info.requestedPermissions)
+							.contains(Manifest.permission.INTERNET))
+					  continue;
+					boolean selected = apps.contains(info.packageName);
+					String label = info.applicationInfo.loadLabel(pm).toString();
+					Drawable icon = info.applicationInfo.loadIcon(pm);
+					found.add(new Package(info, selected, label, icon));
+				}
+				runOnUiThread(new Runnable() {
+					@Override
+					public void run() {
+						if (isFinishing() || isDestroyed())
+						  return;
+						adapter.setAll(found);
+						updateSubtitle();
+					}
+				});
+			}
+		}).start();
 	}
 
 	private void updateSubtitle() {

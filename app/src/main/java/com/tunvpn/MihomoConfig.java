@@ -31,9 +31,6 @@ public class MihomoConfig {
 	/* The proxy-group we build ourselves. The app's rules and the manual node
 	   pick both resolve through this name. */
 	public static final String GROUP = "tunvpn";
-	/* url-test health-check target: a 204 endpoint that is cheap and does not
-	   get intercepted in most networks. */
-	private static final String TEST_URL = "http://www.gstatic.com/generate_204";
 	/* Bail-out threshold for the auto re-test interval. */
 	private static final int MIN_INTERVAL = 30;
 	private static final int MAX_INTERVAL = 86400;
@@ -71,7 +68,11 @@ public class MihomoConfig {
 			cfg.append("tun:\n")
 				.append("  enable: true\n")
 				.append("  auto-route: true\n")
-				.append("  auto-detect-interface: true\n");
+				.append("  auto-detect-interface: true\n")
+				/* Without the hijack, DNS lookups skip the core's fake-ip
+				   resolver and hit the system resolver directly. */
+				.append("  dns-hijack:\n")
+				.append("    - any:53\n");
 
 		/* The home screen asks an echo service for the public IP through the
 		   core's local HTTP port, so make sure such a port is exposed. */
@@ -82,10 +83,27 @@ public class MihomoConfig {
 		   naming it anything else makes quickSetup fail with
 		   "stat config.yaml: no such file or directory". */
 		File out = new File(context.getFilesDir(), "config.yaml");
-		FileOutputStream fos = new FileOutputStream(out, false);
-		fos.write(cfg.toString().getBytes("UTF-8"));
-		fos.close();
+		try (FileOutputStream fos = new FileOutputStream(out, false)) {
+			fos.write(cfg.toString().getBytes("UTF-8"));
+		}
 		return out;
+	}
+
+	/* One-line summary of what the config contains, for the log: an empty
+	   merged pool is the kind of thing that stays invisible until every
+	   connection times out. */
+	public static String describe(Preferences prefs) {
+		int nodes = 0;
+		for (Subscription sub : prefs.getSubscriptions())
+		  nodes += ClashParser.extractProxies(prefs.getSubRaw(sub.id)).size();
+		/* The catch-all target is the single most useful thing to log: if it
+		   says DIRECT, everything is bypassing the proxy no matter how healthy
+		   the node pool looks. */
+		return nodes + " node(s), " + prefs.getRules().size() + " rule(s), default="
+			+ (prefs.getRulesDefaultProxy() ? GROUP : "DIRECT") + ", "
+			+ (prefs.getAutoSelect()
+				? "auto url-test " + prefs.getAutoSelectInterval() + "s"
+				: "manual select");
 	}
 
 	/* Merge every subscription into one node pool and point a single
@@ -111,17 +129,25 @@ public class MihomoConfig {
 		for (String def : defs)
 		  sb.append(def).append('\n');
 
-		String pool = joinQuoted(names);
+		/* Block style rather than a flow mapping: with a few hundred nodes the
+		   single line would run into tens of kilobytes, and a parse failure
+		   there silently leaves MATCH pointing at a group that does not
+		   exist - which shows up as "connected but nothing goes through the
+		   proxy". One node per line cannot blow up that way. */
 		sb.append("proxy-groups:\n");
+		sb.append("  - name: \"").append(GROUP).append("\"\n");
 		if (prefs.getAutoSelect()) {
-			sb.append("  - {name: \"").append(GROUP).append("\", type: url-test, url: \"")
-				.append(TEST_URL).append("\", interval: ")
-				.append(clampInterval(prefs.getAutoSelectInterval()))
-				.append(", tolerance: 50, proxies: [").append(pool).append("]}\n");
+			sb.append("    type: url-test\n")
+				.append("    url: \"").append(escapeYaml(prefs.getAutoTestUrl())).append("\"\n")
+				.append("    interval: ").append(clampInterval(prefs.getAutoSelectInterval()))
+				.append('\n')
+				.append("    tolerance: 50\n");
 		} else {
-			sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [")
-				.append(pool).append("]}\n");
+			sb.append("    type: select\n");
 		}
+		sb.append("    proxies:\n");
+		for (String name : names)
+		  sb.append("      - \"").append(escapeYaml(name)).append("\"\n");
 
 		sb.append("rules:\n");
 		appendRules(sb, prefs);
@@ -154,23 +180,55 @@ public class MihomoConfig {
 
 	/* The app's routing rules, then the catch-all switch. */
 	private static void appendRules(StringBuilder sb, Preferences prefs) {
-		for (Preferences.Rule r : prefs.getRules())
-		  sb.append("  - ").append(clashRule(r)).append('\n');
+		for (Preferences.Rule r : prefs.getRules()) {
+			String line = clashRule(r);
+			if (line != null)
+			  sb.append("  - ").append(line).append('\n');
+		}
 		sb.append("  - MATCH,")
 			.append(prefs.getRulesDefaultProxy() ? GROUP : "DIRECT").append('\n');
 	}
 
-	/* One app rule as a clash rule line. A domain rule matches the suffix,
-	   which is what people mean by "example.com"; IP and CIDR rules go
-	   through IP-CIDR (mihomo may resolve a hostname to test them). */
+	/* One app rule as a clash rule line, or null when it cannot be expressed.
+	   The rule page lets "IP" be picked while typing a hostname (an older
+	   build resolved those itself), and an unusable IP-CIDR target makes
+	   mihomo reject the whole config - so classify by what the value actually
+	   looks like instead of trusting the stored type. */
 	private static String clashRule(Preferences.Rule r) {
 		String target = r.proxy ? GROUP : "DIRECT";
 		String value = r.value == null ? "" : r.value.trim();
-		if (r.type == Preferences.Rule.TYPE_DOMAIN)
+		if (value.isEmpty())
+		  return null;
+		boolean ipv4 = isIpv4(value);
+		boolean ipv6 = value.contains(":");
+		boolean cidr = value.contains("/");
+
+		if (r.type == Preferences.Rule.TYPE_DOMAIN && !ipv4 && !ipv6 && !cidr)
 		  return "DOMAIN-SUFFIX," + value + "," + target;
-		if (r.type == Preferences.Rule.TYPE_IP)
+		if (cidr)
+		  return "IP-CIDR," + value + "," + target;
+		if (ipv4)
 		  return "IP-CIDR," + value + "/32," + target;
-		return "IP-CIDR," + value + "," + target;
+		if (ipv6)
+		  return "IP-CIDR," + value + "/128," + target;
+		/* An "IP" rule that actually holds a hostname. */
+		return "DOMAIN-SUFFIX," + value + "," + target;
+	}
+
+	private static boolean isIpv4(String s) {
+		String[] parts = s.split("\\.");
+		if (parts.length != 4)
+		  return false;
+		for (String p : parts) {
+			try {
+				int v = Integer.parseInt(p);
+				if (v < 0 || v > 255)
+				  return false;
+			} catch (NumberFormatException e) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/* The merged pool has to be addressable by name, and two subscriptions may
@@ -197,16 +255,6 @@ public class MihomoConfig {
 		} catch (Exception e) {
 		}
 		return text;
-	}
-
-	private static String joinQuoted(List<String> names) {
-		StringBuilder sb = new StringBuilder();
-		for (int i = 0; i < names.size(); i++) {
-			if (i > 0)
-			  sb.append(", ");
-			sb.append('"').append(escapeYaml(names.get(i))).append('"');
-		}
-		return sb.toString();
 	}
 
 	private static String escapeYaml(String s) {
