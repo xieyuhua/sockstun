@@ -20,6 +20,7 @@ A simple and lightweight VPN proxy client for Android. It embeds [mihomo](https:
 
 * [使用教程 (Usage guide, 中文)](docs/使用教程.md)
 * [启动与架构说明 (Startup & architecture, 中文)](docs/启动与架构说明.md)
+* [内核接口说明 (mihomo external-controller API, 中文)](docs/内核接口说明.md)
 
 ## How to Build
 

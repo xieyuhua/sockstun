@@ -54,6 +54,15 @@ public class Preferences
 	public static final String STATS_SESSION_RX = "StatsSessionRx";
 	public static final String STATS_RATE_TX = "StatsRateTx";
 	public static final String STATS_RATE_RX = "StatsRateRx";
+	/* Counters that cover only traffic which went through a node. The core
+	   reports everything it handles, direct traffic included, so these are
+	   accumulated separately from its connection list. */
+	public static final String PROXY_TOTAL_TX = "ProxyTotalTx";
+	public static final String PROXY_TOTAL_RX = "ProxyTotalRx";
+	public static final String PROXY_SESSION_TX = "ProxySessionTx";
+	public static final String PROXY_SESSION_RX = "ProxySessionRx";
+	public static final String PROXY_RATE_TX = "ProxyRateTx";
+	public static final String PROXY_RATE_RX = "ProxyRateRx";
 	public static final String STATS_APP_BASE = "StatsAppBase";
 	public static final String STATS_APP_TOTAL = "StatsAppTotal";
 	public static final String THEME = "Theme";
@@ -706,6 +715,46 @@ public class Preferences
 
 	public long getRateRx() {
 		return prefs.getLong(STATS_RATE_RX, 0);
+	}
+
+	public long getProxyTotalTx() {
+		return prefs.getLong(PROXY_TOTAL_TX, 0);
+	}
+
+	public long getProxyTotalRx() {
+		return prefs.getLong(PROXY_TOTAL_RX, 0);
+	}
+
+	public long getProxySessionTx() {
+		return prefs.getLong(PROXY_SESSION_TX, 0);
+	}
+
+	public long getProxySessionRx() {
+		return prefs.getLong(PROXY_SESSION_RX, 0);
+	}
+
+	public long getProxyRateTx() {
+		return prefs.getLong(PROXY_RATE_TX, 0);
+	}
+
+	public long getProxyRateRx() {
+		return prefs.getLong(PROXY_RATE_RX, 0);
+	}
+
+	public void setProxyStats(long totalTx, long totalRx, long sessionTx, long sessionRx,
+			long rateTx, long rateRx) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putLong(PROXY_TOTAL_TX, totalTx);
+		editor.putLong(PROXY_TOTAL_RX, totalRx);
+		editor.putLong(PROXY_SESSION_TX, sessionTx);
+		editor.putLong(PROXY_SESSION_RX, sessionRx);
+		editor.putLong(PROXY_RATE_TX, rateTx);
+		editor.putLong(PROXY_RATE_RX, rateRx);
+		editor.commit();
+	}
+
+	public void resetProxyStats() {
+		setProxyStats(0, 0, 0, 0, 0, 0);
 	}
 
 	public void setStats(long totalTx, long totalRx, long sessionTx, long sessionRx,

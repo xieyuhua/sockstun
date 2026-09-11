@@ -81,6 +81,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			connectionSubtitle(), R.id.settings_connection);
 		addRow(group_connection, R.drawable.ic_apps, R.string.apps,
 			appsSubtitle(), R.id.settings_apps);
+		addRow(group_connection, R.drawable.ic_routing, R.string.settings_connections,
+			getString(R.string.settings_connections_hint), R.id.settings_connections);
 
 		addSwitchRow(group_lan, R.drawable.ic_routing, R.string.settings_allow_lan,
 			R.string.settings_allow_lan_hint, prefs.getAllowLan(),
@@ -276,6 +278,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  showConnectionDialog();
 		else if (id == R.id.settings_apps)
 		  startActivity(new Intent(this, AppListActivity.class));
+		else if (id == R.id.settings_connections)
+		  startActivity(new Intent(this, ConnectionsActivity.class));
 		else if (id == R.id.settings_subscription)
 		  startActivity(new Intent(this, SubscribeConfigActivity.class));
 		else if (id == R.id.settings_proxy_port)

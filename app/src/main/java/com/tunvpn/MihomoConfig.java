@@ -31,6 +31,10 @@ public class MihomoConfig {
 	/* The proxy-group we build ourselves. The app's rules and the manual node
 	   pick both resolve through this name. */
 	public static final String GROUP = "tunvpn";
+	/* mihomo's RESTful API. Bound to loopback only: it exposes every
+	   connection's target and must never be reachable from the LAN, which is
+	   also why it ignores the allow-lan setting. */
+	public static final int API_PORT = 9090;
 	/* Bail-out threshold for the auto re-test interval. */
 	private static final int MIN_INTERVAL = 30;
 	private static final int MAX_INTERVAL = 86400;
@@ -76,6 +80,11 @@ public class MihomoConfig {
 				   resolver and hit the system resolver directly. */
 				.append("  dns-hijack:\n")
 				.append("    - any:53\n");
+
+		/* Loopback-only API used to tell proxied traffic apart from direct
+		   traffic (the point of the home screen's counters). */
+		if (!sectionExists(cfg, "external-controller:"))
+			cfg.append("external-controller: 127.0.0.1:").append(API_PORT).append('\n');
 
 		/* The home screen asks an echo service for the public IP through the
 		   core's local HTTP port, so make sure such a port is exposed. */

@@ -197,6 +197,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	public void onClick(View view) {
 		if (view.getId() == R.id.traffic_reset) {
 			prefs.resetStats();
+			prefs.resetProxyStats();
 			refreshTraffic();
 			return;
 		}
@@ -225,15 +226,17 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	   from the system counters and include traffic outside the tunnel. */
 	private void refreshTraffic() {
 		prefs = new Preferences(this);
+		/* Proxied traffic only: the counters behind these come from the core's
+		   connection list filtered by chain, so direct traffic is excluded. */
 		textview_realtime.setText(statsLine(R.string.stats_realtime,
-			TProxyService.formatRate(prefs.getRateTx()),
-			TProxyService.formatRate(prefs.getRateRx())));
+			TProxyService.formatRate(prefs.getProxyRateTx()),
+			TProxyService.formatRate(prefs.getProxyRateRx())));
 		textview_session.setText(statsLine(R.string.stats_session,
-			TProxyService.formatBytes(prefs.getSessionTx()),
-			TProxyService.formatBytes(prefs.getSessionRx())));
+			TProxyService.formatBytes(prefs.getProxySessionTx()),
+			TProxyService.formatBytes(prefs.getProxySessionRx())));
 		textview_total.setText(statsLine(R.string.stats_total,
-			TProxyService.formatBytes(prefs.getTotalTx()),
-			TProxyService.formatBytes(prefs.getTotalRx())));
+			TProxyService.formatBytes(prefs.getProxyTotalTx()),
+			TProxyService.formatBytes(prefs.getProxyTotalRx())));
 		textview_apps.setText(appSummary(Preferences.parseAppStats(prefs.getAppTotal())));
 		updateNode();
 		refreshProxyState();

@@ -9,12 +9,20 @@
 
 package com.tunvpn;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.Set;
 
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -73,6 +81,20 @@ public class TProxyService extends VpnService {
 	private long txRate, rxRate;
 	private String lastNotifyText = null;
 	private int trafficSamples = 0;
+
+	/* --- proxied-traffic accounting ---------------------------------------
+	   The core's own counters cover everything it handles, direct traffic
+	   included. To report what actually went through a node we poll its
+	   connection list and accumulate the per-connection counters of the ones
+	   whose chain is not DIRECT. A connection that opens and finishes between
+	   two polls is missed, so this is a close approximation, not an exact
+	   figure. */
+	private final Map<String, long[]> connSeen = new HashMap<String, long[]>();
+	private long proxyBaseTx, proxyBaseRx;
+	private long proxySessionTx, proxySessionRx;
+	private long lastProxyTx, lastProxyRx;
+	private long proxyRateTx, proxyRateRx;
+	private long lastProxyTime;
 
 	/* Append a line to the log file directly (bypassing the fd-1/2
 	   redirection), so startup diagnostics are always captured even if the
@@ -460,10 +482,14 @@ public class TProxyService extends VpnService {
 	}
 
 	private Notification buildNotification() {
-		String line = statsLine(R.string.stats_realtime, formatRate(txRate), formatRate(rxRate));
+		String line = statsLine(R.string.stats_realtime,
+			formatRate(proxyRateTx), formatRate(proxyRateRx));
 		String big = line + "\n" +
-			statsLine(R.string.stats_session, formatBytes(sessionTx), formatBytes(sessionRx)) + "\n" +
-			statsLine(R.string.stats_total, formatBytes(totalTx), formatBytes(totalRx));
+			statsLine(R.string.stats_session,
+				formatBytes(proxySessionTx), formatBytes(proxySessionRx)) + "\n" +
+			statsLine(R.string.stats_total,
+				formatBytes(proxyBaseTx + proxySessionTx),
+				formatBytes(proxyBaseRx + proxySessionRx));
 
 		/* The node goes into the title, where a long name is simply ellipsized,
 		   so the live rates below can never be pushed out of the notification.
@@ -515,7 +541,16 @@ public class TProxyService extends VpnService {
 		lastNotifyText = null;
 		trafficSamples = 0;
 
+		proxyBaseTx = prefs.getProxyTotalTx();
+		proxyBaseRx = prefs.getProxyTotalRx();
+		proxySessionTx = proxySessionRx = 0;
+		lastProxyTx = lastProxyRx = 0;
+		proxyRateTx = proxyRateRx = 0;
+		lastProxyTime = SystemClock.elapsedRealtime();
+		connSeen.clear();
+
 		prefs.setStats(totalTx, totalRx, 0, 0, 0, 0);
+		prefs.setProxyStats(proxyBaseTx, proxyBaseRx, 0, 0, 0, 0);
 		prefs.setAppStats(snapshotApps(this, prefs), prefs.getAppTotal());
 
 		statsHandler = new Handler(Looper.getMainLooper());
@@ -584,7 +619,10 @@ public class TProxyService extends VpnService {
 		if (updateNotify)
 		  updateNotification();
 
+		accumulateProxy();
+
 		saveStats();
+		saveProxyStats();
 	}
 
 	/* A stuck traffic counter is invisible from the UI - it just keeps
@@ -618,9 +656,111 @@ public class TProxyService extends VpnService {
 		return -1;
 	}
 
+	/* Pull the core's connection list and add up what actually went through a
+	   node. Only the deltas are counted, so a connection that stays open keeps
+	   contributing as it transfers. */
+	private void accumulateProxy() {
+		String body = httpGet("http://127.0.0.1:" + MihomoConfig.API_PORT + "/connections");
+		if (body == null)
+		  return;
+		try {
+			JSONObject root = new JSONObject(body);
+			JSONArray arr = root.optJSONArray("connections");
+			if (arr == null)
+			  return;
+
+			Set<String> alive = new HashSet<String>();
+			for (int i = 0; i < arr.length(); i++) {
+				JSONObject c = arr.optJSONObject(i);
+				if (c == null)
+				  continue;
+				String id = c.optString("id");
+				if (id.isEmpty())
+				  continue;
+				alive.add(id);
+				if (isDirectConnection(c))
+				  continue;
+
+				long up = c.optLong("upload");
+				long down = c.optLong("download");
+				long[] prev = connSeen.get(id);
+				if (prev == null) {
+					/* First sighting: it already moved this much before we
+					   noticed it. */
+					proxySessionTx += up;
+					proxySessionRx += down;
+				} else {
+					if (up > prev[0])
+					  proxySessionTx += up - prev[0];
+					if (down > prev[1])
+					  proxySessionRx += down - prev[1];
+				}
+				connSeen.put(id, new long[] { up, down });
+			}
+			/* Drop finished connections so the map cannot grow forever. */
+			connSeen.keySet().retainAll(alive);
+
+			long now = SystemClock.elapsedRealtime();
+			long dt = now - lastProxyTime;
+			lastProxyTime = now;
+			if (dt > 0) {
+				proxyRateTx = Math.max((proxySessionTx - lastProxyTx) * 1000 / dt, 0);
+				proxyRateRx = Math.max((proxySessionRx - lastProxyRx) * 1000 / dt, 0);
+			}
+			lastProxyTx = proxySessionTx;
+			lastProxyRx = proxySessionRx;
+		} catch (Exception e) {
+		}
+	}
+
+	/* An empty chain, or a DIRECT hop in it, means the request never reached a
+	   proxy node. */
+	private static boolean isDirectConnection(JSONObject c) {
+		JSONArray chains = c.optJSONArray("chains");
+		if (chains == null || chains.length() == 0)
+		  return true;
+		for (int i = 0; i < chains.length(); i++) {
+			if ("DIRECT".equalsIgnoreCase(chains.optString(i)))
+			  return true;
+		}
+		return false;
+	}
+
+	private String httpGet(String url) {
+		HttpURLConnection conn = null;
+		try {
+			conn = (HttpURLConnection) new URL(url).openConnection();
+			conn.setConnectTimeout(2000);
+			conn.setReadTimeout(2000);
+			if (conn.getResponseCode() != HttpURLConnection.HTTP_OK)
+			  return null;
+			StringBuilder sb = new StringBuilder();
+			try (BufferedReader reader = new BufferedReader(
+					new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
+				String line;
+				while ((line = reader.readLine()) != null)
+				  sb.append(line);
+			}
+			return sb.toString();
+		} catch (Exception e) {
+			return null;
+		} finally {
+			if (conn != null)
+			  conn.disconnect();
+		}
+	}
+
+	private void saveProxyStats() {
+		if (statsPrefs != null)
+		  statsPrefs.setProxyStats(proxyBaseTx + proxySessionTx,
+			proxyBaseRx + proxySessionRx, proxySessionTx, proxySessionRx,
+			proxyRateTx, proxyRateRx);
+	}
+
 	/* Only re-post the notification when the shown text really changed. */
 	private void updateNotification() {
-		String line = statsLine(R.string.stats_realtime, formatRate(txRate), formatRate(rxRate));
+		String line = statsLine(R.string.stats_realtime,
+			formatRate(proxyRateTx), formatRate(proxyRateRx));
 		if (line.equals(lastNotifyText))
 		  return;
 		lastNotifyText = line;
