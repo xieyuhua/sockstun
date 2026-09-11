@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon for Android 8+. Without this the system wraps the legacy
+     bitmap in a white plate, which looks wrong against the dark palette. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+	<background android:drawable="@color/icon_background"/>
+	<foreground android:drawable="@mipmap/tunvpn_foreground"/>
+</adaptive-icon>

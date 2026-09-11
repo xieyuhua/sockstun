@@ -79,8 +79,15 @@ public class MihomoConfig {
 
 		/* The home screen asks an echo service for the public IP through the
 		   core's local HTTP port, so make sure such a port is exposed. */
-		if (!sectionExists(cfg, "port:") && !sectionExists(cfg, "mixed-port:"))
-			cfg.append("mixed-port: 7890\n");
+		if (!sectionExists(cfg, "port:") && !sectionExists(cfg, "mixed-port:")) {
+			cfg.append("mixed-port: ").append(prefs.getProxyPort()).append('\n');
+			/* allow-lan stays off unless asked for: an open proxy on a shared
+			   network lets anyone on it use (and pay for) the tunnel. */
+			if (prefs.getAllowLan()) {
+				cfg.append("allow-lan: true\n")
+					.append("bind-address: \"*\"\n");
+			}
+		}
 
 		/* The core loads <homeDir>/config.yaml, so the file name matters —
 		   naming it anything else makes quickSetup fail with

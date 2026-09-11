@@ -403,7 +403,8 @@ public class SubscribeActivity extends BaseActivity {
 		/* Tapping a node means the user wants exactly that one, so auto-select
 		   has to go off - otherwise the url-test group would switch away from
 		   it on the next health check. */
-		if (prefs.getAutoSelect()) {
+		boolean wasAuto = prefs.getAutoSelect();
+		if (wasAuto) {
 			prefs.setAutoSelect(false);
 			updateAutoUi();
 		}
@@ -417,7 +418,12 @@ public class SubscribeActivity extends BaseActivity {
 		if (prefs.getEnable()) {
 			startService(new Intent(this, TProxyService.class)
 				.setAction(TProxyService.ACTION_SELECT));
-			msg = getString(R.string.sub_switched, n.name);
+			/* The running tunnel still has the url-test group and that group
+			   re-tests on a timer, so a hand-picked node is only guaranteed to
+			   stick after a restart switches the group to select. */
+			msg = wasAuto
+				? getString(R.string.sub_switched_restart, n.name)
+				: getString(R.string.sub_switched, n.name);
 		} else
 			msg = getString(R.string.sub_applied_hint, n.name);
 		Toast.makeText(this, msg, Toast.LENGTH_LONG).show();

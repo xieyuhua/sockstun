@@ -15,6 +15,9 @@
 	<color name="text_dim">#7F9A93</color>
 	<color name="line">#1F2C29</color>
 
+	<!-- Adaptive launcher icon background. -->
+	<color name="icon_background">#060A09</color>
+
 	<color name="danger">#FF5C7A</color>
 	<color name="danger_container">#3A1220</color>
 	<color name="on_danger_container">#FFC2CE</color>

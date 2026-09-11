@@ -5,6 +5,7 @@
 	<item name="settings_connection" type="id"/>
 	<item name="settings_apps" type="id"/>
 	<item name="settings_subscription" type="id"/>
+	<item name="settings_proxy_port" type="id"/>
 	<item name="settings_log" type="id"/>
 	<item name="settings_theme" type="id"/>
 	<item name="settings_version" type="id"/>

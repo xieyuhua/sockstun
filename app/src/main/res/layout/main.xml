@@ -84,6 +84,14 @@
 						android:gravity="center"
 						android:maxLines="2"
 						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
+					<TextView
+						android:id="@+id/status_proxy"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:layout_marginTop="4dp"
+						android:gravity="center"
+						android:textAppearance="@style/TextAppearance.TunVPN.Hint"
+						android:visibility="gone"/>
 					<com.google.android.material.button.MaterialButton
 						android:id="@+id/control"
 						android:layout_width="match_parent"

@@ -14,21 +14,27 @@ import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.View;
+import android.widget.CompoundButton;
+import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.color.MaterialColors;
+import com.google.android.material.switchmaterial.SwitchMaterial;
 
 import java.util.Set;
 
 public class SettingsActivity extends BaseActivity implements View.OnClickListener {
 	private Preferences prefs;
 	private LinearLayout group_connection;
+	private LinearLayout group_lan;
 	private LinearLayout group_subscription;
 	private LinearLayout group_general;
 	private LinearLayout group_about;
@@ -49,6 +55,7 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		});
 
 		group_connection = (LinearLayout) findViewById(R.id.settings_group_connection);
+		group_lan = (LinearLayout) findViewById(R.id.settings_group_lan);
 		group_subscription = (LinearLayout) findViewById(R.id.settings_group_subscription);
 		group_general = (LinearLayout) findViewById(R.id.settings_group_general);
 		group_about = (LinearLayout) findViewById(R.id.settings_group_about);
@@ -65,6 +72,7 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 
 	private void buildList() {
 		group_connection.removeAllViews();
+		group_lan.removeAllViews();
 		group_subscription.removeAllViews();
 		group_general.removeAllViews();
 		group_about.removeAllViews();
@@ -73,6 +81,18 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			connectionSubtitle(), R.id.settings_connection);
 		addRow(group_connection, R.drawable.ic_apps, R.string.apps,
 			appsSubtitle(), R.id.settings_apps);
+
+		addSwitchRow(group_lan, R.drawable.ic_routing, R.string.settings_allow_lan,
+			R.string.settings_allow_lan_hint, prefs.getAllowLan(),
+			new CompoundButton.OnCheckedChangeListener() {
+				@Override
+				public void onCheckedChanged(CompoundButton button, boolean checked) {
+					prefs.setAllowLan(checked);
+					afterNetworkChange();
+				}
+			});
+		addRow(group_lan, R.drawable.ic_dns, R.string.settings_lan_port,
+			Integer.toString(prefs.getProxyPort()), R.id.settings_proxy_port);
 		addRow(group_subscription, R.drawable.ic_subscribe, R.string.subs_config,
 			subsSubtitle(), R.id.settings_subscription);
 		addRow(group_general, R.drawable.ic_log, R.string.log,
@@ -106,6 +126,77 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		group.addView(row);
 	}
 
+	/* Same as addRow(), but the trailing control is a switch. Tapping anywhere
+	   on the row toggles it as well, since the switch itself is a small
+	   target. */
+	private void addSwitchRow(LinearLayout group, int iconRes, int titleRes, int subtitleRes,
+			boolean checked, CompoundButton.OnCheckedChangeListener listener) {
+		if (group.getChildCount() > 0)
+		  group.addView(makeDivider());
+
+		View row = getLayoutInflater().inflate(R.layout.settings_switch_item, group, false);
+		((ImageView) row.findViewById(R.id.item_icon)).setImageResource(iconRes);
+		((TextView) row.findViewById(R.id.item_title)).setText(titleRes);
+		TextView sub = (TextView) row.findViewById(R.id.item_subtitle);
+		sub.setText(subtitleRes);
+		sub.setVisibility(View.VISIBLE);
+
+		final SwitchMaterial toggle = (SwitchMaterial) row.findViewById(R.id.item_switch);
+		toggle.setChecked(checked);
+		toggle.setOnCheckedChangeListener(listener);
+		row.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				toggle.toggle();
+			}
+		});
+		group.addView(row);
+	}
+
+	/* Port and allow-lan both land in the generated config, so a running
+	   tunnel keeps the old values until it restarts. */
+	private void afterNetworkChange() {
+		if (prefs.getEnable())
+		  Toast.makeText(this, R.string.settings_restart_needed, Toast.LENGTH_LONG).show();
+	}
+
+	private void editPort() {
+		final EditText input = new EditText(this);
+		input.setInputType(InputType.TYPE_CLASS_NUMBER);
+		input.setHint(R.string.settings_port_hint);
+		input.setText(Integer.toString(prefs.getProxyPort()));
+		input.setSelection(input.getText().length());
+		int pad = (int) (20 * getResources().getDisplayMetrics().density);
+		input.setPadding(pad, pad / 2, pad, 0);
+
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.settings_lan_port)
+			.setMessage(R.string.settings_port_hint)
+			.setView(input)
+			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface d, int which) {
+					int port;
+					try {
+						port = Integer.parseInt(input.getText().toString().trim());
+					} catch (NumberFormatException e) {
+						port = prefs.getProxyPort();
+					}
+					int clamped = Math.max(Preferences.MIN_PROXY_PORT,
+						Math.min(Preferences.MAX_PROXY_PORT, port));
+					if (clamped != port)
+					  Toast.makeText(SettingsActivity.this,
+						getString(R.string.settings_port_clamped, clamped),
+						Toast.LENGTH_SHORT).show();
+					prefs.setProxyPort(clamped);
+					buildList();
+					afterNetworkChange();
+				}
+			})
+			.setNegativeButton(android.R.string.cancel, null)
+			.show();
+	}
+
 	private View makeDivider() {
 		View divider = new View(this);
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
@@ -119,13 +210,19 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		return divider;
 	}
 
+	/* What the tunnel has moved this session. This row is the connection's
+	   live data rather than a place to configure a proxy, so lead with the
+	   counters - which node it is using already shows on the home screen and
+	   inside the dialog. */
 	private String connectionSubtitle() {
 		if (!prefs.getEnable())
 		  return getString(R.string.status_disconnected);
-		String node = prefs.getCurrentNode();
-		if (node == null || node.isEmpty())
+		long tx = prefs.getSessionTx();
+		long rx = prefs.getSessionRx();
+		if (tx <= 0 && rx <= 0)
 		  return getString(R.string.status_connected);
-		return getString(R.string.status_connected) + " · " + node;
+		return getString(R.string.status_connected) + " · ↑ "
+			+ TProxyService.formatBytes(tx) + " / ↓ " + TProxyService.formatBytes(rx);
 	}
 
 	private String appsSubtitle() {
@@ -181,6 +278,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  startActivity(new Intent(this, AppListActivity.class));
 		else if (id == R.id.settings_subscription)
 		  startActivity(new Intent(this, SubscribeConfigActivity.class));
+		else if (id == R.id.settings_proxy_port)
+		  editPort();
 		else if (id == R.id.settings_log)
 		  startActivity(new Intent(this, LogActivity.class));
 		else if (id == R.id.settings_theme)

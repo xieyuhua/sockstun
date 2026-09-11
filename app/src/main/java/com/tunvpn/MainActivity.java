@@ -19,6 +19,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -29,6 +30,10 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.net.VpnService;
+import java.net.Proxy;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.InetSocketAddress;
 
 
 import com.google.android.material.appbar.MaterialToolbar;
@@ -47,6 +52,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	private TextView textview_status_title;
 	private TextView textview_status_subtitle;
 	private TextView textview_status_node;
+	private TextView textview_status_proxy;
 	private Button button_control;
 	private TextView textview_realtime;
 	private TextView textview_session;
@@ -55,6 +61,10 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 
 	private static final long STATS_INTERVAL = 1500;
 	private static final int MAX_APPS_SHOWN = 3;
+	/* How often to check that traffic really reaches the internet through the
+	   core. "Connected" only means the tunnel came up. */
+	private static final long PROBE_INTERVAL = 20000;
+	private long lastProbe = 0;
 	private Handler statsHandler;
 	private Runnable statsTask;
 	private final Handler ui = new Handler(Looper.getMainLooper());
@@ -114,6 +124,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		textview_status_title = (TextView) findViewById(R.id.status_title);
 		textview_status_subtitle = (TextView) findViewById(R.id.status_subtitle);
 		textview_status_node = (TextView) findViewById(R.id.status_node);
+		textview_status_proxy = (TextView) findViewById(R.id.status_proxy);
 		button_control = (Button) findViewById(R.id.control);
 		textview_realtime = (TextView) findViewById(R.id.stats_realtime);
 		textview_session = (TextView) findViewById(R.id.stats_session);
@@ -222,6 +233,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 			TProxyService.formatBytes(prefs.getTotalRx())));
 		textview_apps.setText(appSummary(Preferences.parseAppStats(prefs.getAppTotal())));
 		updateNode();
+		refreshProxyState();
 
 		/* Enable and LastError are written by the :native process, which cannot
 		   notify this one through OnSharedPreferenceChangeListener - so poll.
@@ -238,6 +250,65 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 			? getString(prefs.hasSubscription() ? R.string.node_default : R.string.node_none)
 			: node;
 		textview_status_node.setText(getString(R.string.node_current, label));
+	}
+
+	/* Ask the core to fetch a small URL through whatever node and rules are in
+	   effect. This is the only honest answer to "is traffic being proxied":
+	   the request leaves through the same path as everything else, so if it
+	   fails, real traffic is failing too. */
+	private void refreshProxyState() {
+		if (!prefs.getEnable()) {
+			textview_status_proxy.setVisibility(View.GONE);
+			return;
+		}
+		long now = SystemClock.elapsedRealtime();
+		if (now - lastProbe < PROBE_INTERVAL)
+		  return;
+		lastProbe = now;
+
+		textview_status_proxy.setVisibility(View.VISIBLE);
+		textview_status_proxy.setText(R.string.proxy_state_probing);
+		textview_status_proxy.setTextColor(getThemeColor(
+			com.google.android.material.R.attr.colorOnSurfaceVariant));
+
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				final boolean ok = probeThroughCore();
+				ui.post(new Runnable() {
+					@Override
+					public void run() {
+						if (isFinishing() || isDestroyed())
+						  return;
+						textview_status_proxy.setText(ok
+							? R.string.proxy_state_ok : R.string.proxy_state_fail);
+						textview_status_proxy.setTextColor(getThemeColor(ok
+							? com.google.android.material.R.attr.colorPrimary
+							: com.google.android.material.R.attr.colorError));
+					}
+				});
+			}
+		}).start();
+	}
+
+	/* Reach the internet through the core's local HTTP port. */
+	private boolean probeThroughCore() {
+		HttpURLConnection conn = null;
+		try {
+			Proxy proxy = new Proxy(Proxy.Type.HTTP,
+				new InetSocketAddress("127.0.0.1", prefs.getProxyPort()));
+			conn = (HttpURLConnection) new URL(prefs.getAutoTestUrl()).openConnection(proxy);
+			conn.setConnectTimeout(6000);
+			conn.setReadTimeout(6000);
+			conn.setInstanceFollowRedirects(false);
+			int code = conn.getResponseCode();
+			return code > 0 && code < 400;
+		} catch (Exception e) {
+			return false;
+		} finally {
+			if (conn != null)
+			  conn.disconnect();
+		}
 	}
 
 	private String statsLine(int labelId, String up, String down) {
@@ -294,6 +365,10 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		final boolean connected = prefs.getEnable();
 		final String error = prefs.getLastError();
 		final boolean failed = !connected && !error.isEmpty();
+
+		/* Probe again as soon as the tunnel comes back up. */
+		if (!connected)
+		  lastProbe = 0;
 
 		int bg;
 		int fg;

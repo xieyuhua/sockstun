@@ -143,7 +143,11 @@
 	<string name="sub_help_title">订阅怎么用？</string>
 	<string name="sub_help_text">1. 可以保存多个订阅（设置 → 订阅配置）。点「拉取订阅」会更新全部订阅，节点合并成一个池，再排序、筛选、测速。\n\n2. 「自动选择最快节点」：打开后由内核定时测速，自动使用延迟最低的那个，测速间隔和测试地址点下方文字修改。关掉即为手动模式，点哪个节点就用哪个。\n\n3. 测速全部：绿色 = 可连通，红色 = 连不上，数字是 TCP 握手延迟，只代表链路快慢，不代表实际带宽。\n\n4. 分流由「路由规则」页统一决定（域名 / IP / IP 段 → 代理或直连），未命中的按该页顶部的开关处理；订阅自带的规则不参与。\n\n5. 与「服务器」页的关系：有订阅就用订阅；没有订阅时，「服务器」里启用的 SOCKS5 会作为手动上游生效。</string>
 	<string name="sub_applied_hint">已选择：%s\n下次启动隧道时生效</string>
-	<string name="sub_switched">已切换到：%s\n立即生效，无需重启</string>
+	<string name="sub_switched">已选择：%s</string>
+	<string name="sub_switched_restart">已选择：%1$s\n自动选择已关闭，重新连接后固定使用该节点</string>
+	<string name="proxy_state_probing">代理连通：检测中…</string>
+	<string name="proxy_state_ok">代理连通：正常</string>
+	<string name="proxy_state_fail">代理不通：节点可能已失效，或需要重新连接</string>
 	<string name="sub_invalid_url">请输入有效的订阅地址</string>
 	<string name="server_manual_hint">未配置订阅时，这里填写的 SOCKS5 会作为手动上游生效；已配置订阅时以订阅为准。</string>
 	<string name="server_use_as_upstream">使用此 SOCKS5 作为上游（忽略订阅）</string>
@@ -163,7 +167,7 @@
 	<string name="subs_delete_confirm">删除订阅“%s”？</string>
 	<string name="subs_url_required">请填写订阅地址</string>
 	<string name="server_list_hint_sub">可保存多个订阅地址。拉取时会更新全部订阅，节点合并成一个池；「默认」只用于标记主订阅。删除订阅会同时清掉它已拉取的节点。</string>
-	<string name="settings_connection">当前连接</string>
+	<string name="settings_connection">连接信息</string>
 	<string name="settings_group_connection">连接</string>
 	<string name="settings_group_subscription">订阅</string>
 	<string name="settings_group_general">通用</string>
@@ -172,6 +176,13 @@
 	<string name="settings_state_off">已关闭</string>
 	<string name="settings_sub_unset">未配置</string>
 	<string name="settings_apps_none">未选择应用</string>
+	<string name="settings_group_lan">局域网代理</string>
+	<string name="settings_allow_lan">允许局域网连接</string>
+	<string name="settings_allow_lan_hint">开启后，同一网络下的其他设备可把本机当代理使用（端口见下）</string>
+	<string name="settings_lan_port">代理端口</string>
+	<string name="settings_port_hint">1024 – 65535</string>
+	<string name="settings_port_clamped">已调整为 %1$d</string>
+	<string name="settings_restart_needed">设置已保存，重新连接后生效</string>
 	<string name="connection_state">状态</string>
 	<string name="connection_node">节点</string>
 	<string name="connection_server">服务器</string>

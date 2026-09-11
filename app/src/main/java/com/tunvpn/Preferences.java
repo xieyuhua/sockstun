@@ -65,6 +65,13 @@ public class Preferences
 	public static final String AUTO_SELECT = "AutoSelect";
 	public static final String AUTO_SELECT_INTERVAL = "AutoSelectInterval";
 	public static final String AUTO_TEST_URL = "AutoTestUrl";
+	/* Local proxy port the core listens on, and whether it is exposed to the
+	   LAN. */
+	public static final String PROXY_PORT = "ProxyPort";
+	public static final String ALLOW_LAN = "AllowLan";
+	public static final int DEFAULT_PROXY_PORT = 7890;
+	public static final int MIN_PROXY_PORT = 1024;
+	public static final int MAX_PROXY_PORT = 65535;
 	/* mihomo's own default for url-test. */
 	public static final int DEFAULT_AUTO_INTERVAL = 300;
 	/* Health-check target for url-test: a 204 endpoint is cheap and most
@@ -479,6 +486,32 @@ public class Preferences
 	public void setAutoTestUrl(String url) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(AUTO_TEST_URL), url == null ? "" : url.trim());
+		editor.commit();
+	}
+
+	/* The core's local HTTP/SOCKS port. Out of range means "never set". */
+	public int getProxyPort() {
+		int port = prefs.getInt(key(PROXY_PORT), DEFAULT_PROXY_PORT);
+		if (port < MIN_PROXY_PORT || port > MAX_PROXY_PORT)
+		  return DEFAULT_PROXY_PORT;
+		return port;
+	}
+
+	public void setProxyPort(int port) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putInt(key(PROXY_PORT), port);
+		editor.commit();
+	}
+
+	/* Expose the port to the whole LAN (mihomo's allow-lan). Off by default:
+	   an open proxy on a shared Wi-Fi lets anyone on it use the tunnel. */
+	public boolean getAllowLan() {
+		return prefs.getBoolean(key(ALLOW_LAN), false);
+	}
+
+	public void setAllowLan(boolean allow) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putBoolean(key(ALLOW_LAN), allow);
 		editor.commit();
 	}
 
