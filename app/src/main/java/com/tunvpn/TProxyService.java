@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Set;
@@ -443,28 +444,122 @@ public class TProxyService extends VpnService {
 		selectInGroup(MihomoConfig.GROUP, sel);
 	}
 
+	/* Ask mihomo to select the chosen proxy/group inside the group we built.
+	   We use the external-controller REST API (loopback :9090) instead of the
+	   JNI invokeAction bridge: the bridge hands Java strings to the core as
+	   "modified UTF-8", which corrupts supplementary-plane characters such as
+	   flag emoji in a node name, so changeProxy then reports "proxy not
+	   exist". REST carries standard UTF-8 end to end, so the name matches
+	   exactly what the config registered. */
 	private void selectInGroup(String group, String proxy) {
-		/* An action document is {"id","method","data"}; changeProxy expects
-		   data to be a *string* holding {"group-name","proxy-name"}. */
-		try {
-			JSONObject data = new JSONObject();
-			data.put("group-name", group);
-			data.put("proxy-name", proxy);
-			JSONObject action = new JSONObject();
-			action.put("id", "select");
-			action.put("method", "changeProxy");
-			action.put("data", data.toString());
-			Clash.INSTANCE.invokeAction(action.toString(), new InvokeInterface() {
-				@Override
-				public void onResult(String result) {
-					appendLog("selector set: " + (result == null ? "ok" : result));
+		appendLog("selected: " + proxy + " in group " + group);
+		/* Best-effort and network-bound, so run off the calling thread. */
+		new Thread(() -> {
+			try {
+				String target = null;
+				try {
+					target = resolveMember(group, proxy);
+				} catch (Throwable ignore) {
 				}
-			});
-			appendLog("selected: " + proxy + " in group " + group);
+				if (target == null)
+				  target = proxy; /* last-ditch: try the raw name */
+				int code = putSelector(group, target);
+				String note = (code >= 200 && code < 300) ? "ok" : ("http " + code);
+				if (!target.equals(proxy))
+				  note += " (resolved to " + target + ")";
+				appendLog("selector set: " + note);
+			} catch (Throwable e) {
+				appendLog("selector set skipped: " + e);
+			}
+		}).start();
+	}
+
+	/* Resolve `wanted` to a real member name of `group`, tolerating the
+	   trailing " (N)" de-duplication suffix the config may have added when two
+	   subscriptions shipped the same node label. Returns null when the group
+	   cannot be read. */
+	private String resolveMember(String group, String wanted) throws IOException {
+		String url = "http://127.0.0.1:" + MihomoConfig.API_PORT
+			+ "/proxies/" + encodePath(group);
+		HttpURLConnection get = (HttpURLConnection) new URL(url).openConnection();
+		get.setRequestMethod("GET");
+		get.setConnectTimeout(2000);
+		get.setReadTimeout(2000);
+		String body = readBody(get);
+		get.disconnect();
+		if (body == null)
+		  return null;
+		String base = wanted.replaceAll(" \\(\\d+\\)$", "");
+		String fallback = null;
+		try {
+			JSONObject o = new JSONObject(body);
+			JSONArray all = o.optJSONArray("all");
+			if (all != null) {
+				for (int i = 0; i < all.length(); i++) {
+					String m = all.getString(i);
+					if (m.equals(wanted))
+					  return m;
+					if (fallback == null
+						&& m.replaceAll(" \\(\\d+\\)$", "").equals(base))
+					  fallback = m;
+				}
+			}
 		} catch (JSONException e) {
-			appendLog("selector set skipped: " + e);
-		} catch (Throwable e) {
-			appendLog("selector set skipped: " + e);
+		}
+		return fallback;
+	}
+
+	/* PUT /proxies/{group} {"name": proxy} to move the selector. */
+	private int putSelector(String group, String proxy) throws IOException {
+		String url = "http://127.0.0.1:" + MihomoConfig.API_PORT
+			+ "/proxies/" + encodePath(group);
+		HttpURLConnection put = (HttpURLConnection) new URL(url).openConnection();
+		put.setRequestMethod("PUT");
+		put.setConnectTimeout(2000);
+		put.setReadTimeout(2000);
+		put.setDoOutput(true);
+		put.setRequestProperty("Content-Type", "application/json");
+		String payload = "{\"name\":\"" + escapeJson(proxy) + "\"}";
+		put.getOutputStream().write(payload.getBytes(StandardCharsets.UTF_8));
+		int code = put.getResponseCode();
+		put.disconnect();
+		return code;
+	}
+
+	private static String encodePath(String s) {
+		try {
+			return URLEncoder.encode(s, "UTF-8").replace("+", "%20");
+		} catch (Exception e) {
+			return s;
+		}
+	}
+
+	private static String escapeJson(String s) {
+		return s.replace("\\", "\\\\").replace("\"", "\\\"");
+	}
+
+	private static String readBody(HttpURLConnection c) {
+		BufferedReader r;
+		try {
+			r = new BufferedReader(new InputStreamReader(
+				c.getResponseCode() < 400 ? c.getInputStream() : c.getErrorStream(),
+				StandardCharsets.UTF_8));
+		} catch (IOException e) {
+			return null;
+		}
+		try {
+			StringBuilder sb = new StringBuilder();
+			String line;
+			while ((line = r.readLine()) != null)
+			  sb.append(line);
+			return sb.toString();
+		} catch (IOException e) {
+			return null;
+		} finally {
+			try {
+				r.close();
+			} catch (IOException e) {
+			}
 		}
 	}
 

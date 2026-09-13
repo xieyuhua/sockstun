@@ -85,6 +85,14 @@ public class SubscribeActivity extends BaseActivity {
 	private final List<String> countryCodes = new ArrayList<String>();
 	private final List<String> countryLabels = new ArrayList<String>();
 	private int pendingGeo = 0;
+	/* Country filter for the node list: an extra dropdown that narrows the
+	   visible list to a single country, independent of the auto-select target
+	   spinner above. "" means "all countries". */
+	private Spinner spinner_country_filter;
+	private ArrayAdapter<String> countryFilterAdapter;
+	private final List<String> filterCountryCodes = new ArrayList<String>();
+	private final List<String> filterCountryLabels = new ArrayList<String>();
+	private String filterCountry = "";
 	/* Bounded pool for latency tests. "Test all" on a large subscription would
 	   otherwise fire one thread - and one socket - per node at once. */
 	private final ExecutorService testPool = Executors.newFixedThreadPool(8);
@@ -152,6 +160,23 @@ public class SubscribeActivity extends BaseActivity {
 			@Override
 			public void onClick(View v) {
 				resolveCountries();
+			}
+		});
+		spinner_country_filter = (Spinner) findViewById(R.id.sub_country_filter);
+		countryFilterAdapter = new ArrayAdapter<String>(this,
+			R.layout.spinner_item_small, filterCountryLabels);
+		countryFilterAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item_small);
+		spinner_country_filter.setAdapter(countryFilterAdapter);
+		spinner_country_filter.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+			@Override
+			public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+				if (position < 0 || position >= filterCountryCodes.size())
+				  return;
+				filterCountry = filterCountryCodes.get(position);
+				applyView();
+			}
+			@Override
+			public void onNothingSelected(AdapterView<?> parent) {
 			}
 		});
 
@@ -234,6 +259,7 @@ public class SubscribeActivity extends BaseActivity {
 			}
 		}
 		applyView();
+		refreshCountryFilterSpinner();
 	}
 
 	/* Rebuild the visible list from nodes according to filter + sort. */
@@ -243,6 +269,8 @@ public class SubscribeActivity extends BaseActivity {
 			if (filterMode == FILTER_OK && !isAvailable(n))
 			  continue;
 			if (filterMode == FILTER_BAD && !isBroken(n))
+			  continue;
+			if (!filterCountry.isEmpty() && !matchesCountry(n, filterCountry))
 			  continue;
 			shown.add(n);
 		}
@@ -258,6 +286,11 @@ public class SubscribeActivity extends BaseActivity {
 
 	private static boolean isBroken(ClashNode n) {
 		return n.latency == -2;
+	}
+
+	private static boolean matchesCountry(ClashNode n, String cc) {
+		String nodeCc = (n.country == null || n.country.isEmpty()) ? GeoIp.UNKNOWN : n.country;
+		return nodeCc.equals(cc);
 	}
 
 	/* Available nodes first by latency, then untested, then broken. */
@@ -332,6 +365,39 @@ public class SubscribeActivity extends BaseActivity {
 		spinner_country.setSelection(idx);
 	}
 
+	/* Rebuild the country filter dropdown from the currently known nodes. The
+	   first entry is "all countries"; the rest are ISO codes with node counts,
+	   sorted by count descending (mirrors the auto-mode country picker). */
+	private void refreshCountryFilterSpinner() {
+		filterCountryCodes.clear();
+		filterCountryLabels.clear();
+		filterCountryCodes.add("");
+		filterCountryLabels.add(getString(R.string.sub_country_all));
+		Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
+		for (ClashNode n : nodes) {
+			String cc = (n.country == null || n.country.isEmpty()) ? GeoIp.UNKNOWN : n.country;
+			Integer c = counts.get(cc);
+			counts.put(cc, c == null ? 1 : c + 1);
+		}
+		List<Map.Entry<String, Integer>> entries =
+			new ArrayList<Map.Entry<String, Integer>>(counts.entrySet());
+		Collections.sort(entries, new Comparator<Map.Entry<String, Integer>>() {
+			@Override
+			public int compare(Map.Entry<String, Integer> a, Map.Entry<String, Integer> b) {
+				return b.getValue().compareTo(a.getValue());
+			}
+		});
+		for (Map.Entry<String, Integer> e : entries) {
+			filterCountryCodes.add(e.getKey());
+			filterCountryLabels.add(Country.displayWithCount(e.getKey(), e.getValue()));
+		}
+		countryFilterAdapter.notifyDataSetChanged();
+		int idx = filterCountryCodes.indexOf(filterCountry);
+		if (idx < 0)
+		  idx = 0;
+		spinner_country_filter.setSelection(idx);
+	}
+
 	/* Resolve each node's country via GeoIp (server IP -> GeoIP), inside the
 	   test pool so a few hundred nodes don't block the UI. Results are cached
 	   into Preferences, then the spinner and list refresh. */
@@ -364,6 +430,7 @@ public class SubscribeActivity extends BaseActivity {
 							if (pendingGeo <= 0) {
 								saveNodes();
 								refreshCountrySpinner();
+								refreshCountryFilterSpinner();
 								applyView();
 							}
 						}
@@ -505,6 +572,11 @@ public class SubscribeActivity extends BaseActivity {
 				} catch (Exception e) {
 					n.latency = -2;
 				}
+				/* Resolve the node's country as part of the same test pass
+				   (offline cache first, so repeats cost nothing). This makes a
+				   single "测速" both measure speed and tag the country. */
+				if (n.country == null || n.country.isEmpty() || n.country.equals(GeoIp.UNKNOWN))
+				  n.country = GeoIp.countryOf(prefs, n.server);
 				ui.post(new Runnable() {
 					@Override
 					public void run() {
@@ -518,6 +590,8 @@ public class SubscribeActivity extends BaseActivity {
 							}
 						}
 						saveNodes();
+						refreshCountrySpinner();
+						refreshCountryFilterSpinner();
 						applyView();
 					}
 				});

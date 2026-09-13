@@ -13,7 +13,7 @@ A simple and lightweight VPN proxy client for Android. It embeds [mihomo](https:
 * The active node is shown on the home screen and in the notification (live rates are always kept visible).
 * IPv4/IPv6 dual stack, global / per-App modes.
 * Traffic statistics (live rate, session and total usage, per-app usage).
-* Routing is handled by the subscription's own `rules` / `rule-providers` / `proxy-groups` inside mihomo (the app pushes all traffic into the TUN and lets the core decide proxy vs direct).
+* **App-owned routing**: the "规则" (Rules) page builds mihomo's `rules:` section — domain suffix / domain keyword / GeoIP country / IP / process-name, each → proxy or direct. A routing strategy (rule mode / global proxy / global direct) and a one-tap "domestic direct" preset are included. Subscription `rules` / `rule-providers` are ignored; only nodes are merged.
 * Bottom navigation bar, multiple profiles (up to 13), Quick Settings tile, start on boot.
 
 ## Documents
