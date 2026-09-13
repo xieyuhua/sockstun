@@ -67,7 +67,7 @@
 	<string name="traffic_hint">上方统计的是经过代理节点的流量（不含直连）；应用数据取自系统统计，包含未走隧道的部分，仅供参考。</string>
 
 	<string name="rules">Routing rules</string>
-	<string name="rules_hint">Match a domain, an IP or an IP range. A domain rule also matches its subdomains; changes take effect on the next connect.</string>
+	<string name="rules_hint">先选「分流策略」，再按需添加规则：域名后缀 / 域名关键字 / 国家(GeoIP) / IP / 进程名 → 代理或直连；未命中的按底部开关处理。订阅自带规则不参与，修改后重新连接生效。</string>
 	<string name="rules_default_proxy">Unmatched traffic uses the proxy</string>
 	<string name="rule_add">Add</string>
 	<string name="rule_delete">Delete</string>
@@ -78,16 +78,37 @@
 	<string name="rule_type_domain">Domain</string>
 	<string name="rule_type_ip">IP</string>
 	<string name="rule_type_cidr">CIDR</string>
+	<string name="rule_type_keyword">Keyword</string>
+	<string name="rule_type_geoip">GeoIP 国家</string>
+	<string name="rule_type_process">进程名</string>
 	<string name="rule_action_proxy">Proxy</string>
 	<string name="rule_action_direct">Direct</string>
+	<string name="rule_strategy_label">分流策略</string>
+	<string name="rule_strategy_rules">规则模式</string>
+	<string name="rule_strategy_global">全局代理</string>
+	<string name="rule_strategy_direct">全局直连</string>
+	<string name="rules_mode_hint_rules">规则模式：按下方规则分流，未命中的流量走「未命中默认」开关。</string>
+	<string name="rules_mode_hint_global">全局代理：所有流量都走代理，下方规则不生效。</string>
+	<string name="rules_mode_hint_direct">全局直连：所有流量都不走代理，下方规则不生效。</string>
+	<string name="rules_preset_cn">国内直连预设</string>
+	<string name="rules_preset_cn_confirm">将清空现有规则并添加：国内（GeoIP,CN）及常见国内域名走直连，其余流量走代理。是否继续？</string>
+	<string name="rules_preset_cn_done">已应用「国内直连」预设，重新连接后生效</string>
 	<string-array name="rule_types">
 		<item>@string/rule_type_domain</item>
 		<item>@string/rule_type_ip</item>
 		<item>@string/rule_type_cidr</item>
+		<item>@string/rule_type_keyword</item>
+		<item>@string/rule_type_geoip</item>
+		<item>@string/rule_type_process</item>
 	</string-array>
 	<string-array name="rule_actions">
 		<item>@string/rule_action_proxy</item>
 		<item>@string/rule_action_direct</item>
+	</string-array>
+	<string-array name="rule_strategies">
+		<item>@string/rule_strategy_rules</item>
+		<item>@string/rule_strategy_global</item>
+		<item>@string/rule_strategy_direct</item>
 	</string-array>
 
 	<string name="theme">Theme</string>
@@ -125,6 +146,13 @@
 	<string name="sub_auto">自动选择最快节点</string>
 	<string name="sub_auto_hint">每 %1$s 重新测速（点击修改）</string>
 	<string name="sub_manual_hint">手动模式：使用你点选的那个节点</string>
+	<string name="sub_country_label">自动选择国家/地区</string>
+	<string name="sub_country_global">全局最快</string>
+	<string name="sub_country_unknown">未知（%1$d）</string>
+	<string name="sub_detect">探测国家</string>
+	<string name="sub_detecting">正在探测节点所属国家/地区…</string>
+	<string name="sub_detect_none">所有节点都已探测过国家</string>
+	<string name="sub_auto_country_hint">自动模式下：选「自动最优国家」会按测速自动挑最快的国家；选具体国家则在该国挑最快节点；选「全局最快」则不限国家。点「探测国家」可识别各节点所属国家。</string>
 	<string name="sub_minutes">%1$d 分钟</string>
 	<string name="sub_interval_title">自动测速间隔（分钟）</string>
 	<string name="sub_interval_custom">自定义…（当前 %1$d 分钟）</string>

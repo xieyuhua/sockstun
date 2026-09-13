@@ -10,8 +10,11 @@ package com.tunvpn;
 
 import java.net.Inet6Address;
 import java.net.InetAddress;
+import java.util.ArrayList;
 import java.util.List;
 
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.LayoutInflater;
@@ -48,6 +51,9 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 	private CompoundButton switch_default_proxy;
 	private Spinner spinner_type;
 	private Spinner spinner_action;
+	private Spinner spinner_strategy;
+	private TextView textview_mode_hint;
+	private MaterialButton button_preset_cn;
 	private EditText edit_value;
 	private LinearLayout rules_list;
 	private TextView rules_empty;
@@ -97,6 +103,30 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		setupSpinner(spinner_type, R.array.rule_types);
 		setupSpinner(spinner_action, R.array.rule_actions);
 
+		/* Routing strategy: rule mode / global proxy / global direct. */
+		spinner_strategy = (Spinner) findViewById(R.id.rules_strategy);
+		textview_mode_hint = (TextView) findViewById(R.id.rules_mode_hint);
+		button_preset_cn = (MaterialButton) findViewById(R.id.rules_preset_cn);
+		button_preset_cn.setOnClickListener(this);
+		setupSpinner(spinner_strategy, R.array.rule_strategies);
+		String strat = prefs.getRulesStrategy();
+		spinner_strategy.setSelection(
+			Preferences.RULES_STRATEGY_GLOBAL.equals(strat) ? 1
+			: Preferences.RULES_STRATEGY_DIRECT.equals(strat) ? 2 : 0);
+		spinner_strategy.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+			@Override
+			public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+				String s = position == 1 ? Preferences.RULES_STRATEGY_GLOBAL
+						: position == 2 ? Preferences.RULES_STRATEGY_DIRECT
+						: Preferences.RULES_STRATEGY_RULES;
+				prefs.setRulesStrategy(s);
+				updateModeUi();
+			}
+			@Override
+			public void onNothingSelected(AdapterView<?> parent) {
+			}
+		});
+
 		switch_default_proxy.setChecked(prefs.getRulesDefaultProxy());
 		switch_default_proxy.setOnCheckedChangeListener(
 			new CompoundButton.OnCheckedChangeListener() {
@@ -141,14 +171,34 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		checkbox_ipv6.setEnabled(editable);
 		checkbox_udp_in_tcp.setEnabled(editable);
 		checkbox_remote_dns.setEnabled(editable);
-		switch_default_proxy.setEnabled(editable);
-		spinner_type.setEnabled(editable);
-		spinner_action.setEnabled(editable);
-		edit_value.setEnabled(editable);
-		findViewById(R.id.rule_add).setEnabled(editable);
 
 		button_apps.setEnabled(editable && !checkbox_global.isChecked());
 		applyDnsEnabled(editable, checkbox_remote_dns.isChecked());
+		/* Rule controls depend on both editability and the chosen strategy, so
+		   let updateModeUi() own them. */
+		updateModeUi();
+	}
+
+	/* Enable/disable the rule-editing controls and pick the mode hint based on
+	   the current routing strategy. In the two global modes the rule list is
+	   ignored, so editing it would be misleading. */
+	private void updateModeUi() {
+		boolean editable = !prefs.getEnable();
+		String strat = prefs.getRulesStrategy();
+		boolean rulesMode = Preferences.RULES_STRATEGY_RULES.equals(strat);
+		boolean canEdit = editable && rulesMode;
+		switch_default_proxy.setEnabled(canEdit);
+		spinner_type.setEnabled(canEdit);
+		spinner_action.setEnabled(canEdit);
+		edit_value.setEnabled(canEdit);
+		findViewById(R.id.rule_add).setEnabled(canEdit);
+		button_preset_cn.setEnabled(canEdit);
+		if (Preferences.RULES_STRATEGY_GLOBAL.equals(strat))
+		  textview_mode_hint.setText(R.string.rules_mode_hint_global);
+		else if (Preferences.RULES_STRATEGY_DIRECT.equals(strat))
+		  textview_mode_hint.setText(R.string.rules_mode_hint_direct);
+		else
+		  textview_mode_hint.setText(R.string.rules_mode_hint_rules);
 	}
 
 	private void applyDnsEnabled(boolean editable, boolean remote) {
@@ -190,15 +240,30 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 			applyDnsEnabled(!prefs.getEnable(), checkbox_remote_dns.isChecked());
 			return;
 		}
+		if (view == button_preset_cn) {
+			applyCnPreset();
+			return;
+		}
 		addRule();
 	}
 
 	private String typeLabel(int type) {
-		if (type == Preferences.Rule.TYPE_DOMAIN)
-		  return getString(R.string.rule_type_domain);
-		if (type == Preferences.Rule.TYPE_CIDR)
-		  return getString(R.string.rule_type_cidr);
-		return getString(R.string.rule_type_ip);
+		switch (type) {
+			case Preferences.Rule.TYPE_DOMAIN:
+				return getString(R.string.rule_type_domain);
+			case Preferences.Rule.TYPE_IP:
+				return getString(R.string.rule_type_ip);
+			case Preferences.Rule.TYPE_CIDR:
+				return getString(R.string.rule_type_cidr);
+			case Preferences.Rule.TYPE_KEYWORD:
+				return getString(R.string.rule_type_keyword);
+			case Preferences.Rule.TYPE_GEOIP:
+				return getString(R.string.rule_type_geoip);
+			case Preferences.Rule.TYPE_PROCESS:
+				return getString(R.string.rule_type_process);
+			default:
+				return "?";
+		}
 	}
 
 	private void renderRules() {
@@ -253,38 +318,106 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		renderRules();
 	}
 
+	/* Validate the value against the chosen rule type. '|' and ';' are rejected
+	   because they are the field/record separators used when rules are stored. */
 	private boolean checkValue(int type, String value) {
 		if (value.isEmpty() || value.indexOf('|') >= 0 || value.indexOf(';') >= 0)
 		  return false;
+		switch (type) {
+			case Preferences.Rule.TYPE_DOMAIN:
+				/* A domain suffix: no slash, no prefix. */
+				return value.indexOf('/') < 0;
+			case Preferences.Rule.TYPE_IP:
+				if (value.indexOf('/') >= 0)
+				  return false;
+				return looksLikeIp(value);
+			case Preferences.Rule.TYPE_CIDR: {
+				int slash = value.lastIndexOf('/');
+				if (slash <= 0)
+				  return false;
+				String addr = value.substring(0, slash);
+				int prefix;
+				try {
+					prefix = Integer.parseInt(value.substring(slash + 1));
+				} catch (NumberFormatException e) {
+					return false;
+				}
+				if (!looksLikeIp(addr))
+				  return false;
+				boolean v6 = addr.indexOf(':') >= 0;
+				return prefix >= 0 && prefix <= (v6 ? 128 : 32);
+			}
+			case Preferences.Rule.TYPE_KEYWORD:
+				/* Any non-empty substring of a domain name. */
+				return true;
+			case Preferences.Rule.TYPE_GEOIP:
+				/* ISO-3166 alpha-2 country code. */
+				return value.matches("^[A-Za-z]{2}$");
+			case Preferences.Rule.TYPE_PROCESS:
+				return true;
+			default:
+				return false;
+		}
+	}
 
-		if (type == Preferences.Rule.TYPE_DOMAIN)
-		  return value.indexOf('/') < 0;
-
-		String addr = value;
-		int prefix = -1;
-		int slash = value.lastIndexOf('/');
-		if (slash > 0) {
-			if (type != Preferences.Rule.TYPE_CIDR)
-			  return false;
-			addr = value.substring(0, slash);
+	/* True for a literal IPv4 (four 0-255 octets) or IPv6 (contains ':') address.
+	   Hostnames are rejected so an "IP" rule never triggers a DNS lookup. */
+	private static boolean looksLikeIp(String s) {
+		if (s.indexOf(':') >= 0)
+		  return true;
+		String[] p = s.split("\\.");
+		if (p.length != 4)
+		  return false;
+		for (String x : p) {
 			try {
-				prefix = Integer.parseInt(value.substring(slash + 1));
+				int v = Integer.parseInt(x);
+				if (v < 0 || v > 255)
+				  return false;
 			} catch (NumberFormatException e) {
 				return false;
 			}
-			if (prefix < 0 || prefix > 128)
-			  return false;
-		} else if (type == Preferences.Rule.TYPE_CIDR) {
-			return false;
-		}
-
-		try {
-			InetAddress ia = InetAddress.getByName(addr);
-			if (prefix > (ia instanceof Inet6Address ? 128 : 32))
-			  return false;
-		} catch (Exception e) {
-			return false;
 		}
 		return true;
+	}
+
+	/* One-tap "domestic direct" preset: GEOIP,CN plus a handful of the most
+	   common Chinese domains go DIRECT, everything else proxies. This replaces
+	   the current rule list. */
+	private void applyCnPreset() {
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.rules_preset_cn)
+			.setMessage(R.string.rules_preset_cn_confirm)
+			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface d, int which) {
+					prefs.setRulesStrategy(Preferences.RULES_STRATEGY_RULES);
+					prefs.setRulesDefaultProxy(true);
+					rules = buildCnDirectPreset();
+					prefs.setRules(rules);
+					spinner_strategy.setSelection(0);
+					switch_default_proxy.setChecked(true);
+					renderRules();
+					updateModeUi();
+					Toast.makeText(RulesHubActivity.this,
+						R.string.rules_preset_cn_done, Toast.LENGTH_LONG).show();
+				}
+			})
+			.setNegativeButton(android.R.string.cancel, null)
+			.show();
+	}
+
+	/* The preset's rule list: Chinese traffic direct, the rest proxied. */
+	private static List<Preferences.Rule> buildCnDirectPreset() {
+		List<Preferences.Rule> list = new ArrayList<Preferences.Rule>();
+		list.add(new Preferences.Rule(Preferences.Rule.TYPE_GEOIP, "CN", false));
+		String[] domains = {
+			"cn", "baidu.com", "qq.com", "taobao.com", "jd.com",
+			"sina.com.cn", "weibo.com", "aliyun.com", "163.com", "126.com",
+			"tencent.com", "tmall.com", "hao123.com", "sohu.com", "ifeng.com",
+			"ximalaya.com", "bilibili.com", "youku.com", "iqiyi.com", "douyin.com"
+		};
+		for (String d : domains)
+		  list.add(new Preferences.Rule(Preferences.Rule.TYPE_DOMAIN, d, false));
+		return list;
 	}
 }

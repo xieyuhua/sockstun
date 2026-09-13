@@ -31,6 +31,14 @@ public class MihomoConfig {
 	/* The proxy-group we build ourselves. The app's rules and the manual node
 	   pick both resolve through this name. */
 	public static final String GROUP = "tunvpn";
+	/* The url-test group that spans every node (the "fastest anywhere" choice
+	   in auto mode). */
+	public static final String GLOBAL_GROUP = GROUP + "-global";
+
+	/* Name of the per-country url-test group for an ISO-3166 alpha-2 code. */
+	public static String countryGroup(String cc) {
+		return GROUP + "-" + cc;
+	}
 	/* mihomo's RESTful API. Bound to loopback only: it exposes every
 	   connection's target and must never be reachable from the LAN, which is
 	   also why it ignores the allow-lan setting. */
@@ -118,11 +126,32 @@ public class MihomoConfig {
 		/* The catch-all target is the single most useful thing to log: if it
 		   says DIRECT, everything is bypassing the proxy no matter how healthy
 		   the node pool looks. */
-		return nodes + " node(s), " + prefs.getRules().size() + " rule(s), default="
-			+ (prefs.getRulesDefaultProxy() ? GROUP : "DIRECT") + ", "
+		return nodes + " node(s), " + prefs.getRules().size() + " rule(s), "
+			+ strategyLabel(prefs) + ", "
 			+ (prefs.getAutoSelect()
-				? "auto url-test " + prefs.getAutoSelectInterval() + "s"
+				? ("auto url-test " + prefs.getAutoSelectInterval() + "s" + autoCountryLabel(prefs))
 				: "manual select");
+	}
+
+	/* One-line description of the routing strategy for the log. */
+	private static String strategyLabel(Preferences prefs) {
+		String s = prefs.getRulesStrategy();
+		if (Preferences.RULES_STRATEGY_GLOBAL.equals(s))
+		  return "strategy=global-proxy";
+		if (Preferences.RULES_STRATEGY_DIRECT.equals(s))
+		  return "strategy=global-direct";
+		return "strategy=rules(default="
+			+ (prefs.getRulesDefaultProxy() ? GROUP : "DIRECT") + ")";
+	}
+
+	/* One-line description of which sub-group auto mode will default to. */
+	private static String autoCountryLabel(Preferences prefs) {
+		String c = prefs.getAutoSelectCountry();
+		if (c == null || c.isEmpty())
+		  return " (global)";
+		if (Country.AUTO.equals(c))
+		  return " (auto-best)";
+		return " (country=" + c + ")";
 	}
 
 	/* Merge every subscription into one node pool and point a single
@@ -130,14 +159,19 @@ public class MihomoConfig {
 	private static String mergedConfig(Preferences prefs) throws IOException {
 		List<String> names = new ArrayList<String>();
 		List<String> defs = new ArrayList<String>();
+		List<ClashParser.ProxyDef> proxys = new ArrayList<ClashParser.ProxyDef>();
 
 		for (Subscription sub : prefs.getSubscriptions()) {
-			List<ClashParser.ProxyDef> proxies =
+			List<ClashParser.ProxyDef> list =
 				ClashParser.extractProxies(prefs.getSubRaw(sub.id));
-			for (ClashParser.ProxyDef p : proxies) {
+			for (ClashParser.ProxyDef p : list) {
 				String name = uniqueName(names, p.name);
 				defs.add(name.equals(p.name) ? p.text : renameProxy(p.text, p.name, name));
+				/* Keep the de-duplicated name on the def so grouping below
+				   refers to exactly the name we emitted under proxies:. */
+				p.name = name;
 				names.add(name);
+				proxys.add(p);
 			}
 		}
 		if (names.isEmpty())
@@ -154,23 +188,138 @@ public class MihomoConfig {
 		   exist - which shows up as "connected but nothing goes through the
 		   proxy". One node per line cannot blow up that way. */
 		sb.append("proxy-groups:\n");
-		sb.append("  - name: \"").append(GROUP).append("\"\n");
-		if (prefs.getAutoSelect()) {
-			sb.append("    type: url-test\n")
-				.append("    url: \"").append(escapeYaml(prefs.getAutoTestUrl())).append("\"\n")
-				.append("    interval: ").append(clampInterval(prefs.getAutoSelectInterval()))
-				.append('\n')
-				.append("    tolerance: 50\n");
-		} else {
+		if (prefs.getAutoSelect())
+		  appendAutoGroups(sb, proxys, prefs);
+		else {
+			sb.append("  - name: \"").append(GROUP).append("\"\n");
 			sb.append("    type: select\n");
+			sb.append("    proxies:\n");
+			for (String name : names)
+			  sb.append("      - \"").append(escapeYaml(name)).append("\"\n");
 		}
-		sb.append("    proxies:\n");
-		for (String name : names)
-		  sb.append("      - \"").append(escapeYaml(name)).append("\"\n");
 
 		sb.append("rules:\n");
 		appendRules(sb, prefs);
 		return sb.toString();
+	}
+
+	/* Auto mode: one url-test group per country (fastest node *within* that
+	   country) plus a global url-test group (fastest anywhere), all gathered
+	   under a top-level select group. The default sub-group is:
+	     - "AUTO"  -> the country whose nodes have the lowest measured latency
+	     - a code  -> that country's url-test group
+	     - "GLOBAL"/empty -> the global url-test group (fastest anywhere). */
+	private static void appendAutoGroups(StringBuilder sb,
+			List<ClashParser.ProxyDef> proxys, Preferences prefs) {
+		/* Country code -> member node names, preserving first-seen order. */
+		java.util.LinkedHashMap<String, List<String>> byCountry =
+			new java.util.LinkedHashMap<String, List<String>>();
+		List<String> global = new ArrayList<String>();
+		for (ClashParser.ProxyDef p : proxys) {
+			String cc = prefs.getServerCountry(p.server);
+			if (cc == null || cc.isEmpty())
+			  cc = GeoIp.UNKNOWN;
+			List<String> list = byCountry.get(cc);
+			if (list == null) {
+				list = new ArrayList<String>();
+				byCountry.put(cc, list);
+			}
+			list.add(p.name);
+			global.add(p.name);
+		}
+
+		String chosen = prefs.getAutoSelectCountry();
+		String defaultSub;
+		if (Country.AUTO.equals(chosen)) {
+			String best = bestCountryForAuto(prefs, byCountry, proxys);
+			defaultSub = (best != null && byCountry.containsKey(best))
+				? countryGroup(best) : GLOBAL_GROUP;
+		} else if (chosen != null && !chosen.isEmpty() && !Country.GLOBAL.equals(chosen)
+				&& byCountry.containsKey(chosen))
+		  defaultSub = countryGroup(chosen);
+		else
+		  defaultSub = GLOBAL_GROUP;
+
+		/* mihomo's select group defaults to its FIRST member, so the chosen
+		   sub-group is listed first, then the remaining country groups, then the
+		   global group, then a direct escape hatch. */
+		sb.append("  - name: \"").append(GROUP).append("\"\n");
+		sb.append("    type: select\n");
+		sb.append("    proxies:\n");
+		sb.append("      - \"").append(escapeYaml(defaultSub)).append("\"\n");
+		for (String cc : byCountry.keySet()) {
+			String g = countryGroup(cc);
+			if (g.equals(defaultSub))
+			  continue;
+			sb.append("      - \"").append(escapeYaml(g)).append("\"\n");
+		}
+		if (!GLOBAL_GROUP.equals(defaultSub))
+		  sb.append("      - \"").append(escapeYaml(GLOBAL_GROUP)).append("\"\n");
+		sb.append("      - DIRECT\n");
+
+		for (java.util.Map.Entry<String, List<String>> e : byCountry.entrySet())
+		  appendUrlTestGroup(sb, countryGroup(e.getKey()), e.getValue(), prefs);
+		appendUrlTestGroup(sb, GLOBAL_GROUP, global, prefs);
+	}
+
+	/* When auto-best is selected, return the ISO code of the country whose nodes
+	   have the lowest measured latency (from the app's earlier TCP tests, cached
+	   per subscription). Null when no usable latency exists, so the caller falls
+	   back to the global group. UNKNOWN nodes are skipped - we cannot optimise a
+	   country we could not identify. */
+	private static String bestCountryForAuto(Preferences prefs,
+			java.util.LinkedHashMap<String, List<String>> byCountry,
+			List<ClashParser.ProxyDef> proxys) {
+		/* Proxy name -> server, then server -> best latency seen in the caches. */
+		java.util.HashMap<String, String> nameToServer = new java.util.HashMap<String, String>();
+		for (ClashParser.ProxyDef p : proxys)
+		  nameToServer.put(p.name, p.server);
+
+		java.util.HashMap<String, Long> serverLat = new java.util.HashMap<String, Long>();
+		for (Subscription sub : prefs.getSubscriptions()) {
+			for (ClashNode n : ClashNode.decode(prefs.getSubNodes(sub.id))) {
+				if (n.latency >= 0) {
+					Long prev = serverLat.get(n.server);
+					if (prev == null || n.latency < prev)
+					  serverLat.put(n.server, n.latency);
+				}
+			}
+		}
+
+		String best = null;
+		long bestLat = Long.MAX_VALUE;
+		for (java.util.Map.Entry<String, List<String>> e : byCountry.entrySet()) {
+			String cc = e.getKey();
+			if (GeoIp.UNKNOWN.equals(cc))
+			  continue;
+			long min = Long.MAX_VALUE;
+			for (String name : e.getValue()) {
+				String srv = nameToServer.get(name);
+				Long lat = srv == null ? null : serverLat.get(srv);
+				if (lat != null && lat < min)
+				  min = lat;
+			}
+			if (min < bestLat) {
+				bestLat = min;
+				best = cc;
+			}
+		}
+		return best;
+	}
+
+	/* A url-test group: mihomo measures every member against the test URL and
+	   routes through the lowest-latency one, re-checking on `interval`. */
+	private static void appendUrlTestGroup(StringBuilder sb, String name,
+			List<String> members, Preferences prefs) {
+		sb.append("  - name: \"").append(escapeYaml(name)).append("\"\n");
+		sb.append("    type: url-test\n");
+		sb.append("    url: \"").append(escapeYaml(prefs.getAutoTestUrl())).append("\"\n");
+		sb.append("    interval: ").append(clampInterval(prefs.getAutoSelectInterval()))
+			.append('\n')
+			.append("    tolerance: 50\n");
+		sb.append("    proxies:\n");
+		for (String m : members)
+		  sb.append("      - \"").append(escapeYaml(m)).append("\"\n");
 	}
 
 	/* Minimal upstream for a manually configured SOCKS5 server. The rules page
@@ -197,8 +346,23 @@ public class MihomoConfig {
 		return sb.toString();
 	}
 
-	/* The app's routing rules, then the catch-all switch. */
+	/* The app's routing rules, then the catch-all switch. The strategy decides
+	   whether the user's rules even run: the two global modes route everything
+	   one way and skip the list. */
 	private static void appendRules(StringBuilder sb, Preferences prefs) {
+		String strategy = prefs.getRulesStrategy();
+		if (Preferences.RULES_STRATEGY_GLOBAL.equals(strategy)) {
+			/* Everything through the proxy; the rule list is ignored. */
+			sb.append("  - MATCH,").append(GROUP).append('\n');
+			return;
+		}
+		if (Preferences.RULES_STRATEGY_DIRECT.equals(strategy)) {
+			/* Everything direct; the rule list is ignored. */
+			sb.append("  - MATCH,DIRECT\n");
+			return;
+		}
+		/* Rule mode: the user's rules first, then the catch-all (itself proxy or
+		   direct per the switch below). */
 		for (Preferences.Rule r : prefs.getRules()) {
 			String line = clashRule(r);
 			if (line != null)
@@ -208,30 +372,39 @@ public class MihomoConfig {
 			.append(prefs.getRulesDefaultProxy() ? GROUP : "DIRECT").append('\n');
 	}
 
-	/* One app rule as a clash rule line, or null when it cannot be expressed.
-	   The rule page lets "IP" be picked while typing a hostname (an older
-	   build resolved those itself), and an unusable IP-CIDR target makes
-	   mihomo reject the whole config - so classify by what the value actually
-	   looks like instead of trusting the stored type. */
+	/* One app rule as a clash rule line, honouring the type the user actually
+	   picked (an earlier build re-derived the type from the value and ignored
+	   the choice). Returns null when the rule cannot be expressed. */
 	private static String clashRule(Preferences.Rule r) {
 		String target = r.proxy ? GROUP : "DIRECT";
 		String value = r.value == null ? "" : r.value.trim();
 		if (value.isEmpty())
 		  return null;
-		boolean ipv4 = isIpv4(value);
-		boolean ipv6 = value.contains(":");
-		boolean cidr = value.contains("/");
-
-		if (r.type == Preferences.Rule.TYPE_DOMAIN && !ipv4 && !ipv6 && !cidr)
-		  return "DOMAIN-SUFFIX," + value + "," + target;
-		if (cidr)
-		  return "IP-CIDR," + value + "," + target;
-		if (ipv4)
-		  return "IP-CIDR," + value + "/32," + target;
-		if (ipv6)
-		  return "IP-CIDR," + value + "/128," + target;
-		/* An "IP" rule that actually holds a hostname. */
-		return "DOMAIN-SUFFIX," + value + "," + target;
+		switch (r.type) {
+			case Preferences.Rule.TYPE_KEYWORD:
+				return "DOMAIN-KEYWORD," + value + "," + target;
+			case Preferences.Rule.TYPE_GEOIP:
+				/* value is an ISO-3166 alpha-2 code; GEOIP needs the core's
+				   geoip database, which mihomo fetches on first use. */
+				if (!value.matches("^[A-Za-z]{2}$"))
+				  return null;
+				return "GEOIP," + value.toUpperCase() + "," + target;
+			case Preferences.Rule.TYPE_PROCESS:
+				return "PROCESS-NAME," + value + "," + target;
+			case Preferences.Rule.TYPE_CIDR:
+				if (!value.contains("/"))
+				  return null;
+				return "IP-CIDR," + value + "," + target;
+			case Preferences.Rule.TYPE_IP:
+				if (isIpv4(value))
+				  return "IP-CIDR," + value + "/32," + target;
+				if (value.contains(":"))
+				  return "IP-CIDR," + value + "/128," + target;
+				return null;
+			case Preferences.Rule.TYPE_DOMAIN:
+			default:
+				return "DOMAIN-SUFFIX," + value + "," + target;
+		}
 	}
 
 	private static boolean isIpv4(String s) {

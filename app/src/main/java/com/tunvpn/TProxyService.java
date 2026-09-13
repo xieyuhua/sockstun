@@ -396,8 +396,18 @@ public class TProxyService extends VpnService {
 	   has been picked yet, and in auto-select mode where the group's url-test
 	   logic owns the choice. */
 	private String selectedMap(Preferences prefs) {
-		if (prefs.getAutoSelect())
-		  return "{}";
+		if (prefs.getAutoSelect()) {
+			/* In auto mode the top group points at a country url-test subgroup
+			   (or the global one), which then owns the fastest-node pick. */
+			String target = autoTargetGroup(prefs);
+			try {
+				JSONObject map = new JSONObject();
+				map.put(MihomoConfig.GROUP, target);
+				return map.toString();
+			} catch (JSONException e) {
+				return "{}";
+			}
+		}
 		String sel = prefs.getSubSelected();
 		if (sel == null || sel.isEmpty())
 		  return "{}";
@@ -410,23 +420,36 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* Ask mihomo to select the chosen proxy inside the group we built. In
-	   auto-select mode a manual pick would be undone by the next health
-	   check, so leave the choice to url-test. */
+	/* The url-test subgroup the top select group should default to. */
+	private static String autoTargetGroup(Preferences prefs) {
+		String chosen = prefs.getAutoSelectCountry();
+		if (chosen == null || chosen.isEmpty() || "GLOBAL".equals(chosen))
+		  return MihomoConfig.GLOBAL_GROUP;
+		return MihomoConfig.countryGroup(chosen);
+	}
+
+	/* Ask mihomo to select the chosen proxy/group inside the group we built.
+	   In auto mode we select the country url-test subgroup (whose own
+	   health-check then keeps picking the fastest node within that country);
+	   in manual mode we select the exact node the user tapped. */
 	private void applySelectedNode(Preferences prefs) {
 		if (prefs.getAutoSelect()) {
-			appendLog("selector skipped: auto-select is on");
+			selectInGroup(MihomoConfig.GROUP, autoTargetGroup(prefs));
 			return;
 		}
 		String sel = prefs.getSubSelected();
 		if (sel == null || sel.isEmpty())
 		  return;
+		selectInGroup(MihomoConfig.GROUP, sel);
+	}
+
+	private void selectInGroup(String group, String proxy) {
 		/* An action document is {"id","method","data"}; changeProxy expects
 		   data to be a *string* holding {"group-name","proxy-name"}. */
 		try {
 			JSONObject data = new JSONObject();
-			data.put("group-name", MihomoConfig.GROUP);
-			data.put("proxy-name", sel);
+			data.put("group-name", group);
+			data.put("proxy-name", proxy);
 			JSONObject action = new JSONObject();
 			action.put("id", "select");
 			action.put("method", "changeProxy");
@@ -437,7 +460,7 @@ public class TProxyService extends VpnService {
 					appendLog("selector set: " + (result == null ? "ok" : result));
 				}
 			});
-			appendLog("selected node: " + sel + " in group " + MihomoConfig.GROUP);
+			appendLog("selected: " + proxy + " in group " + group);
 		} catch (JSONException e) {
 			appendLog("selector set skipped: " + e);
 		} catch (Throwable e) {

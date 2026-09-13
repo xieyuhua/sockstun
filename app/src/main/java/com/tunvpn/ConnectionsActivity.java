@@ -59,6 +59,10 @@ public class ConnectionsActivity extends BaseActivity {
 	private final List<Row> rows = new ArrayList<Row>();
 	private String query = "";
 	private boolean loading = false;
+	/* The real reason the last fetch failed, surfaced on screen instead of a
+	   generic "unavailable" so a silent empty list is actually diagnosable.
+	   Empty when the last fetch succeeded. */
+	private String lastError = "";
 
 	/* One row of the connection table, reduced to what is worth showing. */
 	private static class Row {
@@ -165,7 +169,10 @@ public class ConnectionsActivity extends BaseActivity {
 
 	private void updateSummary(boolean available) {
 		if (!available) {
-			textview_summary.setText(R.string.connections_unavailable);
+			String msg = getString(R.string.connections_unavailable);
+			if (!lastError.isEmpty())
+			  msg += "（" + lastError + "）";
+			textview_summary.setText(msg);
 			return;
 		}
 		long up = 0;
@@ -206,9 +213,13 @@ public class ConnectionsActivity extends BaseActivity {
 	/* null when the core could not be asked at all (most likely it is not
 	   running), as opposed to an empty list. */
 	private List<Row> fetch() {
+		lastError = "";
 		String body = httpGet("http://127.0.0.1:" + MihomoConfig.API_PORT + "/connections");
-		if (body == null)
-		  return null;
+		if (body == null) {
+			if (lastError.isEmpty())
+			  lastError = "无响应（核心可能未运行 / 端口未监听）";
+			return null;
+		}
 		List<Row> out = new ArrayList<Row>();
 		try {
 			JSONArray arr = new JSONObject(body).optJSONArray("connections");
@@ -312,13 +323,17 @@ public class ConnectionsActivity extends BaseActivity {
 	}
 
 	private String httpGet(String url) {
+		lastError = "";
 		HttpURLConnection conn = null;
 		try {
 			conn = (HttpURLConnection) new URL(url).openConnection();
 			conn.setConnectTimeout(2000);
 			conn.setReadTimeout(2000);
-			if (conn.getResponseCode() != HttpURLConnection.HTTP_OK)
-			  return null;
+			int code = conn.getResponseCode();
+			if (code != HttpURLConnection.HTTP_OK) {
+				lastError = "HTTP " + code;
+				return null;
+			}
 			StringBuilder sb = new StringBuilder();
 			try (BufferedReader reader = new BufferedReader(
 					new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
@@ -328,6 +343,7 @@ public class ConnectionsActivity extends BaseActivity {
 			}
 			return sb.toString();
 		} catch (Exception e) {
+			lastError = e.getClass().getSimpleName() + ": " + e.getMessage();
 			return null;
 		} finally {
 			if (conn != null)

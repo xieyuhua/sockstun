@@ -46,11 +46,13 @@ public class ClashParser {
 		public String name;
 		public String type;
 		public String text;   /* the "- ..." block, indented by 2 spaces */
+		public String server; /* proxy host, used to resolve its country */
 
-		ProxyDef(String name, String type, String text) {
+		ProxyDef(String name, String type, String text, String server) {
 			this.name = name;
 			this.type = type;
 			this.text = text;
+			this.server = server == null ? "" : server;
 		}
 	}
 
@@ -123,7 +125,8 @@ public class ClashParser {
 			String name = m.get("name");
 			String type = m.get("type");
 			if (name != null && !name.isEmpty())
-			  out.add(new ProxyDef(name, type == null ? "" : type, block.toString()));
+			  out.add(new ProxyDef(name, type == null ? "" : type, block.toString(),
+				m.get("server")));
 		}
 		return out;
 	}

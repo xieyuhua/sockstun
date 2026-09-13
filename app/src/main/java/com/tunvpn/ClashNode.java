@@ -24,6 +24,9 @@ public class ClashNode {
 	public int port;
 	public String username;
 	public String password;
+	/* ISO-3166 alpha-2 country code of the node's server, resolved via GeoIp.
+	   "" means not yet probed (shown as "unknown"). */
+	public String country = "";
 	/* Id of the subscription this node was parsed from. Needed because the
 	   subscribe page shows one merged list but each node's latency has to be
 	   written back to the subscription it belongs to. */
@@ -52,6 +55,7 @@ public class ClashNode {
 				o.put("user", n.username);
 				o.put("pass", n.password);
 				o.put("lat", n.latency);
+				o.put("cc", n.country == null ? "" : n.country);
 				o.put("sub", n.subId == null ? "" : n.subId);
 				arr.put(o);
 			}
@@ -76,6 +80,7 @@ public class ClashNode {
 					o.optString("user"),
 					o.optString("pass"));
 				n.latency = o.optLong("lat", -1);
+				n.country = o.optString("cc", "");
 				n.subId = o.optString("sub");
 				out.add(n);
 			}

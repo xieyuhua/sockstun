@@ -23,6 +23,7 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -36,6 +37,8 @@ import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.color.MaterialColors;
 import com.google.android.material.switchmaterial.SwitchMaterial;
 
+import com.tunvpn.GeoIp;
+
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
@@ -46,7 +49,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -71,6 +76,15 @@ public class SubscribeActivity extends BaseActivity {
 	private SwitchMaterial switch_auto;
 	private TextView textview_auto_hint;
 	private TextView textview_test_url;
+	/* Country picker, shown only while auto-select is on: the user picks which
+	   country's url-test group the tunnel should default to. */
+	private LinearLayout countryRow;
+	private Spinner spinner_country;
+	private MaterialButton button_detect;
+	private ArrayAdapter<String> countryAdapter;
+	private final List<String> countryCodes = new ArrayList<String>();
+	private final List<String> countryLabels = new ArrayList<String>();
+	private int pendingGeo = 0;
 	/* Bounded pool for latency tests. "Test all" on a large subscription would
 	   otherwise fire one thread - and one socket - per node at once. */
 	private final ExecutorService testPool = Executors.newFixedThreadPool(8);
@@ -111,6 +125,35 @@ public class SubscribeActivity extends BaseActivity {
 		switch_auto = (SwitchMaterial) findViewById(R.id.sub_auto);
 		textview_auto_hint = (TextView) findViewById(R.id.sub_auto_hint);
 		textview_test_url = (TextView) findViewById(R.id.sub_test_url);
+		countryRow = (LinearLayout) findViewById(R.id.sub_country_row);
+		spinner_country = (Spinner) findViewById(R.id.sub_country);
+		button_detect = (MaterialButton) findViewById(R.id.sub_detect_country);
+
+		countryAdapter = new ArrayAdapter<String>(this,
+			R.layout.spinner_item_small, countryLabels);
+		countryAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item_small);
+		spinner_country.setAdapter(countryAdapter);
+		spinner_country.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+			@Override
+			public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+				if (position < 0 || position >= countryCodes.size())
+				  return;
+				String code = countryCodes.get(position);
+				prefs.setAutoSelectCountry(code);
+				if (prefs.getEnable())
+				  Toast.makeText(SubscribeActivity.this,
+					R.string.sub_auto_restart, Toast.LENGTH_LONG).show();
+			}
+			@Override
+			public void onNothingSelected(AdapterView<?> parent) {
+			}
+		});
+		button_detect.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				resolveCountries();
+			}
+		});
 
 
 		adapter = new NodeAdapter();
@@ -251,6 +294,85 @@ public class SubscribeActivity extends BaseActivity {
 		textview_stats.setText(getString(R.string.sub_stats, ok, bad, nodes.size()));
 	}
 
+	/* Rebuild the country dropdown from the nodes already parsed. Index 0 is
+	   always "GLOBAL" (fastest anywhere); the rest are ISO codes with counts,
+	   sorted by count descending. */
+	private void refreshCountrySpinner() {
+		countryCodes.clear();
+		countryLabels.clear();
+		/* Index 0 = fastest anywhere; index 1 = auto-pick the fastest country.
+		   Both are sentinels; the rest are real ISO codes with node counts. */
+		countryCodes.add(Country.GLOBAL);
+		countryLabels.add(Country.display(Country.GLOBAL));
+		countryCodes.add(Country.AUTO);
+		countryLabels.add(Country.display(Country.AUTO));
+		Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
+		for (ClashNode n : nodes) {
+			String cc = (n.country == null || n.country.isEmpty()) ? GeoIp.UNKNOWN : n.country;
+			Integer c = counts.get(cc);
+			counts.put(cc, c == null ? 1 : c + 1);
+		}
+		List<Map.Entry<String, Integer>> entries =
+			new ArrayList<Map.Entry<String, Integer>>(counts.entrySet());
+		Collections.sort(entries, new Comparator<Map.Entry<String, Integer>>() {
+			@Override
+			public int compare(Map.Entry<String, Integer> a, Map.Entry<String, Integer> b) {
+				return b.getValue().compareTo(a.getValue());
+			}
+		});
+		for (Map.Entry<String, Integer> e : entries) {
+			countryCodes.add(e.getKey());
+			countryLabels.add(Country.displayWithCount(e.getKey(), e.getValue()));
+		}
+		countryAdapter.notifyDataSetChanged();
+		String cur = prefs.getAutoSelectCountry();
+		int idx = countryCodes.indexOf(cur);
+		if (idx < 0)
+		  idx = 0;
+		spinner_country.setSelection(idx);
+	}
+
+	/* Resolve each node's country via GeoIp (server IP -> GeoIP), inside the
+	   test pool so a few hundred nodes don't block the UI. Results are cached
+	   into Preferences, then the spinner and list refresh. */
+	private void resolveCountries() {
+		if (nodes.isEmpty())
+		  return;
+		final List<ClashNode> todo = new ArrayList<ClashNode>();
+		for (ClashNode n : nodes) {
+			if (n.country == null || n.country.isEmpty() || n.country.equals(GeoIp.UNKNOWN))
+			  todo.add(n);
+		}
+		if (todo.isEmpty()) {
+			Toast.makeText(this, R.string.sub_detect_none, Toast.LENGTH_SHORT).show();
+			return;
+		}
+		Toast.makeText(this, R.string.sub_detecting, Toast.LENGTH_SHORT).show();
+		pendingGeo = todo.size();
+		for (final ClashNode n : todo) {
+			testPool.execute(new Runnable() {
+				@Override
+				public void run() {
+					String cc = GeoIp.countryOf(prefs, n.server);
+					n.country = cc;
+					ui.post(new Runnable() {
+						@Override
+						public void run() {
+							if (isFinishing() || isDestroyed())
+							  return;
+							pendingGeo--;
+							if (pendingGeo <= 0) {
+								saveNodes();
+								refreshCountrySpinner();
+								applyView();
+							}
+						}
+					});
+				}
+			});
+		}
+	}
+
 	/* Latency results belong to the subscription a node came from, so write
 	   each group back to its own cache. */
 	private void saveNodes() {
@@ -310,6 +432,10 @@ public class SubscribeActivity extends BaseActivity {
 							button_fetch.setEnabled(true);
 							button_fetch.setText(R.string.sub_fetch);
 							loadNodes();
+							/* New nodes have no country yet; probe them so the
+							   auto-mode country picker has something to show. */
+							if (prefs.getAutoSelect())
+							  resolveCountries();
 							if (fetched > 0)
 							  Toast.makeText(SubscribeActivity.this,
 								getString(R.string.sub_fetched, fetched),
@@ -440,6 +566,10 @@ public class SubscribeActivity extends BaseActivity {
 			public void onCheckedChanged(CompoundButton button, boolean checked) {
 				prefs.setAutoSelect(checked);
 				updateAutoUi();
+				/* Turning auto on with no country data yet: probe the nodes so
+				   the picker is populated. */
+				if (checked)
+				  resolveCountries();
 				/* The group type is baked in when the tunnel starts, so a
 				   running tunnel keeps its old behaviour until reconnected. */
 				if (prefs.getEnable())
@@ -475,6 +605,10 @@ public class SubscribeActivity extends BaseActivity {
 		textview_test_url.setVisibility(auto ? View.VISIBLE : View.GONE);
 		textview_test_url.setText(getString(R.string.sub_test_url,
 			prefs.getAutoTestUrl()));
+		/* The country picker only makes sense in auto mode. */
+		countryRow.setVisibility(auto ? View.VISIBLE : View.GONE);
+		if (auto)
+		  refreshCountrySpinner();
 	}
 
 	private int intervalMinutes() {
@@ -655,7 +789,10 @@ public class SubscribeActivity extends BaseActivity {
 			Button test = (Button) convertView.findViewById(R.id.item_test);
 
 			name.setText(n.name);
-			detail.setText(n.server + ":" + n.port);
+			String detailText = n.server + ":" + n.port;
+			if (n.country != null && !n.country.isEmpty() && !n.country.equals(GeoIp.UNKNOWN))
+			  detailText += "  ·  " + Country.display(n.country);
+			detail.setText(detailText);
 			/* The protocol gets its own tag: sharing a line with the address
 			   meant a long host name would ellipsize it away. */
 			if (n.type == null || n.type.isEmpty()) {

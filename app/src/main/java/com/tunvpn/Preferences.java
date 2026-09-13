@@ -20,6 +20,8 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 public class Preferences
 {
@@ -42,6 +44,13 @@ public class Preferences
 	public static final String APPS = "Apps";
 	public static final String RULES = "Rules";
 	public static final String RULES_DEFAULT_PROXY = "RulesDefaultProxy";
+	/* Routing strategy: rule mode applies the user's rules (and MATCH falls back
+	   to proxy/direct per RULES_DEFAULT_PROXY); the two global modes route
+	   everything one way and ignore the rule list. */
+	public static final String RULES_STRATEGY = "RulesStrategy";
+	public static final String RULES_STRATEGY_RULES = "rules";
+	public static final String RULES_STRATEGY_GLOBAL = "global";
+	public static final String RULES_STRATEGY_DIRECT = "direct";
 	public static final String ENABLE = "Enable";
 	public static final String LAST_ERROR = "LastError";
 	public static final String NAME = "Name";
@@ -74,6 +83,14 @@ public class Preferences
 	public static final String AUTO_SELECT = "AutoSelect";
 	public static final String AUTO_SELECT_INTERVAL = "AutoSelectInterval";
 	public static final String AUTO_TEST_URL = "AutoTestUrl";
+	/* Auto mode only: which country group the top group should default to.
+	   Empty / "GLOBAL" means "fastest anywhere". The value is an ISO-3166
+	   alpha-2 code, matching the per-country url-test group names built in
+	   MihomoConfig. */
+	public static final String AUTO_SELECT_COUNTRY = "AutoSelectCountry";
+	/* Persisted server -> ISO country-code map, filled by GeoIp resolution so
+	   config generation can group nodes offline (no network at tunnel start). */
+	public static final String SERVER_COUNTRY_MAP = "ServerCountryMap";
 	/* Local proxy port the core listens on, and whether it is exposed to the
 	   LAN. */
 	public static final String PROXY_PORT = "ProxyPort";
@@ -89,11 +106,15 @@ public class Preferences
 
 	public static final int MAX_PROFILES = 13;
 
-	/* One routing rule: "value (domain / ip / cidr) -> proxy or direct". */
+	/* One routing rule: "value -> proxy or direct", with an explicit type so
+	   the config builder emits exactly the clash rule the user picked. */
 	public static class Rule {
-		public static final int TYPE_DOMAIN = 0;
-		public static final int TYPE_IP = 1;
-		public static final int TYPE_CIDR = 2;
+		public static final int TYPE_DOMAIN = 0;   /* DOMAIN-SUFFIX */
+		public static final int TYPE_IP = 1;       /* single IP -> IP-CIDR /32|/128 */
+		public static final int TYPE_CIDR = 2;     /* IP-CIDR */
+		public static final int TYPE_KEYWORD = 3;  /* DOMAIN-KEYWORD */
+		public static final int TYPE_GEOIP = 4;    /* GEOIP,<country> */
+		public static final int TYPE_PROCESS = 5;  /* PROCESS-NAME */
 
 		public int type;
 		public String value;
@@ -498,6 +519,50 @@ public class Preferences
 		editor.commit();
 	}
 
+	/* Auto mode: the country whose url-test group the top group defaults to.
+	   "" or "GLOBAL" => fastest node anywhere. */
+	public String getAutoSelectCountry() {
+		return prefs.getString(key(AUTO_SELECT_COUNTRY), "");
+	}
+
+	public void setAutoSelectCountry(String cc) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(AUTO_SELECT_COUNTRY), cc == null ? "" : cc);
+		editor.commit();
+	}
+
+	/* Country of a proxy's server, resolved earlier by GeoIp. "" means not yet
+	   known (treated as "OTHER" at config build time). */
+	public String getServerCountry(String server) {
+		JSONObject map = loadCountryMap();
+		return map.optString(server == null ? "" : server, "");
+	}
+
+	public void setServerCountry(String server, String cc) {
+		if (server == null || server.isEmpty() || cc == null || cc.isEmpty())
+		  return;
+		JSONObject map = loadCountryMap();
+		try {
+			map.put(server, cc);
+		} catch (JSONException e) {
+			return;
+		}
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SERVER_COUNTRY_MAP), map.toString());
+		editor.commit();
+	}
+
+	private JSONObject loadCountryMap() {
+		String s = prefs.getString(key(SERVER_COUNTRY_MAP), "");
+		if (s == null || s.isEmpty())
+		  return new JSONObject();
+		try {
+			return new JSONObject(s);
+		} catch (JSONException e) {
+			return new JSONObject();
+		}
+	}
+
 	/* The core's local HTTP/SOCKS port. Out of range means "never set". */
 	public int getProxyPort() {
 		int port = prefs.getInt(key(PROXY_PORT), DEFAULT_PROXY_PORT);
@@ -638,6 +703,17 @@ public class Preferences
 	public void setRulesDefaultProxy(boolean proxy) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putBoolean(key(RULES_DEFAULT_PROXY), proxy);
+		editor.commit();
+	}
+
+	public String getRulesStrategy() {
+		return prefs.getString(key(RULES_STRATEGY), RULES_STRATEGY_RULES);
+	}
+
+	public void setRulesStrategy(String s) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(RULES_STRATEGY),
+			s == null ? RULES_STRATEGY_RULES : s);
 		editor.commit();
 	}
 
