@@ -79,6 +79,12 @@
 						app:icon="@drawable/ic_apps"
 						app:iconGravity="textStart"
 						app:iconPadding="8dp"/>
+					<TextView
+						android:id="@+id/routing_scope_hint"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:layout_marginTop="10dp"
+						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 				</LinearLayout>
 			</com.google.android.material.card.MaterialCardView>
 

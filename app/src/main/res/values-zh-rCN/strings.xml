@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<string name="app_name">tunVPN</string>
+	<string name="app_name">protun</string>
 	<string name="home">首页</string>
 	<string name="home_hint">底部标签可进入订阅、服务器、分应用与更多设置</string>
 	<string name="log">日志</string>
@@ -66,6 +66,8 @@
 
 	<string name="rules">路由规则</string>
 	<string name="rules_hint">按域名、IP 或 IP 段匹配。域名规则同时匹配其子域；改动在下次连接时生效。</string>
+	<string name="routing_scope_hint">两层路由：①「全局模式 / 部分应用」决定哪些应用的流量进入隧道（VPN 作用域，最前置判断）；②「分流策略（规则 / 全局代理 / 全局直连）」只对已进入隧道的流量生效。被排除的应用由系统直接联网，路由规则管不到它。</string>
+	<string name="routing_scope_empty_warn">⚠️ 已选「部分应用」但未勾选任何应用：将没有任何流量进入隧道（等于不代理）。请点「应用」勾选要走代理的程序，或打开「全局模式」。</string>
 	<string name="rules_default_proxy">未命中的流量走代理</string>
 	<string name="rule_add">添加</string>
 	<string name="rule_delete">删除</string>

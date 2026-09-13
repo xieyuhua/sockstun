@@ -12,10 +12,12 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -31,6 +33,7 @@ import android.widget.Toast;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.color.MaterialColors;
 import com.google.android.material.textfield.TextInputLayout;
 
 public class RulesHubActivity extends BaseActivity implements View.OnClickListener {
@@ -41,6 +44,11 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 	private CompoundButton checkbox_ipv6;
 	private CompoundButton checkbox_udp_in_tcp;
 	private MaterialButton button_apps;
+	/* Live hint under the routing card: explains the two routing layers, and
+	   warns when "per-app" mode has no apps selected (empty tunnel scope). */
+	private TextView textview_scope_hint;
+	private int scopeHintColor;
+	private int scopeErrorColor;
 
 	private CompoundButton checkbox_remote_dns;
 	private EditText edittext_dns_ipv4;
@@ -82,6 +90,11 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		button_apps = (MaterialButton) findViewById(R.id.apps);
 		button_apps.setOnClickListener(this);
 		checkbox_global.setOnClickListener(this);
+		textview_scope_hint = (TextView) findViewById(R.id.routing_scope_hint);
+		scopeHintColor = MaterialColors.getColor(this,
+			com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY);
+		scopeErrorColor = MaterialColors.getColor(this,
+			com.google.android.material.R.attr.colorError, Color.GRAY);
 
 		/* --- dns --- */
 		checkbox_remote_dns = (CompoundButton) findViewById(R.id.remote_dns);
@@ -177,6 +190,30 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		/* Rule controls depend on both editability and the chosen strategy, so
 		   let updateModeUi() own them. */
 		updateModeUi();
+		updateScopeHint();
+	}
+
+	/* Refresh the hint under the routing card. It always explains that the
+	   VPN scope (global / per-app) is evaluated before the routing strategy,
+	   and turns into a warning when per-app mode has no apps selected (which
+	   would leave the tunnel with zero captured traffic). */
+	private void updateScopeHint() {
+		if (textview_scope_hint == null)
+		  return;
+		boolean global = checkbox_global.isChecked();
+		if (global) {
+			textview_scope_hint.setText(R.string.routing_scope_hint);
+			textview_scope_hint.setTextColor(scopeHintColor);
+			return;
+		}
+		Set<String> apps = prefs.getApps();
+		if (apps == null || apps.isEmpty()) {
+			textview_scope_hint.setText(R.string.routing_scope_empty_warn);
+			textview_scope_hint.setTextColor(scopeErrorColor);
+		} else {
+			textview_scope_hint.setText(R.string.routing_scope_hint);
+			textview_scope_hint.setTextColor(scopeHintColor);
+		}
 	}
 
 	/* Enable/disable the rule-editing controls and pick the mode hint based on
@@ -215,6 +252,14 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		prefs.setRules(rules);
 	}
 
+	@Override
+	protected void onResume() {
+		super.onResume();
+		/* The app list is edited in a separate activity; re-sync the hint
+		   (an empty per-app scope may now have apps, or vice versa). */
+		updateScopeHint();
+	}
+
 	private void savePrefs() {
 		prefs.setGlobal(checkbox_global.isChecked());
 		prefs.setIpv4(checkbox_ipv4.isChecked());
@@ -234,6 +279,13 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		if (view == checkbox_global) {
 			boolean editable = !prefs.getEnable();
 			button_apps.setEnabled(editable && !checkbox_global.isChecked());
+			updateScopeHint();
+			if (!checkbox_global.isChecked()) {
+				Set<String> apps = prefs.getApps();
+				if (apps == null || apps.isEmpty())
+				  Toast.makeText(RulesHubActivity.this,
+					R.string.routing_scope_empty_warn, Toast.LENGTH_LONG).show();
+			}
 			return;
 		}
 		if (view == checkbox_remote_dns) {

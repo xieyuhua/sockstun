@@ -278,6 +278,11 @@ public class TProxyService extends VpnService {
 		appendLog("vpn: ipv4=" + ipv4 + " ipv6=" + ipv6 + " mtu=" + prefs.getTunnelMtu()
 			+ " scope=" + (prefs.getGlobal() ? "all apps" : prefs.getApps().size() + " app(s)")
 			+ " excludeSelf=" + disallowSelf);
+		/* Per-app mode with no apps selected captures nothing: the tunnel comes
+		   up "connected" but proxies zero traffic. Spell it out in the log. */
+		if (!prefs.getGlobal() && prefs.getApps().isEmpty())
+		  appendLog("WARN: 部分应用模式未选择任何应用，将没有任何流量进入隧道（等于不代理）。"
+			+ "请到「规则 → 应用」勾选程序，或开启「全局模式」。");
 		tunFd = builder.establish();
 		if (tunFd == null) {
 			failStartup("建立 VPN 接口失败（未授权或被其他 VPN 占用）");
