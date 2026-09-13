@@ -68,8 +68,8 @@
 
 	<string name="rules">Routing rules</string>
 	<string name="rules_hint">先选「分流策略」，再按需添加规则：域名后缀 / 域名关键字 / 国家(GeoIP) / IP / 进程名 → 代理或直连；未命中的按底部开关处理。订阅自带规则不参与，修改后重新连接生效。</string>
-	<string name="routing_scope_hint">Two routing layers: ① Global / per-App decides which apps' traffic enters the tunnel (VPN scope, evaluated first); ② the routing strategy (rules / global-proxy / global-direct) only applies to traffic already inside the tunnel. Excluded apps use the system network directly and ignore the routing rules.</string>
-	<string name="routing_scope_empty_warn">⚠️ "Per-App" is on but no app is selected: no traffic will enter the tunnel (i.e. nothing is proxied). Tap "Apps" to pick apps, or enable "Global".</string>
+	<string name="routing_scope_hint">Two routing layers: (1) Global / per-App decides which apps traffic enters the tunnel (VPN scope, evaluated first); (2) the routing strategy (rules / global-proxy / global-direct) only applies to traffic already inside the tunnel. Excluded apps use the system network directly and ignore the routing rules.</string>
+	<string name="routing_scope_empty_warn">"Per-App" is on but no app is selected: no traffic will enter the tunnel (i.e. nothing is proxied). Tap "Apps" to pick apps, or enable "Global".</string>
 	<string name="rules_default_proxy">Unmatched traffic uses the proxy</string>
 	<string name="rule_add">Add</string>
 	<string name="rule_delete">Delete</string>

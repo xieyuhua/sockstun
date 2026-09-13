@@ -296,7 +296,12 @@ public class TProxyService extends VpnService {
 		String homeDir = getFilesDir().getAbsolutePath();
 		String initParams = "{\"home-dir\":\"" + homeDir + "\"," +
 			"\"homeDir\":\"" + homeDir + "\"}";
-		String setupParams = "{\"selected-map\":" + selectedMap(prefs) + "," +
+		/* selected-map 故意留空：它会把选中的节点名经 JNI 桥传进内核，而桥把
+		   Java 字符串按 "modified UTF-8" 交给内核，会破坏补充平面字符（节点名里
+		   的国旗 emoji），内核随即报 "proxy ... not found"，甚至整份配置加载失败
+		   （external-controller 因此没监听，REST 全部连不上）。
+		   节点改在下面用 REST API 选择，全程标准 UTF-8，名字能精确匹配。 */
+		String setupParams = "{\"selected-map\":{}," +
 			"\"profile\":\"" + configFile.getAbsolutePath() + "\"}";
 		try {
 			Clash.INSTANCE.quickSetup(initParams, setupParams, new InvokeInterface() {
@@ -398,34 +403,6 @@ public class TProxyService extends VpnService {
 		stopSelf();
 	}
 
-	/* {"<group>":"<node>"} for quickSetup's selected-map. Empty when no node
-	   has been picked yet, and in auto-select mode where the group's url-test
-	   logic owns the choice. */
-	private String selectedMap(Preferences prefs) {
-		if (prefs.getAutoSelect()) {
-			/* In auto mode the top group points at a country url-test subgroup
-			   (or the global one), which then owns the fastest-node pick. */
-			String target = autoTargetGroup(prefs);
-			try {
-				JSONObject map = new JSONObject();
-				map.put(MihomoConfig.GROUP, target);
-				return map.toString();
-			} catch (JSONException e) {
-				return "{}";
-			}
-		}
-		String sel = prefs.getSubSelected();
-		if (sel == null || sel.isEmpty())
-		  return "{}";
-		try {
-			JSONObject map = new JSONObject();
-			map.put(MihomoConfig.GROUP, sel);
-			return map.toString();
-		} catch (JSONException e) {
-			return "{}";
-		}
-	}
-
 	/* The url-test subgroup the top select group should default to. */
 	private static String autoTargetGroup(Preferences prefs) {
 		String chosen = prefs.getAutoSelectCountry();
@@ -461,6 +438,14 @@ public class TProxyService extends VpnService {
 		/* Best-effort and network-bound, so run off the calling thread. */
 		new Thread(() -> {
 			try {
+				/* The core's control API is not necessarily listening the
+				   instant startTUN() returns; wait for it instead of firing
+				   the PUT into a closed port and silently losing the pick. */
+				if (!waitForController()) {
+					appendLog("selector set failed: 控制接口 127.0.0.1:"
+						+ MihomoConfig.API_PORT + " 未就绪（内核可能未监听）");
+					return;
+				}
 				String target = null;
 				try {
 					target = resolveMember(group, proxy);
@@ -477,6 +462,35 @@ public class TProxyService extends VpnService {
 				appendLog("selector set skipped: " + e);
 			}
 		}).start();
+	}
+
+	/* Poll the core's control API until it answers, so a selector PUT right
+	   after startup does not race the core's own HTTP listener. Returns false
+	   when it never came up within the window (then the log says so, instead
+	   of the failure being invisible). */
+	private boolean waitForController() {
+		for (int i = 0; i < 24; i++) {
+			HttpURLConnection c = null;
+			try {
+				c = (HttpURLConnection) new URL("http://127.0.0.1:"
+					+ MihomoConfig.API_PORT + "/version").openConnection();
+				c.setConnectTimeout(500);
+				c.setReadTimeout(500);
+				int code = c.getResponseCode();
+				if (code >= 200 && code < 300)
+				  return true;
+			} catch (Throwable ignore) {
+			} finally {
+				if (c != null)
+				  c.disconnect();
+			}
+			try {
+				Thread.sleep(250);
+			} catch (InterruptedException e) {
+				return false;
+			}
+		}
+		return false;
 	}
 
 	/* Resolve `wanted` to a real member name of `group`, tolerating the
