@@ -143,11 +143,19 @@ public class Preferences
 	}
 
 	private SharedPreferences prefs;
+	private Context mContext;
 
 	public Preferences(Context context) {
+		mContext = context.getApplicationContext();
 		prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_MULTI_PROCESS);
 		migrate();
 		migrateSubCache();
+	}
+
+	/* Application context, used by helpers that need assets / system services
+	   (e.g. GeoIp reading the bundled GeoLite2 database). */
+	public Context getContext() {
+		return mContext;
 	}
 
 	/* Older builds kept exactly one fetched subscription in a single cache.

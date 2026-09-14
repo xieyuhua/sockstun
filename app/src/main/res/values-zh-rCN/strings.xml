@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<string name="app_name">protun</string>
+	<string name="app_name">ProTun</string>
 	<string name="home">首页</string>
 	<string name="home_hint">底部标签可进入订阅、服务器、分应用与更多设置</string>
 	<string name="log">日志</string>
@@ -89,5 +89,10 @@
 		<item>@string/rule_action_proxy</item>
 		<item>@string/rule_action_direct</item>
 	</string-array>
+
+	<string name="rules_tab_common">常用规则</string>
+	<string name="rules_tab_all">全部规则</string>
+	<string name="rules_common_hint">点击可添加或移除常用规则；已添加的也会出现在「全部规则」中。</string>
+	<string name="rule_added">已添加</string>
 
 </resources>

@@ -251,24 +251,36 @@ public class TProxyService extends VpnService {
 			builder.addRoute("::", 0);
 		}
 
+		/* The controller app must never have its own traffic routed into the
+		   tunnel it creates. It reaches mihomo's loopback listeners - the
+		   external-controller API on 127.0.0.1:9090 (node selection, the
+		   home-screen connection counters) and the mixed-port used by the
+		   home-screen "is it proxied?" probe - and if those sockets get
+		   captured by the VPN they never reach the local listeners. The
+		   symptom is exactly what was reported: the selected apps proxy fine
+		   (their traffic is the tunnel's job) yet the UI shows no traffic stats
+		   and reports "代理不通". Always exclude ourselves, in both global and
+		   per-app scope. */
+		boolean selfExcluded = true;
+		try {
+			builder.addDisallowedApplication(getApplicationContext().getPackageName());
+		} catch (NameNotFoundException e) {
+			selfExcluded = false;
+		}
+
 		/* Per-app routing stays at the VpnService level: only the selected
-		   apps (or everything but us) have their traffic routed into the VPN. */
-		boolean disallowSelf = true;
+		   apps have their traffic routed into the VPN; everything else (and
+		   us) bypasses it. */
+		boolean perAppScope = false;
 		if (prefs.getGlobal()) {
-			/* Default: all apps through the tunnel. */
+			/* Default: all other apps through the tunnel. */
 		} else {
 			for (String appName : prefs.getApps()) {
 				try {
 					builder.addAllowedApplication(appName);
-					disallowSelf = false;
+					perAppScope = true;
 				} catch (NameNotFoundException e) {
 				}
-			}
-		}
-		if (disallowSelf) {
-			try {
-				builder.addDisallowedApplication(getApplicationContext().getPackageName());
-			} catch (NameNotFoundException e) {
 			}
 		}
 		builder.setSession("tunVPN/mihomo");
@@ -277,7 +289,7 @@ public class TProxyService extends VpnService {
 		   captured - both look exactly like "connected but not proxied". */
 		appendLog("vpn: ipv4=" + ipv4 + " ipv6=" + ipv6 + " mtu=" + prefs.getTunnelMtu()
 			+ " scope=" + (prefs.getGlobal() ? "all apps" : prefs.getApps().size() + " app(s)")
-			+ " excludeSelf=" + disallowSelf);
+			+ " excludeSelf=" + selfExcluded);
 		/* Per-app mode with no apps selected captures nothing: the tunnel comes
 		   up "connected" but proxies zero traffic. Spell it out in the log. */
 		if (!prefs.getGlobal() && prefs.getApps().isEmpty())
@@ -437,31 +449,54 @@ public class TProxyService extends VpnService {
 		appendLog("selected: " + proxy + " in group " + group);
 		/* Best-effort and network-bound, so run off the calling thread. */
 		new Thread(() -> {
-			try {
-				/* The core's control API is not necessarily listening the
-				   instant startTUN() returns; wait for it instead of firing
-				   the PUT into a closed port and silently losing the pick. */
-				if (!waitForController()) {
-					appendLog("selector set failed: 控制接口 127.0.0.1:"
-						+ MihomoConfig.API_PORT + " 未就绪（内核可能未监听）");
+			/* The core brings the TUN up before its external-controller HTTP
+			   listener is bound, and with a large subscription the config parse
+			   can keep that listener closed for several seconds longer. A single
+			   early probe would then report "未就绪" and silently drop the user's
+			   pick — yet the tunnel is already proxying, so the failure is easy
+			   to miss (proxy traffic keeps flowing via the default node). Retry
+			   the whole apply so the selector lands once the control API is
+			   actually listening. */
+			for (int attempt = 1; attempt <= 5; attempt++) {
+				if (waitForController()) {
+					applySelector(group, proxy);
 					return;
 				}
-				String target = null;
-				try {
-					target = resolveMember(group, proxy);
-				} catch (Throwable ignore) {
+				if (attempt < 5) {
+					appendLog("selector: 控制接口 127.0.0.1:" + MihomoConfig.API_PORT
+						+ " 未就绪（第 " + attempt + " 次），3 秒后重试");
+					try {
+						Thread.sleep(3000);
+					} catch (InterruptedException e) {
+						return;
+					}
 				}
-				if (target == null)
-				  target = proxy; /* last-ditch: try the raw name */
-				int code = putSelector(group, target);
-				String note = (code >= 200 && code < 300) ? "ok" : ("http " + code);
-				if (!target.equals(proxy))
-				  note += " (resolved to " + target + ")";
-				appendLog("selector set: " + note);
-			} catch (Throwable e) {
-				appendLog("selector set skipped: " + e);
 			}
+			appendLog("selector set failed: 控制接口 127.0.0.1:"
+				+ MihomoConfig.API_PORT + " 未就绪（内核可能未监听）");
 		}).start();
+	}
+
+	/* PUT the chosen proxy into `group` once the control API is reachable.
+	   Extracted so selectInGroup can retry it without re-duplicating the
+	   resolve-and-PUT logic. */
+	private void applySelector(String group, String proxy) {
+		try {
+			String target = null;
+			try {
+				target = resolveMember(group, proxy);
+			} catch (Throwable ignore) {
+			}
+			if (target == null)
+			  target = proxy; /* last-ditch: try the raw name */
+			int code = putSelector(group, target);
+			String note = (code >= 200 && code < 300) ? "ok" : ("http " + code);
+			if (!target.equals(proxy))
+			  note += " (resolved to " + target + ")";
+			appendLog("selector set: " + note);
+		} catch (Throwable e) {
+			appendLog("selector set skipped: " + e);
+		}
 	}
 
 	/* Poll the core's control API until it answers, so a selector PUT right

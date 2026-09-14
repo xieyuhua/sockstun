@@ -232,22 +232,31 @@
 						android:text="@string/rule_add"
 						android:textSize="14sp"
 						app:cornerRadius="24dp"/>
-					<com.google.android.material.button.MaterialButton
-						android:id="@+id/rules_preset_cn"
-						style="?attr/materialButtonOutlinedStyle"
+					<com.google.android.material.tabs.TabLayout
+						android:id="@+id/rules_tabs"
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
-						android:layout_marginTop="10dp"
-						android:minHeight="48dp"
-						android:text="@string/rules_preset_cn"
-						android:textSize="14sp"
-						app:cornerRadius="24dp"/>
+						android:layout_marginTop="14dp"/>
+					<TextView
+						android:id="@+id/rules_common_hint"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:layout_marginTop="6dp"
+						android:text="@string/rules_common_hint"
+						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
+					<LinearLayout
+						android:id="@+id/rules_common_list"
+						android:orientation="vertical"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:layout_marginTop="8dp"
+						android:visibility="gone"/>
 					<LinearLayout
 						android:id="@+id/rules_list"
 						android:orientation="vertical"
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
-						android:layout_marginTop="12dp"/>
+						android:layout_marginTop="8dp"/>
 					<TextView
 						android:id="@+id/rules_empty"
 						android:layout_width="match_parent"

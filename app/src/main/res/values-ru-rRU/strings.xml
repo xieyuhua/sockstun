@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<string name="app_name">protun</string>
+	<string name="app_name">ProTun</string>
 	<string name="socks_addr">Адрес Socks</string>
 	<string name="socks_udp_addr">UDP-aдрес Socks</string>
 	<string name="socks_port">Порт Socks</string>
@@ -58,4 +58,10 @@
 		<item>@string/rule_action_proxy</item>
 		<item>@string/rule_action_direct</item>
 	</string-array>
+
+	<string name="rules_tab_common">Частые</string>
+	<string name="rules_tab_all">Все правила</string>
+	<string name="rules_common_hint">Нажмите, чтобы добавить или убрать частое правило. Добавленные также видны в «Все правила».</string>
+	<string name="rule_added">Добавлено</string>
+
 </resources>

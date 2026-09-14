@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<string name="app_name">protun</string>
+	<string name="app_name">ProTun</string>
 	<string name="home">Home</string>
 	<string name="home_hint">Use the bottom tabs to open subscription, server, per-app and more settings</string>
 	<string name="log">Log</string>
@@ -92,9 +92,10 @@
 	<string name="rules_mode_hint_rules">规则模式：按下方规则分流，未命中的流量走「未命中默认」开关。</string>
 	<string name="rules_mode_hint_global">全局代理：所有流量都走代理，下方规则不生效。</string>
 	<string name="rules_mode_hint_direct">全局直连：所有流量都不走代理，下方规则不生效。</string>
-	<string name="rules_preset_cn">国内直连预设</string>
-	<string name="rules_preset_cn_confirm">将清空现有规则并添加：国内（GeoIP,CN）及常见国内域名走直连，其余流量走代理。是否继续？</string>
-	<string name="rules_preset_cn_done">已应用「国内直连」预设，重新连接后生效</string>
+	<string name="rules_tab_common">Common</string>
+	<string name="rules_tab_all">All rules</string>
+	<string name="rules_common_hint">Tap to add or remove a common rule. Added ones also appear under "All rules".</string>
+	<string name="rule_added">Added</string>
 	<string-array name="rule_types">
 		<item>@string/rule_type_domain</item>
 		<item>@string/rule_type_ip</item>
