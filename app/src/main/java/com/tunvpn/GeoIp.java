@@ -15,8 +15,6 @@ package com.tunvpn;
 import android.content.Context;
 import android.util.Log;
 
-import com.maxmind.db.Reader;
-
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -47,9 +45,9 @@ public class GeoIp {
 	   lookups are NOT cached, so a later retry can succeed. */
 	private static final Map<String, String> cache = new ConcurrentHashMap<String, String>();
 
-	/* Lazily opened MaxMind reader; null means unavailable (and we won't retry
-	   until process restart, see MMDB_TRIED). */
-	private static Reader mmdbReader = null;
+	/* Lazily opened local mmdb reader; null means unavailable (and we won't
+	   retry until process restart, see MMDB_TRIED). */
+	private static MMDB mmdb = null;
 	private static boolean mmdbTried = false;
 	private static final Object MMDB_LOCK = new Object();
 
@@ -84,12 +82,12 @@ public class GeoIp {
 		Context ctx = prefs.getContext();
 		if (ctx == null)
 		  return null;
-		Reader reader = getReader(ctx);
-		if (reader == null)
+		MMDB db = getReader(ctx);
+		if (db == null)
 		  return null;
 		try {
 			InetAddress addr = InetAddress.getByName(ip);
-			Object rec = reader.get(addr);
+			Object rec = db.get(addr);
 			if (rec instanceof Map) {
 				Map<String, Object> m = (Map<String, Object>) rec;
 				String cc = isoFrom(m.get("country"));
@@ -114,20 +112,20 @@ public class GeoIp {
 
 	/* Open the bundled database once. Returns null (and remembers so) if the
 	   asset is not present, in which case callers fall back to the network. */
-	private static Reader getReader(Context ctx) {
+	private static MMDB getReader(Context ctx) {
 		synchronized (MMDB_LOCK) {
 			if (mmdbTried)
-			  return mmdbReader;
+			  return mmdb;
 			mmdbTried = true;
 			try {
 				InputStream in = ctx.getAssets().open(MMDB_NAME);
-				mmdbReader = new Reader(in);
+				mmdb = MMDB.open(MMDB.readAll(in));
 			} catch (Exception e) {
 				Log.w(TAG, "GeoLite2 (" + MMDB_NAME + ") not found in assets, " +
 					"falling back to network lookup: " + e);
-				mmdbReader = null;
+				mmdb = null;
 			}
-			return mmdbReader;
+			return mmdb;
 		}
 	}
 
