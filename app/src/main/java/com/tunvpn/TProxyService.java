@@ -94,6 +94,9 @@ public class TProxyService extends VpnService {
 	/* Consecutive failed /connections polls, so the "stats are stuck at 0"
 	   case is reported instead of being invisible. */
 	private int connFailStreak = 0;
+	/* Last exception seen while probing the control API, so a failed probe says
+	   whether nothing is listening (refused) or it is up but not answering. */
+	private volatile String lastControllerError = null;
 	private long proxyBaseTx, proxyBaseRx;
 	private long proxySessionTx, proxySessionRx;
 	private long lastProxyTx, lastProxyRx;
@@ -237,6 +240,9 @@ public class TProxyService extends VpnService {
 				appendLog("config: " + configFile.getAbsolutePath());
 				appendLog("routing: " + MihomoConfig.describe(prefs));
 			}
+			/* One line, not the whole file: these keys decide whether the node
+			   picker and the traffic counters can reach the core at all. */
+			appendLog("config: " + configKeySummary(configFile));
 		} catch (Throwable e) {
 			failStartup("生成配置失败：" + e.getMessage());
 			return;
@@ -550,6 +556,28 @@ public class TProxyService extends VpnService {
 		}
 	}
 
+	/* A one-line summary of the keys the app itself depends on, so "the tunnel
+	   works but the counters/pickers are dead" is traceable to the config. */
+	private static String configKeySummary(File configFile) {
+		try {
+			byte[] buf = new byte[(int) configFile.length()];
+			java.io.FileInputStream in = new java.io.FileInputStream(configFile);
+			int n = in.read(buf);
+			in.close();
+			String text = new String(buf, 0, n, "UTF-8");
+			String ec = topLevelLine(text, "external-controller:");
+			String mp = topLevelLine(text, "mixed-port:");
+			if (mp == null)
+			  mp = topLevelLine(text, "port:");
+			return "external-controller="
+				+ (ec == null ? "缺失!" : ec.substring("external-controller:".length()).trim())
+				+ ", mixed-port="
+				+ (mp == null ? "缺失!" : mp.substring(mp.indexOf(':') + 1).trim());
+		} catch (Exception e) {
+			return "(读取配置失败: " + e + ")";
+		}
+	}
+
 	/* True when "key" appears as a top-level YAML key (column 0). */
 	private static boolean hasTopLevelKey(String text, String key) {
 		return topLevelLine(text, key) != null;
@@ -684,7 +712,9 @@ public class TProxyService extends VpnService {
 				int code = c.getResponseCode();
 				if (code >= 200 && code < 300)
 				  return true;
-			} catch (Throwable ignore) {
+			} catch (Throwable e) {
+				lastControllerError = e.getClass().getSimpleName()
+					+ (e.getMessage() == null ? "" : (": " + e.getMessage()));
 			} finally {
 				if (c != null)
 				  c.disconnect();
@@ -709,6 +739,8 @@ public class TProxyService extends VpnService {
 				return;
 			}
 			appendLog("controller: 127.0.0.1:" + MihomoConfig.API_PORT + " NOT ready");
+			if (lastControllerError != null)
+			  appendLog("controller: 最后一次探测：" + lastControllerError);
 			if (quickSetupError != null && !quickSetupError.isEmpty())
 			  appendLog("controller: 内核配置加载报错：" + quickSetupError);
 		}).start();

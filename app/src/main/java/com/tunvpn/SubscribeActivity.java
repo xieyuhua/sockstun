@@ -34,7 +34,10 @@ import androidx.appcompat.app.AlertDialog;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
+import com.google.android.material.chip.Chip;
+import com.google.android.material.chip.ChipGroup;
 import com.google.android.material.color.MaterialColors;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.android.material.switchmaterial.SwitchMaterial;
 
 import com.tunvpn.GeoIp;
@@ -56,8 +59,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class SubscribeActivity extends BaseActivity {
-	private static final int SORT_DEFAULT = 0;
-	private static final int SORT_LATENCY = 1;
+	/* Spinner position 0 is the default, and "fastest first" is what people
+	   want, so latency is index 0 and subscription order index 1. */
+	private static final int SORT_LATENCY = 0;
+	private static final int SORT_SUB_ORDER = 1;
 	private static final int FILTER_ALL = 0;
 	private static final int FILTER_OK = 1;
 	private static final int FILTER_BAD = 2;
@@ -67,7 +72,7 @@ public class SubscribeActivity extends BaseActivity {
 
 	private Preferences prefs;
 	private MaterialButton button_fetch;
-	private MaterialButton button_test_all;
+	private FloatingActionButton fab_test_all;
 	private ListView listview;
 	private TextView textview_empty;
 	private TextView textview_stats;
@@ -88,10 +93,10 @@ public class SubscribeActivity extends BaseActivity {
 	/* Country filter for the node list: an extra dropdown that narrows the
 	   visible list to a single country, independent of the auto-select target
 	   spinner above. "" means "all countries". */
-	private Spinner spinner_country_filter;
-	private ArrayAdapter<String> countryFilterAdapter;
+	/* Country chips: a single row the user swipes sideways; "" = all countries
+	   (= every proxy in the pool). */
+	private ChipGroup countryChips;
 	private final List<String> filterCountryCodes = new ArrayList<String>();
-	private final List<String> filterCountryLabels = new ArrayList<String>();
 	private String filterCountry = "";
 	/* Protocol (proxy type, e.g. ss / vmess / trojan) filter for the node list.
 	   "" means "all protocols". Persisted so it survives a reopen. */
@@ -102,7 +107,7 @@ public class SubscribeActivity extends BaseActivity {
 	private String filterProto = "";
 	/* Bounded pool for latency tests. "Test all" on a large subscription would
 	   otherwise fire one thread - and one socket - per node at once. */
-	private final ExecutorService testPool = Executors.newFixedThreadPool(8);
+	private final ExecutorService testPool = Executors.newFixedThreadPool(16);
 
 	/* nodes = everything we parsed (source of truth, persisted)
 	   shown = what the list displays after filtering + sorting */
@@ -111,9 +116,15 @@ public class SubscribeActivity extends BaseActivity {
 	private NodeAdapter adapter;
 	private final Handler ui = new Handler(Looper.getMainLooper());
 
-	private int sortMode = SORT_DEFAULT;
+	/* Latency order by default: fastest first is what people actually want. */
+	private int sortMode = SORT_LATENCY;
 	private int filterMode = FILTER_ALL;
 	private int pendingTests = 0;
+	/* Progress of a "test all" run, and the last time the list was fully
+	   re-filtered. Sorting hundreds of rows on every single result would cost
+	   more than the wait it saves, so a full refresh is throttled. */
+	private int testsDone = 0;
+	private long lastTestUiUpdate = 0;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -134,7 +145,7 @@ public class SubscribeActivity extends BaseActivity {
 		});
 
 		button_fetch = (MaterialButton) findViewById(R.id.sub_fetch);
-		button_test_all = (MaterialButton) findViewById(R.id.sub_test_all);
+		fab_test_all = (FloatingActionButton) findViewById(R.id.sub_test_all);
 		listview = (ListView) findViewById(R.id.sub_list);
 		textview_empty = (TextView) findViewById(R.id.sub_empty);
 		textview_stats = (TextView) findViewById(R.id.sub_stats);
@@ -191,24 +202,7 @@ public class SubscribeActivity extends BaseActivity {
 				resolveCountries();
 			}
 		});
-		spinner_country_filter = (Spinner) findViewById(R.id.sub_country_filter);
-		countryFilterAdapter = new ArrayAdapter<String>(this,
-			R.layout.spinner_item_small, filterCountryLabels);
-		countryFilterAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item_small);
-		spinner_country_filter.setAdapter(countryFilterAdapter);
-		spinner_country_filter.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-			@Override
-			public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-				if (position < 0 || position >= filterCountryCodes.size())
-				  return;
-				filterCountry = filterCountryCodes.get(position);
-				prefs.setSubCountryFilter(filterCountry);
-				applyView();
-			}
-			@Override
-			public void onNothingSelected(AdapterView<?> parent) {
-			}
-		});
+		countryChips = (ChipGroup) findViewById(R.id.sub_country_chips);
 		spinner_proto_filter = (Spinner) findViewById(R.id.sub_proto_filter);
 		protoFilterAdapter = new ArrayAdapter<String>(this,
 			R.layout.spinner_item_small, filterProtoLabels);
@@ -250,7 +244,7 @@ public class SubscribeActivity extends BaseActivity {
 				fetch();
 			}
 		});
-		button_test_all.setOnClickListener(new View.OnClickListener() {
+		fab_test_all.setOnClickListener(new View.OnClickListener() {
 			@Override
 			public void onClick(View v) {
 				testAll();
@@ -318,7 +312,7 @@ public class SubscribeActivity extends BaseActivity {
 			}
 		}
 		applyView();
-		refreshCountryFilterSpinner();
+		refreshCountryChips();
 		refreshProtoFilterSpinner();
 	}
 
@@ -396,7 +390,14 @@ public class SubscribeActivity extends BaseActivity {
 			else if (isBroken(n))
 			  bad++;
 		}
-		textview_stats.setText(getString(R.string.sub_stats, ok, bad, nodes.size()));
+		StringBuilder sb = new StringBuilder(
+			getString(R.string.sub_stats, ok, bad, nodes.size()));
+		if (shown.size() != nodes.size())
+		  sb.append("  ·  ").append(getString(R.string.sub_visible, shown.size()));
+		if (pendingTests > 0)
+		  sb.append("  ·  ").append(getString(R.string.sub_testing, testsDone,
+			testsDone + pendingTests));
+		textview_stats.setText(sb.toString());
 	}
 
 	/* Rebuild the country dropdown from the nodes already parsed. Index 0 is
@@ -437,17 +438,18 @@ public class SubscribeActivity extends BaseActivity {
 		spinner_country.setSelection(idx);
 	}
 
-	/* Rebuild the country filter dropdown from the currently known nodes. The
-	   first entry is "all countries"; the rest are ISO codes with node counts,
-	   sorted by count descending (mirrors the auto-mode country picker). */
-	private void refreshCountryFilterSpinner() {
+	/* Rebuild the country chip row: "全部" first (that is the whole proxy pool),
+	   then one chip per country with its node count, busiest first. The row
+	   scrolls sideways, so a long list of countries never squeezes the layout. */
+	private void refreshCountryChips() {
 		filterCountryCodes.clear();
-		filterCountryLabels.clear();
 		filterCountryCodes.add("");
-		filterCountryLabels.add(getString(R.string.sub_country_all));
+		countryChips.removeAllViews();
+		countryChips.addView(makeCountryChip(getString(R.string.sub_country_all), ""));
+
 		Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
 		for (ClashNode n : nodes) {
-			String cc = (n.country == null || n.country.isEmpty()) ? GeoIp.UNKNOWN : n.country;
+			String cc = countryCode(n);
 			Integer c = counts.get(cc);
 			counts.put(cc, c == null ? 1 : c + 1);
 		}
@@ -461,13 +463,36 @@ public class SubscribeActivity extends BaseActivity {
 		});
 		for (Map.Entry<String, Integer> e : entries) {
 			filterCountryCodes.add(e.getKey());
-			filterCountryLabels.add(Country.displayWithCount(e.getKey(), e.getValue()));
+			countryChips.addView(makeCountryChip(
+				Country.displayWithCount(e.getKey(), e.getValue()), e.getKey()));
 		}
-		countryFilterAdapter.notifyDataSetChanged();
+
 		int idx = filterCountryCodes.indexOf(filterCountry);
-		if (idx < 0)
-		  idx = 0;
-		spinner_country_filter.setSelection(idx);
+		if (idx < 0) {
+			/* The remembered country is gone (subscription changed): fall back to
+			   "all" instead of leaving the list empty. */
+			filterCountry = "";
+			idx = 0;
+		}
+		Chip chip = (Chip) countryChips.getChildAt(idx);
+		if (chip != null)
+		  chip.setChecked(true);
+	}
+
+	private Chip makeCountryChip(String label, final String code) {
+		Chip chip = new Chip(this);
+		chip.setText(label);
+		chip.setCheckable(true);
+		chip.setClickable(true);
+		chip.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				filterCountry = code;
+				prefs.setSubCountryFilter(filterCountry);
+				applyView();
+			}
+		});
+		return chip;
 	}
 
 	/* Rebuild the protocol filter dropdown from the node types we parsed. The
@@ -537,7 +562,7 @@ public class SubscribeActivity extends BaseActivity {
 							if (pendingGeo <= 0) {
 								saveNodes();
 								refreshCountrySpinner();
-								refreshCountryFilterSpinner();
+								refreshCountryChips();
 								refreshProtoFilterSpinner();
 								applyView();
 							}
@@ -661,8 +686,18 @@ public class SubscribeActivity extends BaseActivity {
 		if (nodes.isEmpty())
 		  return;
 		pendingTests = nodes.size();
+		testsDone = 0;
+		lastTestUiUpdate = 0;
+		updateTestProgress();
 		for (ClashNode n : nodes)
 		  testNode(n, true);
+	}
+
+	/* The FAB carries no label, so progress goes into the stats line and the
+	   FAB is simply disabled while a run is in flight. */
+	private void updateTestProgress() {
+		fab_test_all.setEnabled(pendingTests <= 0);
+		updateStats();
 	}
 
 	/* batch = part of "test all": only refresh + persist once the last one
@@ -691,17 +726,28 @@ public class SubscribeActivity extends BaseActivity {
 						if (isFinishing() || isDestroyed())
 						  return;
 						if (batch) {
+							testsDone++;
 							pendingTests--;
-							if (pendingTests > 0) {
+							updateTestProgress();
+							/* Show each result as it lands; a full re-filter (with
+							   sorting) is throttled. */
+							long now = System.currentTimeMillis();
+							if (now - lastTestUiUpdate >= 400) {
+								lastTestUiUpdate = now;
+								applyView();
+							} else {
 								adapter.notifyDataSetChanged();
-								return;
+								updateStats();
 							}
+							if (pendingTests > 0)
+							  return;
 						}
 						saveNodes();
 						refreshCountrySpinner();
-						refreshCountryFilterSpinner();
+						refreshCountryChips();
 						refreshProtoFilterSpinner();
 						applyView();
+						updateTestProgress();
 					}
 				});
 			}

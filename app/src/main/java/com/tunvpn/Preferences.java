@@ -592,6 +592,8 @@ public class Preferences
 	/* Subscribe-page view state (sort / availability / country / protocol),
 	   so reopening the page keeps the user's last choice instead of resetting
 	   to "all". */
+	/* Index 0 is "by latency" (see sub_sort_options): fastest first is the
+	   useful default, and it is also what the previously stored 0 now means. */
 	public int getSubSort() {
 		return prefs.getInt(key(SUB_SORT), 0);
 	}

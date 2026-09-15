@@ -196,11 +196,28 @@ public class MihomoConfig {
 		if (prefs.getAutoSelect())
 		  appendAutoGroups(sb, proxys, prefs);
 		else {
+			String sel = prefs.getSubSelected();
 			sb.append("  - name: \"").append(GROUP).append("\"\n");
 			sb.append("    type: select\n");
 			sb.append("    proxies:\n");
-			for (ClashParser.ProxyDef p : proxys)
-			  sb.append("      - \"").append(escapeYaml(p.name)).append("\"\n");
+			/* mihomo defaults a select group to its FIRST member, and the app's
+			   own switch is applied afterwards through the control API - which
+			   is exactly the step that fails when 9090 is unreachable. Listing
+			   the picked node first makes the choice hold by itself, instead of
+			   silently falling back to whatever node happens to be first. */
+			if (sel != null && !sel.isEmpty()) {
+				for (ClashParser.ProxyDef p : proxys) {
+					if (sel.equals(p.name)) {
+						sb.append("      - \"").append(escapeYaml(p.name)).append("\"\n");
+						break;
+					}
+				}
+			}
+			for (ClashParser.ProxyDef p : proxys) {
+				if (sel != null && sel.equals(p.name))
+				  continue;
+				sb.append("      - \"").append(escapeYaml(p.name)).append("\"\n");
+			}
 		}
 
 		sb.append("rules:\n");

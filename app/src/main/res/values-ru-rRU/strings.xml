@@ -39,19 +39,51 @@
 	<string name="rules_default_proxy">Несовпавший трафик идёт через прокси</string>
 	<string name="rule_add">Добавить</string>
 	<string name="rule_delete">Удалить</string>
-	<string name="rule_value_hint">Домен / IP / CIDR (например 10.0.0.0/8)</string>
+	<string name="rule_value_hint">Введите значение по типу, напр. google.com / 10.0.0.0/8 / 443</string>
 	<string name="rule_empty">Правил нет, всё определяется переключателем выше</string>
 	<string name="rule_invalid">Введите корректное значение</string>
 	<string name="rule_exists">Такое правило уже есть</string>
-	<string name="rule_type_domain">Домен</string>
+	<string name="rule_type_domain">Суффикс домена</string>
 	<string name="rule_type_ip">IP</string>
-	<string name="rule_type_cidr">CIDR</string>
+	<string name="rule_type_cidr">Диапазон IP</string>
+	<string name="rule_type_keyword">Ключевое слово</string>
+	<string name="rule_type_geoip">Страна (GeoIP)</string>
+	<string name="rule_type_process">Имя процесса</string>
+	<string name="rule_type_domain_full">Домен (точно)</string>
+	<string name="rule_type_geosite">Категория (GeoSite)</string>
+	<string name="rule_type_process_path">Путь процесса</string>
+	<string name="rule_type_dst_port">Порт назначения</string>
+	<string name="rule_type_src_port">Порт источника</string>
+	<string name="rule_type_network">Тип сети</string>
 	<string name="rule_action_proxy">Прокси</string>
 	<string name="rule_action_direct">Напрямую</string>
 	<string-array name="rule_types">
 		<item>@string/rule_type_domain</item>
 		<item>@string/rule_type_ip</item>
 		<item>@string/rule_type_cidr</item>
+		<item>@string/rule_type_keyword</item>
+		<item>@string/rule_type_geoip</item>
+		<item>@string/rule_type_process</item>
+		<item>@string/rule_type_domain_full</item>
+		<item>@string/rule_type_geosite</item>
+		<item>@string/rule_type_process_path</item>
+		<item>@string/rule_type_dst_port</item>
+		<item>@string/rule_type_src_port</item>
+		<item>@string/rule_type_network</item>
+	</string-array>
+	<string-array name="rule_value_hints">
+		<item>напр. google.com (домен и поддомены)</item>
+		<item>напр. 1.2.3.4</item>
+		<item>напр. 10.0.0.0/8 или 2001:db8::/32</item>
+		<item>напр. google (подстрока домена)</item>
+		<item>Код страны, напр. CN / US</item>
+		<item>напр. com.android.chrome</item>
+		<item>напр. www.google.com (точное совпадение)</item>
+		<item>напр. geolocation-cn / openai</item>
+		<item>напр. /system/bin/ping</item>
+		<item>напр. 443 или 1000-2000</item>
+		<item>напр. 12345 или 1000-2000</item>
+		<item>tcp / udp / tcp,udp</item>
 	</string-array>
 	<string-array name="rule_actions">
 		<item>@string/rule_action_proxy</item>

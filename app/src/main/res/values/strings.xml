@@ -153,6 +153,7 @@
 	<string name="sub_fetch">拉取订阅</string>
 	<string name="sub_fetching">拉取中…</string>
 	<string name="sub_test_all">测速全部</string>
+	<string name="sub_testing">测速中 %1$d/%2$d</string>
 	<string name="sub_test">测速</string>
 	<string name="sub_use">使用</string>
 	<string name="sub_empty">暂无节点，先拉取订阅</string>
@@ -167,9 +168,10 @@
 	<string name="sub_section_auto">自动选择</string>
 	<string name="sub_section_filter">筛选</string>
 	<string name="sub_country_switched">已切换：%s</string>
+	<!-- 位置 0 是默认值：最快优先 -->
 	<string-array name="sub_sort_options">
-		<item>订阅顺序</item>
 		<item>按延迟（快→慢）</item>
+		<item>订阅顺序</item>
 	</string-array>
 	<string-array name="sub_filter_options">
 		<item>全部</item>
@@ -182,7 +184,9 @@
 	<string name="sub_manual_hint">手动模式：使用你点选的那个节点</string>
 	<string name="sub_country_label">自动选择国家/地区</string>
 	<string name="sub_country_filter_label">按国家筛选</string>
-	<string name="sub_country_all">全部国家</string>
+	<string name="sub_country_all">全部</string>
+	<string name="sub_country_all_label">全部国家</string>
+	<string name="sub_visible">显示 %d 个</string>
 	<string name="sub_proto_filter_label">按协议筛选</string>
 	<string name="sub_proto_all">全部协议</string>
 	<string name="sub_country_global">全局最快</string>
