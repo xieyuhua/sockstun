@@ -25,15 +25,6 @@
 				android:maxLines="1"
 				android:textAppearance="?attr/textAppearanceTitleMedium"
 				android:textStyle="bold"/>
-			<TextView
-				android:id="@+id/item_badge"
-				android:layout_width="wrap_content"
-				android:layout_height="wrap_content"
-				android:layout_marginStart="8dp"
-				android:text="@string/subs_default_badge"
-				android:textAppearance="?attr/textAppearanceLabelMedium"
-				android:textStyle="bold"
-				android:visibility="gone"/>
 		</LinearLayout>
 		<TextView
 			android:id="@+id/item_detail"
@@ -49,15 +40,6 @@
 			android:layout_width="match_parent"
 			android:layout_height="wrap_content"
 			android:layout_marginTop="8dp">
-			<com.google.android.material.button.MaterialButton
-				android:id="@+id/item_default"
-				style="?attr/materialButtonOutlinedStyle"
-				android:layout_width="0dp"
-				android:layout_weight="1"
-				android:layout_height="wrap_content"
-				android:minHeight="42dp"
-				android:text="@string/subs_set_default"
-				android:textSize="13sp"/>
 			<com.google.android.material.button.MaterialButton
 				android:id="@+id/item_edit"
 				style="?attr/materialButtonOutlinedStyle"

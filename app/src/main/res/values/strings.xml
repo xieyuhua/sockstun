@@ -92,10 +92,6 @@
 	<string name="rules_mode_hint_rules">规则模式：按下方规则分流，未命中的流量走「未命中默认」开关。</string>
 	<string name="rules_mode_hint_global">全局代理：所有流量都走代理，下方规则不生效。</string>
 	<string name="rules_mode_hint_direct">全局直连：所有流量都不走代理，下方规则不生效。</string>
-	<string name="rules_tab_common">Common</string>
-	<string name="rules_tab_all">All rules</string>
-	<string name="rules_common_hint">Tap to add or remove a common rule. Added ones also appear under "All rules".</string>
-	<string name="rule_added">Added</string>
 	<string-array name="rule_types">
 		<item>@string/rule_type_domain</item>
 		<item>@string/rule_type_ip</item>
@@ -152,6 +148,8 @@
 	<string name="sub_country_label">自动选择国家/地区</string>
 	<string name="sub_country_filter_label">按国家筛选</string>
 	<string name="sub_country_all">全部国家</string>
+	<string name="sub_proto_filter_label">按协议筛选</string>
+	<string name="sub_proto_all">全部协议</string>
 	<string name="sub_country_global">全局最快</string>
 	<string name="sub_country_unknown">未知（%1$d）</string>
 	<string name="sub_detect">探测国家</string>
@@ -193,15 +191,12 @@
 	<string name="subs_name">名称（可选）</string>
 	<string name="subs_url">订阅地址</string>
 	<string name="subs_empty">暂无订阅，点「新增订阅」添加一个</string>
-	<string name="subs_set_default">设为默认</string>
-	<string name="subs_default_badge">默认</string>
 	<string name="subs_cached">%1$s · 已缓存 %2$d 个节点</string>
 	<string name="subs_not_fetched">%1$s · 尚未拉取</string>
-	<string name="subs_current">当前订阅：%s</string>
 	<string name="subs_none">未配置订阅，请在「设置 → 订阅配置」中添加</string>
 	<string name="subs_delete_confirm">删除订阅“%s”？</string>
 	<string name="subs_url_required">请填写订阅地址</string>
-	<string name="server_list_hint_sub">可保存多个订阅地址。拉取时会更新全部订阅，节点合并成一个池；「默认」只用于标记主订阅。删除订阅会同时清掉它已拉取的节点。</string>
+	<string name="server_list_hint_sub">可保存多个订阅地址。拉取时会更新全部订阅，节点合并成一个池。删除订阅会同时清掉它已拉取的节点。</string>
 	<string name="settings_connection">连接信息</string>
 	<string name="settings_group_connection">连接</string>
 	<string name="settings_group_subscription">订阅</string>

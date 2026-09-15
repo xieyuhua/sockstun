@@ -10,7 +10,6 @@ package com.tunvpn;
 
 import java.net.Inet6Address;
 import java.net.InetAddress;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -32,7 +31,6 @@ import android.widget.Toast;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.color.MaterialColors;
-import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.textfield.TextInputLayout;
 
 public class RulesHubActivity extends BaseActivity implements View.OnClickListener {
@@ -60,10 +58,6 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 	private Spinner spinner_action;
 	private Spinner spinner_strategy;
 	private TextView textview_mode_hint;
-	private TabLayout rulesTabs;
-	private LinearLayout rulesCommonList;
-	private TextView rulesCommonHint;
-	private boolean commonTabActive = true;
 	private EditText edit_value;
 	private LinearLayout rules_list;
 	private TextView rules_empty;
@@ -113,9 +107,6 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		edit_value = (EditText) findViewById(R.id.rule_value);
 		rules_list = (LinearLayout) findViewById(R.id.rules_list);
 		rules_empty = (TextView) findViewById(R.id.rules_empty);
-		rulesTabs = (TabLayout) findViewById(R.id.rules_tabs);
-		rulesCommonList = (LinearLayout) findViewById(R.id.rules_common_list);
-		rulesCommonHint = (TextView) findViewById(R.id.rules_common_hint);
 		((MaterialButton) findViewById(R.id.rule_add)).setOnClickListener(this);
 
 		setupSpinner(spinner_type, R.array.rule_types);
@@ -153,10 +144,7 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 			});
 
 		rules = prefs.getRules();
-		setupRuleTabs();
 		renderRules();
-		renderCommonRules();
-		showTab(0);
 		loadUI();
 	}
 
@@ -346,7 +334,7 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 			rules_list.addView(row);
 		}
 
-		rules_empty.setVisibility(!commonTabActive && rules.isEmpty() ? View.VISIBLE : View.GONE);
+		rules_empty.setVisibility(rules.isEmpty() ? View.VISIBLE : View.GONE);
 	}
 
 	private void addRule() {
@@ -433,108 +421,4 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		return true;
 	}
 
-	/* Two tabs: "常用规则" (built-in common rules, one-tap add/remove) and
-	   "全部规则" (the user's own rules). */
-	private void setupRuleTabs() {
-		rulesTabs.addTab(rulesTabs.newTab().setText(R.string.rules_tab_common));
-		rulesTabs.addTab(rulesTabs.newTab().setText(R.string.rules_tab_all));
-		rulesTabs.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
-			@Override
-			public void onTabSelected(TabLayout.Tab tab) {
-				showTab(tab.getPosition());
-			}
-			@Override
-			public void onTabUnselected(TabLayout.Tab tab) {
-			}
-			@Override
-			public void onTabReselected(TabLayout.Tab tab) {
-			}
-		});
-	}
-
-	/* Toggle the visible list and its hint. The common-rules list is always
-	   populated; the all-rules list only shows the user's added rules. */
-	private void showTab(int pos) {
-		commonTabActive = pos == 0;
-		rulesCommonList.setVisibility(commonTabActive ? View.VISIBLE : View.GONE);
-		rulesCommonHint.setVisibility(commonTabActive ? View.VISIBLE : View.GONE);
-		rules_list.setVisibility(commonTabActive ? View.GONE : View.VISIBLE);
-		rules_empty.setVisibility(commonTabActive ? View.GONE : View.VISIBLE);
-	}
-
-	/* "常用规则": a curated set the user can toggle on/off with one tap. Tapping
-	   adds the rule to (or removes it from) the user's rule list, so it also
-	   appears under "全部规则". */
-	private void renderCommonRules() {
-		rulesCommonList.removeAllViews();
-		LayoutInflater inflater = LayoutInflater.from(this);
-		for (final Preferences.Rule cr : commonRules()) {
-			View row = inflater.inflate(R.layout.ruleitem, rulesCommonList, false);
-			((TextView) row.findViewById(R.id.value))
-				.setText(typeLabel(cr.type) + "  " + cr.value);
-			((TextView) row.findViewById(R.id.action))
-				.setText(cr.proxy ? R.string.rule_action_proxy : R.string.rule_action_direct);
-			boolean added = hasRule(rules, cr);
-			ImageButton btn = (ImageButton) row.findViewById(R.id.delete);
-			btn.setImageResource(added ? R.drawable.ic_check : R.drawable.ic_add);
-			btn.setContentDescription(added
-				? getString(R.string.rule_added) : getString(R.string.rule_add));
-			btn.setEnabled(!prefs.getEnable());
-			btn.setOnClickListener(new View.OnClickListener() {
-				@Override
-				public void onClick(View v) {
-					toggleCommonRule(cr);
-				}
-			});
-			rulesCommonList.addView(row);
-		}
-	}
-
-	/* Add the rule if absent, remove it if present (matched by type + value). */
-	private void toggleCommonRule(Preferences.Rule r) {
-		for (int i = 0; i < rules.size(); i++) {
-			if (rules.get(i).type == r.type && rules.get(i).value.equals(r.value)) {
-				rules.remove(i);
-				prefs.setRules(rules);
-				renderCommonRules();
-				renderRules();
-				return;
-			}
-		}
-		rules.add(new Preferences.Rule(r.type, r.value, r.proxy));
-		prefs.setRules(rules);
-		renderCommonRules();
-		renderRules();
-	}
-
-	private static boolean hasRule(List<Preferences.Rule> list, Preferences.Rule r) {
-		for (Preferences.Rule x : list)
-			if (x.type == r.type && x.value.equals(r.value))
-				return true;
-		return false;
-	}
-
-	/* The curated common-rule set: domestic destinations go DIRECT, common
-	   foreign services go through the proxy. Users enable only what they need. */
-	private static List<Preferences.Rule> commonRules() {
-		List<Preferences.Rule> list = new ArrayList<Preferences.Rule>();
-		list.add(new Preferences.Rule(Preferences.Rule.TYPE_GEOIP, "CN", false));
-		String[] cn = {
-			"baidu.com", "qq.com", "taobao.com", "jd.com", "sina.com.cn",
-			"weibo.com", "aliyun.com", "tencent.com", "tmall.com", "163.com",
-			"126.com", "hao123.com", "sohu.com", "bilibili.com", "youku.com",
-			"iqiyi.com", "douyin.com"
-		};
-		for (String d : cn)
-			list.add(new Preferences.Rule(Preferences.Rule.TYPE_DOMAIN, d, false));
-		String[] foreign = {
-			"google.com", "youtube.com", "github.com", "twitter.com",
-			"x.com", "facebook.com", "instagram.com", "openai.com",
-			"netflix.com", "telegram.org", "wikipedia.org", "reddit.com",
-			"discord.com", "medium.com"
-		};
-		for (String d : foreign)
-			list.add(new Preferences.Rule(Preferences.Rule.TYPE_DOMAIN, d, true));
-		return list;
-	}
 }

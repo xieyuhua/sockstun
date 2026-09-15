@@ -9,7 +9,6 @@
 package com.tunvpn;
 
 import android.content.DialogInterface;
-import android.graphics.Color;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.View;
@@ -26,8 +25,6 @@ import androidx.appcompat.app.AlertDialog;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
-import com.google.android.material.card.MaterialCardView;
-import com.google.android.material.color.MaterialColors;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -79,14 +76,6 @@ public class SubscribeConfigActivity extends BaseActivity {
 		subs.clear();
 		subs.addAll(prefs.getSubscriptions());
 		adapter.notifyDataSetChanged();
-	}
-
-	private void setDefault(Subscription s) {
-		prefs.setActiveSubId(s.id);
-		prefs.setSubUrl(s.url);
-		Toast.makeText(this, getString(R.string.subs_current, s.label()),
-			Toast.LENGTH_SHORT).show();
-		load();
 	}
 
 	private void confirmDelete(final Subscription s) {
@@ -175,13 +164,10 @@ public class SubscribeConfigActivity extends BaseActivity {
 
 	private class SubAdapter extends ArrayAdapter<Subscription> {
 		private final android.view.LayoutInflater inflater;
-		private final int colorSelected;
 
 		SubAdapter() {
 			super(SubscribeConfigActivity.this, R.layout.subscriptionitem, subs);
 			inflater = getLayoutInflater();
-			colorSelected = MaterialColors.getColor(SubscribeConfigActivity.this,
-				com.google.android.material.R.attr.colorPrimaryContainer, 0);
 		}
 
 		@Override
@@ -189,11 +175,8 @@ public class SubscribeConfigActivity extends BaseActivity {
 			if (convertView == null)
 				convertView = inflater.inflate(R.layout.subscriptionitem, parent, false);
 			final Subscription s = getItem(position);
-			MaterialCardView card = (MaterialCardView) convertView;
 			TextView name = (TextView) convertView.findViewById(R.id.item_name);
 			TextView detail = (TextView) convertView.findViewById(R.id.item_detail);
-			TextView badge = (TextView) convertView.findViewById(R.id.item_badge);
-			Button def = (Button) convertView.findViewById(R.id.item_default);
 			Button edit = (Button) convertView.findViewById(R.id.item_edit);
 			Button delete = (Button) convertView.findViewById(R.id.item_delete);
 
@@ -204,17 +187,6 @@ public class SubscribeConfigActivity extends BaseActivity {
 				? getString(R.string.subs_cached, s.url, cached)
 				: getString(R.string.subs_not_fetched, s.url));
 
-			boolean active = s.id.equals(prefs.getActiveSubId());
-			badge.setVisibility(active ? View.VISIBLE : View.GONE);
-			card.setCardBackgroundColor(active ? colorSelected : Color.TRANSPARENT);
-			def.setEnabled(!active);
-
-			def.setOnClickListener(new View.OnClickListener() {
-				@Override
-				public void onClick(View v) {
-					setDefault(s);
-				}
-			});
 			edit.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {

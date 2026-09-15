@@ -93,6 +93,13 @@ public class SubscribeActivity extends BaseActivity {
 	private final List<String> filterCountryCodes = new ArrayList<String>();
 	private final List<String> filterCountryLabels = new ArrayList<String>();
 	private String filterCountry = "";
+	/* Protocol (proxy type, e.g. ss / vmess / trojan) filter for the node list.
+	   "" means "all protocols". Persisted so it survives a reopen. */
+	private Spinner spinner_proto_filter;
+	private ArrayAdapter<String> protoFilterAdapter;
+	private final List<String> filterProtoTypes = new ArrayList<String>();
+	private final List<String> filterProtoLabels = new ArrayList<String>();
+	private String filterProto = "";
 	/* Bounded pool for latency tests. "Test all" on a large subscription would
 	   otherwise fire one thread - and one socket - per node at once. */
 	private final ExecutorService testPool = Executors.newFixedThreadPool(8);
@@ -112,6 +119,9 @@ public class SubscribeActivity extends BaseActivity {
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
 		prefs = new Preferences(this);
+		/* Restore the last view state so the filters do not reset to "all". */
+		filterCountry = prefs.getSubCountryFilter();
+		filterProto = prefs.getSubProtoFilter();
 		setContentView(R.layout.activity_subscribe);
 
 		MaterialToolbar toolbar = (MaterialToolbar) findViewById(R.id.toolbar);
@@ -173,6 +183,25 @@ public class SubscribeActivity extends BaseActivity {
 				if (position < 0 || position >= filterCountryCodes.size())
 				  return;
 				filterCountry = filterCountryCodes.get(position);
+				prefs.setSubCountryFilter(filterCountry);
+				applyView();
+			}
+			@Override
+			public void onNothingSelected(AdapterView<?> parent) {
+			}
+		});
+		spinner_proto_filter = (Spinner) findViewById(R.id.sub_proto_filter);
+		protoFilterAdapter = new ArrayAdapter<String>(this,
+			R.layout.spinner_item_small, filterProtoLabels);
+		protoFilterAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item_small);
+		spinner_proto_filter.setAdapter(protoFilterAdapter);
+		spinner_proto_filter.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+			@Override
+			public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+				if (position < 0 || position >= filterProtoTypes.size())
+				  return;
+				filterProto = filterProtoTypes.get(position);
+				prefs.setSubProtoFilter(filterProto);
 				applyView();
 			}
 			@Override
@@ -185,8 +214,16 @@ public class SubscribeActivity extends BaseActivity {
 		listview.setAdapter(adapter);
 		listview.setEmptyView(textview_empty);
 
+		/* Read the persisted choices BEFORE the adapters are attached: attaching
+		   an adapter immediately fires onItemSelected(0), which would persist 0
+		   over the saved value. Setting the selection afterwards then re-fires
+		   the listeners with the right position - and that is what applies it. */
+		final int savedSort = prefs.getSubSort();
+		final int savedFilter = prefs.getSubFilter();
 		setupSpinner(spinner_sort, R.array.sub_sort_options, true);
 		setupSpinner(spinner_filter, R.array.sub_filter_options, false);
+		spinner_sort.setSelection(savedSort);
+		spinner_filter.setSelection(savedFilter);
 
 		button_fetch.setOnClickListener(new View.OnClickListener() {
 			@Override
@@ -235,10 +272,13 @@ public class SubscribeActivity extends BaseActivity {
 		spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
 			@Override
 			public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-				if (isSort)
+				if (isSort) {
 				  sortMode = position;
-				else
+				  prefs.setSubSort(position);
+				} else {
 				  filterMode = position;
+				  prefs.setSubFilter(position);
+				}
 				applyView();
 			}
 			@Override
@@ -260,6 +300,7 @@ public class SubscribeActivity extends BaseActivity {
 		}
 		applyView();
 		refreshCountryFilterSpinner();
+		refreshProtoFilterSpinner();
 	}
 
 	/* Rebuild the visible list from nodes according to filter + sort. */
@@ -271,6 +312,8 @@ public class SubscribeActivity extends BaseActivity {
 			if (filterMode == FILTER_BAD && !isBroken(n))
 			  continue;
 			if (!filterCountry.isEmpty() && !matchesCountry(n, filterCountry))
+			  continue;
+			if (!filterProto.isEmpty() && !filterProto.equals(nodeType(n)))
 			  continue;
 			shown.add(n);
 		}
@@ -291,6 +334,11 @@ public class SubscribeActivity extends BaseActivity {
 	private static boolean matchesCountry(ClashNode n, String cc) {
 		String nodeCc = (n.country == null || n.country.isEmpty()) ? GeoIp.UNKNOWN : n.country;
 		return nodeCc.equals(cc);
+	}
+
+	/* The node's proxy type (ss / vmess / trojan / ...), "" when unknown. */
+	private static String nodeType(ClashNode n) {
+		return n.type == null ? "" : n.type;
 	}
 
 	/* Available nodes first by latency, then untested, then broken. */
@@ -398,6 +446,41 @@ public class SubscribeActivity extends BaseActivity {
 		spinner_country_filter.setSelection(idx);
 	}
 
+	/* Rebuild the protocol filter dropdown from the node types we parsed. The
+	   first entry is "all protocols"; the rest are proxy types with counts,
+	   busiest first. */
+	private void refreshProtoFilterSpinner() {
+		filterProtoTypes.clear();
+		filterProtoLabels.clear();
+		filterProtoTypes.add("");
+		filterProtoLabels.add(getString(R.string.sub_proto_all));
+		Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
+		for (ClashNode n : nodes) {
+			String t = nodeType(n);
+			if (t.isEmpty())
+			  continue;
+			Integer c = counts.get(t);
+			counts.put(t, c == null ? 1 : c + 1);
+		}
+		List<Map.Entry<String, Integer>> entries =
+			new ArrayList<Map.Entry<String, Integer>>(counts.entrySet());
+		Collections.sort(entries, new Comparator<Map.Entry<String, Integer>>() {
+			@Override
+			public int compare(Map.Entry<String, Integer> a, Map.Entry<String, Integer> b) {
+				return b.getValue().compareTo(a.getValue());
+			}
+		});
+		for (Map.Entry<String, Integer> e : entries) {
+			filterProtoTypes.add(e.getKey());
+			filterProtoLabels.add(e.getKey() + " (" + e.getValue() + ")");
+		}
+		protoFilterAdapter.notifyDataSetChanged();
+		int idx = filterProtoTypes.indexOf(filterProto);
+		if (idx < 0)
+		  idx = 0;
+		spinner_proto_filter.setSelection(idx);
+	}
+
 	/* Resolve each node's country via GeoIp (server IP -> GeoIP), inside the
 	   test pool so a few hundred nodes don't block the UI. Results are cached
 	   into Preferences, then the spinner and list refresh. */
@@ -431,6 +514,7 @@ public class SubscribeActivity extends BaseActivity {
 								saveNodes();
 								refreshCountrySpinner();
 								refreshCountryFilterSpinner();
+								refreshProtoFilterSpinner();
 								applyView();
 							}
 						}
@@ -592,6 +676,7 @@ public class SubscribeActivity extends BaseActivity {
 						saveNodes();
 						refreshCountrySpinner();
 						refreshCountryFilterSpinner();
+						refreshProtoFilterSpinner();
 						applyView();
 					}
 				});

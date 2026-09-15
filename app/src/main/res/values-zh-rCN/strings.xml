@@ -90,9 +90,6 @@
 		<item>@string/rule_action_direct</item>
 	</string-array>
 
-	<string name="rules_tab_common">常用规则</string>
-	<string name="rules_tab_all">全部规则</string>
-	<string name="rules_common_hint">点击可添加或移除常用规则；已添加的也会出现在「全部规则」中。</string>
-	<string name="rule_added">已添加</string>
+
 
 </resources>

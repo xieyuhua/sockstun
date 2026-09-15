@@ -34,6 +34,12 @@ public class Preferences
 	public static final String SOCKS_ACTIVE = "SocksActive";
 	public static final String SUBSCRIPTIONS = "Subscriptions";
 	public static final String SUB_ACTIVE = "SubActive";
+	/* Subscribe-page view state, remembered across runs (sort mode,
+	   availability filter, country filter and protocol filter). */
+	public static final String SUB_SORT = "SubSort";
+	public static final String SUB_FILTER = "SubFilter";
+	public static final String SUB_COUNTRY_FILTER = "SubCountryFilter";
+	public static final String SUB_PROTO_FILTER = "SubProtoFilter";
 	public static final String DNS_IPV4 = "DnsIpv4";
 	public static final String DNS_IPV6 = "DnsIpv6";
 	public static final String IPV4 = "Ipv4";
@@ -249,6 +255,10 @@ public class Preferences
 		editor.putString(key(dst, SOCKS_ACTIVE), prefs.getString(key(src, SOCKS_ACTIVE), ""));
 		editor.putString(key(dst, SUBSCRIPTIONS), prefs.getString(key(src, SUBSCRIPTIONS), ""));
 		editor.putString(key(dst, SUB_ACTIVE), prefs.getString(key(src, SUB_ACTIVE), ""));
+		editor.putInt(key(dst, SUB_SORT), prefs.getInt(key(src, SUB_SORT), 0));
+		editor.putInt(key(dst, SUB_FILTER), prefs.getInt(key(src, SUB_FILTER), 0));
+		editor.putString(key(dst, SUB_COUNTRY_FILTER), prefs.getString(key(src, SUB_COUNTRY_FILTER), ""));
+		editor.putString(key(dst, SUB_PROTO_FILTER), prefs.getString(key(src, SUB_PROTO_FILTER), ""));
 	}
 
 	private void removeProfile(SharedPreferences.Editor editor, int profile) {
@@ -271,6 +281,10 @@ public class Preferences
 		editor.remove(key(profile, SOCKS_ACTIVE));
 		editor.remove(key(profile, SUBSCRIPTIONS));
 		editor.remove(key(profile, SUB_ACTIVE));
+		editor.remove(key(profile, SUB_SORT));
+		editor.remove(key(profile, SUB_FILTER));
+		editor.remove(key(profile, SUB_COUNTRY_FILTER));
+		editor.remove(key(profile, SUB_PROTO_FILTER));
 	}
 
 	public int getProfileCount() {
@@ -339,6 +353,20 @@ public class Preferences
 	public void setSubscriptions(List<Subscription> list) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(SUBSCRIPTIONS), Subscription.encode(list));
+		/* There is no "default subscription" any more: every subscription is
+		   fetched and merged. Keep the first one recorded as the active id so
+		   the few callers that ask for "the" subscription still work. */
+		String active = getActiveSubId();
+		boolean present = false;
+		for (Subscription s : list) {
+			if (s != null && s.id != null && s.id.equals(active)) {
+				present = true;
+				break;
+			}
+		}
+		if (!present)
+		  editor.putString(key(SUB_ACTIVE),
+			(list.isEmpty() || list.get(0).id == null) ? "" : list.get(0).id);
 		editor.commit();
 	}
 
@@ -386,7 +414,16 @@ public class Preferences
 
 	public boolean hasSubscription() {
 		String raw = getSubRaw();
-		return raw != null && !raw.trim().isEmpty();
+		if (raw != null && !raw.trim().isEmpty())
+		  return true;
+		/* With no "default" subscription recorded, fall back to scanning every
+		   subscription's own cache. */
+		for (Subscription s : getSubscriptions()) {
+			String r = getSubRaw(s.id);
+			if (r != null && !r.trim().isEmpty())
+			  return true;
+		}
+		return false;
 	}
 
 	/* The manually configured SOCKS5 servers, plus which one is enabled.
@@ -536,6 +573,49 @@ public class Preferences
 	public void setAutoSelectCountry(String cc) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(AUTO_SELECT_COUNTRY), cc == null ? "" : cc);
+		editor.commit();
+	}
+
+	/* Subscribe-page view state (sort / availability / country / protocol),
+	   so reopening the page keeps the user's last choice instead of resetting
+	   to "all". */
+	public int getSubSort() {
+		return prefs.getInt(key(SUB_SORT), 0);
+	}
+
+	public void setSubSort(int mode) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putInt(key(SUB_SORT), mode);
+		editor.commit();
+	}
+
+	public int getSubFilter() {
+		return prefs.getInt(key(SUB_FILTER), 0);
+	}
+
+	public void setSubFilter(int mode) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putInt(key(SUB_FILTER), mode);
+		editor.commit();
+	}
+
+	public String getSubCountryFilter() {
+		return prefs.getString(key(SUB_COUNTRY_FILTER), "");
+	}
+
+	public void setSubCountryFilter(String cc) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SUB_COUNTRY_FILTER), cc == null ? "" : cc);
+		editor.commit();
+	}
+
+	public String getSubProtoFilter() {
+		return prefs.getString(key(SUB_PROTO_FILTER), "");
+	}
+
+	public void setSubProtoFilter(String type) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SUB_PROTO_FILTER), type == null ? "" : type);
 		editor.commit();
 	}
 

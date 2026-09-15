@@ -95,15 +95,16 @@ public class MihomoConfig {
 			cfg.append("external-controller: 127.0.0.1:").append(API_PORT).append('\n');
 
 		/* The home screen asks an echo service for the public IP through the
-		   core's local HTTP port, so make sure such a port is exposed. */
-		if (!sectionExists(cfg, "port:") && !sectionExists(cfg, "mixed-port:")) {
-			cfg.append("mixed-port: ").append(prefs.getProxyPort()).append('\n');
-			/* allow-lan stays off unless asked for: an open proxy on a shared
-			   network lets anyone on it use (and pay for) the tunnel. */
-			if (prefs.getAllowLan()) {
-				cfg.append("allow-lan: true\n")
-					.append("bind-address: \"*\"\n");
-			}
+		   core's local HTTP port, and the "allow LAN" setting exposes it to the
+		   network, so the app owns this port outright. The config is built from
+		   scratch (subscription port settings are not carried over), hence the
+		   value is always written - never inherited, never omitted. */
+		cfg.append("mixed-port: ").append(prefs.getProxyPort()).append('\n');
+		/* allow-lan stays off unless asked for: an open proxy on a shared
+		   network lets anyone on it use (and pay for) the tunnel. */
+		if (prefs.getAllowLan()) {
+			cfg.append("allow-lan: true\n")
+				.append("bind-address: \"*\"\n");
 		}
 
 		/* The core loads <homeDir>/config.yaml, so the file name matters —
@@ -240,9 +241,21 @@ public class MihomoConfig {
 		else
 		  defaultSub = GLOBAL_GROUP;
 
-		/* mihomo's select group defaults to its FIRST member, so the chosen
-		   sub-group is listed first, then the remaining country groups, then the
-		   global group, then a direct escape hatch. */
+		/* mihomo resolves a proxy-group's members in definition order: a group
+		   may only reference proxies/groups declared BEFORE it. The per-country
+		   url-test groups (and the global one) therefore have to be emitted
+		   first; the top-level select group that points at them comes last.
+		   Getting this order wrong makes quickSetup fail with
+		   "proxy group[0] tunvpn: proxy '...' not found", which also takes the
+		   external-controller down - the symptoms are an unreachable node
+		   picker, an empty connection list and zero proxy counters. */
+		for (java.util.Map.Entry<String, List<String>> e : byCountry.entrySet())
+		  appendUrlTestGroup(sb, countryGroup(e.getKey()), e.getValue(), prefs);
+		appendUrlTestGroup(sb, GLOBAL_GROUP, global, prefs);
+
+		/* The top select group: mihomo defaults it to its FIRST member, so the
+		   chosen sub-group is listed first, then the remaining country groups,
+		   then the global group, then a direct escape hatch. */
 		sb.append("  - name: \"").append(GROUP).append("\"\n");
 		sb.append("    type: select\n");
 		sb.append("    proxies:\n");
@@ -256,10 +269,6 @@ public class MihomoConfig {
 		if (!GLOBAL_GROUP.equals(defaultSub))
 		  sb.append("      - \"").append(escapeYaml(GLOBAL_GROUP)).append("\"\n");
 		sb.append("      - DIRECT\n");
-
-		for (java.util.Map.Entry<String, List<String>> e : byCountry.entrySet())
-		  appendUrlTestGroup(sb, countryGroup(e.getKey()), e.getValue(), prefs);
-		appendUrlTestGroup(sb, GLOBAL_GROUP, global, prefs);
 	}
 
 	/* When auto-best is selected, return the ISO code of the country whose nodes
