@@ -46,6 +46,9 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 	private TextView textview_scope_hint;
 	private int scopeHintColor;
 	private int scopeErrorColor;
+	/* Action colours for the rule rows: proxy = primary, direct = muted. */
+	private int ruleProxyColor;
+	private int ruleDirectColor;
 
 	private CompoundButton checkbox_remote_dns;
 	private EditText edittext_dns_ipv4;
@@ -91,6 +94,10 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 			com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY);
 		scopeErrorColor = MaterialColors.getColor(this,
 			com.google.android.material.R.attr.colorError, Color.GRAY);
+		ruleProxyColor = MaterialColors.getColor(this,
+			com.google.android.material.R.attr.colorPrimary, Color.GRAY);
+		ruleDirectColor = MaterialColors.getColor(this,
+			com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY);
 
 		/* --- dns --- */
 		checkbox_remote_dns = (CompoundButton) findViewById(R.id.remote_dns);
@@ -316,10 +323,12 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 			Preferences.Rule rule = rules.get(i);
 			View row = inflater.inflate(R.layout.ruleitem, rules_list, false);
 
-			((TextView) row.findViewById(R.id.value))
-				.setText(typeLabel(rule.type) + "  " + rule.value);
-			((TextView) row.findViewById(R.id.action))
-				.setText(rule.proxy ? R.string.rule_action_proxy : R.string.rule_action_direct);
+			((TextView) row.findViewById(R.id.type)).setText(typeLabel(rule.type));
+			((TextView) row.findViewById(R.id.value)).setText(rule.value);
+			TextView action = (TextView) row.findViewById(R.id.action);
+			action.setText(rule.proxy
+				? R.string.rule_action_proxy : R.string.rule_action_direct);
+			action.setTextColor(rule.proxy ? ruleProxyColor : ruleDirectColor);
 			ImageButton delete = (ImageButton) row.findViewById(R.id.delete);
 			delete.setEnabled(!prefs.getEnable());
 			delete.setOnClickListener(new View.OnClickListener() {

@@ -29,6 +29,7 @@ import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.color.MaterialColors;
 import com.google.android.material.switchmaterial.SwitchMaterial;
 
+import java.io.File;
 import java.util.Set;
 
 public class SettingsActivity extends BaseActivity implements View.OnClickListener {
@@ -99,6 +100,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			subsSubtitle(), R.id.settings_subscription);
 		addRow(group_general, R.drawable.ic_log, R.string.log,
 			logSubtitle(), R.id.settings_log);
+		addRow(group_general, R.drawable.ic_rules, R.string.settings_config,
+			configSubtitle(), R.id.settings_config);
 		addRow(group_general, R.drawable.ic_palette, R.string.theme,
 			themeSubtitle(), R.id.settings_theme);
 		addRow(group_about, R.drawable.ic_traffic, R.string.settings_version,
@@ -252,6 +255,15 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			: R.string.settings_state_off);
 	}
 
+	/* Whether a generated config exists, and whether it is overridden by hand. */
+	private String configSubtitle() {
+		File f = new File(getFilesDir(), "config.yaml");
+		if (!f.exists())
+		  return getString(R.string.settings_config_none);
+		return getString(prefs.getCustomConfig()
+			? R.string.settings_config_custom : R.string.settings_config_auto);
+	}
+
 	private String themeSubtitle() {
 		int theme = prefs.getTheme();
 		if (theme < 0 || theme >= ThemeManager.count())
@@ -286,6 +298,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  editPort();
 		else if (id == R.id.settings_log)
 		  startActivity(new Intent(this, LogActivity.class));
+		else if (id == R.id.settings_config)
+		  startActivity(new Intent(this, ConfigActivity.class));
 		else if (id == R.id.settings_theme)
 		  showThemeDialog();
 		else if (id == R.id.settings_version)

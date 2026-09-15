@@ -58,6 +58,8 @@
 			android:exported="false" android:parentActivityName=".MainActivity"/>
 		<activity android:name=".SettingsActivity" android:label="@string/settings"
 			android:exported="false" android:parentActivityName=".MainActivity"/>
+		<activity android:name=".ConfigActivity" android:label="@string/settings_config"
+			android:exported="false" android:parentActivityName=".SettingsActivity"/>
 		<activity android:name=".ConnectionsActivity" android:label="@string/settings_connections"
 			android:exported="false" android:parentActivityName=".SettingsActivity"/>
 	</application>

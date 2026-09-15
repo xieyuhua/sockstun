@@ -2,7 +2,6 @@
 <resources>
 	<string name="app_name">ProTun</string>
 	<string name="home">首页</string>
-	<string name="home_hint">底部标签可进入订阅、服务器、分应用与更多设置</string>
 	<string name="log">日志</string>
 	<string name="log_empty">（暂无日志，请先连接）</string>
 	<string name="log_disabled">日志已关闭（下次连接生效）</string>
@@ -62,7 +61,6 @@
 	<string name="traffic">流量</string>
 	<string name="traffic_reset">重置累计</string>
 	<string name="traffic_empty">暂无流量记录</string>
-	<string name="traffic_hint">应用数据取自系统统计，其中也包含未走隧道的流量，仅供参考。</string>
 
 	<string name="rules">路由规则</string>
 	<string name="rules_hint">按域名、IP 或 IP 段匹配。域名规则同时匹配其子域；改动在下次连接时生效。</string>

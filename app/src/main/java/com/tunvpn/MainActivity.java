@@ -9,17 +9,10 @@
 
 package com.tunvpn;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
-
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -30,12 +23,6 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.net.VpnService;
-import java.net.Proxy;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.InetSocketAddress;
-import java.net.ConnectException;
-import java.net.SocketTimeoutException;
 
 
 import com.google.android.material.appbar.MaterialToolbar;
@@ -54,23 +41,14 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	private TextView textview_status_title;
 	private TextView textview_status_subtitle;
 	private TextView textview_status_node;
-	private TextView textview_status_proxy;
 	private Button button_control;
 	private TextView textview_realtime;
 	private TextView textview_session;
 	private TextView textview_total;
-	private TextView textview_apps;
 
 	private static final long STATS_INTERVAL = 1500;
-	private static final int MAX_APPS_SHOWN = 3;
-	/* How often to check that traffic really reaches the internet through the
-	   core. "Connected" only means the tunnel came up. */
-	private static final long PROBE_INTERVAL = 20000;
-	private static final int PROBE_TIMEOUT = 10000;
-	private long lastProbe = 0;
 	private Handler statsHandler;
 	private Runnable statsTask;
-	private final Handler ui = new Handler(Looper.getMainLooper());
 	/* Last failure already surfaced as a Toast, so the 1.5s tick stays quiet. */
 	private String lastShownError = "";
 
@@ -127,12 +105,10 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		textview_status_title = (TextView) findViewById(R.id.status_title);
 		textview_status_subtitle = (TextView) findViewById(R.id.status_subtitle);
 		textview_status_node = (TextView) findViewById(R.id.status_node);
-		textview_status_proxy = (TextView) findViewById(R.id.status_proxy);
 		button_control = (Button) findViewById(R.id.control);
 		textview_realtime = (TextView) findViewById(R.id.stats_realtime);
 		textview_session = (TextView) findViewById(R.id.stats_session);
 		textview_total = (TextView) findViewById(R.id.stats_total);
-		textview_apps = (TextView) findViewById(R.id.stats_apps);
 		((Button) findViewById(R.id.traffic_reset)).setOnClickListener(this);
 
 		button_control.setOnClickListener(this);
@@ -237,9 +213,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		textview_total.setText(statsLine(R.string.stats_total,
 			TProxyService.formatBytes(prefs.getProxyTotalTx()),
 			TProxyService.formatBytes(prefs.getProxyTotalRx())));
-		textview_apps.setText(appSummary(Preferences.parseAppStats(prefs.getAppTotal())));
 		updateNode();
-		refreshProxyState();
 
 		/* Enable and LastError are written by the :native process, which cannot
 		   notify this one through OnSharedPreferenceChangeListener - so poll.
@@ -258,127 +232,8 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		textview_status_node.setText(getString(R.string.node_current, label));
 	}
 
-	/* Ask the core to fetch a small URL through whatever node and rules are in
-	   effect. This is the only honest answer to "is traffic being proxied":
-	   the request leaves through the same path as everything else, so if it
-	   fails, real traffic is failing too. */
-	private void refreshProxyState() {
-		if (!prefs.getEnable()) {
-			textview_status_proxy.setVisibility(View.GONE);
-			return;
-		}
-		long now = SystemClock.elapsedRealtime();
-		if (now - lastProbe < PROBE_INTERVAL)
-		  return;
-		lastProbe = now;
-
-		textview_status_proxy.setVisibility(View.VISIBLE);
-		textview_status_proxy.setText(R.string.proxy_state_probing);
-		textview_status_proxy.setTextColor(getThemeColor(
-			com.google.android.material.R.attr.colorOnSurfaceVariant));
-
-		new Thread(new Runnable() {
-			@Override
-			public void run() {
-				/* One retry. Straight after CONNECT the group may not have
-				   settled on a node yet, so a single unlucky timeout should not
-				   be reported as "not proxied". */
-				String problem = probeThroughCore();
-				if (problem != null) {
-					try {
-						Thread.sleep(2000);
-					} catch (InterruptedException ignored) {
-					}
-					problem = probeThroughCore();
-				}
-				final String reason = problem;
-				ui.post(new Runnable() {
-					@Override
-					public void run() {
-						if (isFinishing() || isDestroyed())
-						  return;
-						if (reason == null) {
-							textview_status_proxy.setText(R.string.proxy_state_ok);
-							textview_status_proxy.setTextColor(getThemeColor(
-								com.google.android.material.R.attr.colorPrimary));
-						} else {
-							textview_status_proxy.setText(getString(
-								R.string.proxy_state_fail_reason, reason));
-							textview_status_proxy.setTextColor(getThemeColor(
-								com.google.android.material.R.attr.colorError));
-						}
-					}
-				});
-			}
-		}).start();
-	}
-
-	/* null when the core can reach the check URL, otherwise why it cannot.
-	   Telling these apart is the point: a closed port means the core never
-	   came up, a timeout means it is up but the node is not carrying traffic. */
-	private String probeThroughCore() {
-		HttpURLConnection conn = null;
-		try {
-			Proxy proxy = new Proxy(Proxy.Type.HTTP,
-				new InetSocketAddress("127.0.0.1", prefs.getProxyPort()));
-			conn = (HttpURLConnection) new URL(prefs.getAutoTestUrl()).openConnection(proxy);
-			conn.setConnectTimeout(PROBE_TIMEOUT);
-			conn.setReadTimeout(PROBE_TIMEOUT);
-			conn.setInstanceFollowRedirects(false);
-			int code = conn.getResponseCode();
-			if (code > 0 && code < 400)
-			  return null;
-			return "HTTP " + code;
-		} catch (SocketTimeoutException e) {
-			return getString(R.string.proxy_fail_timeout);
-		} catch (ConnectException e) {
-			return getString(R.string.proxy_fail_closed);
-		} catch (Exception e) {
-			return e.getMessage();
-		} finally {
-			if (conn != null)
-			  conn.disconnect();
-		}
-	}
-
 	private String statsLine(int labelId, String up, String down) {
 		return getString(R.string.stats_line, getString(labelId), up, down);
-	}
-
-	private String appSummary(Map<String, long[]> totals) {
-		if (totals.isEmpty())
-		  return "";
-
-		List<Map.Entry<String, long[]>> entries =
-			new ArrayList<Map.Entry<String, long[]>>(totals.entrySet());
-		Collections.sort(entries, new Comparator<Map.Entry<String, long[]>>() {
-			@Override
-			public int compare(Map.Entry<String, long[]> a, Map.Entry<String, long[]> b) {
-				long ca = a.getValue()[0] + a.getValue()[1];
-				long cb = b.getValue()[0] + b.getValue()[1];
-				if (ca != cb)
-				  return ca < cb ? 1 : -1;
-				return 0;
-			}
-		});
-
-		StringBuilder sb = new StringBuilder();
-		for (int i = 0; i < entries.size() && i < MAX_APPS_SHOWN; i++) {
-			if (sb.length() > 0)
-			  sb.append("  ·  ");
-			long[] v = entries.get(i).getValue();
-			sb.append(labelOf(entries.get(i).getKey())).append(' ')
-			  .append(TProxyService.formatBytes(v[0] + v[1]));
-		}
-		return sb.toString();
-	}
-
-	private String labelOf(String pkg) {
-		try {
-			return getPackageManager().getApplicationInfo(pkg, 0).loadLabel(getPackageManager()).toString();
-		} catch (Exception e) {
-			return pkg;
-		}
 	}
 
 	private void updateControlState() {
@@ -395,10 +250,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		final boolean connected = prefs.getEnable();
 		final String error = prefs.getLastError();
 		final boolean failed = !connected && !error.isEmpty();
-
-		/* Probe again as soon as the tunnel comes back up. */
-		if (!connected)
-		  lastProbe = 0;
 
 		int bg;
 		int fg;

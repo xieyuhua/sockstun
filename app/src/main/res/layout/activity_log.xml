@@ -36,6 +36,29 @@
 			android:text="@string/clear"
 			app:cornerRadius="20dp"/>
 	</LinearLayout>
+	<LinearLayout
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:orientation="horizontal"
+		android:gravity="center_vertical"
+		android:paddingStart="16dp"
+		android:paddingEnd="16dp"
+		android:paddingBottom="8dp">
+		<com.google.android.material.switchmaterial.SwitchMaterial
+			android:id="@+id/log_follow"
+			android:layout_width="0dp"
+			android:layout_height="wrap_content"
+			android:layout_weight="1"
+			android:text="@string/log_follow"
+			android:textSize="16sp"/>
+		<com.google.android.material.button.MaterialButton
+			android:id="@+id/copy"
+			style="?attr/materialButtonOutlinedStyle"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:text="@string/log_copy"
+			app:cornerRadius="20dp"/>
+	</LinearLayout>
 	<ScrollView
 		android:id="@+id/log_scroll"
 		android:layout_width="match_parent"

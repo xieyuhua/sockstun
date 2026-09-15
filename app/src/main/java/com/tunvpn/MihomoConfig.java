@@ -158,36 +158,40 @@ public class MihomoConfig {
 	/* Merge every subscription into one node pool and point a single
 	   self-built group at it. */
 	private static String mergedConfig(Preferences prefs) throws IOException {
-		List<String> names = new ArrayList<String>();
-		List<String> defs = new ArrayList<String>();
-		List<ClashParser.ProxyDef> proxys = new ArrayList<ClashParser.ProxyDef>();
+		List<String> taken = new ArrayList<String>();
+		StringBuilder proxies = new StringBuilder();
 
 		for (Subscription sub : prefs.getSubscriptions()) {
 			List<ClashParser.ProxyDef> list =
 				ClashParser.extractProxies(prefs.getSubRaw(sub.id));
 			for (ClashParser.ProxyDef p : list) {
-				String name = uniqueName(names, p.name);
-				defs.add(name.equals(p.name) ? p.text : renameProxy(p.text, p.name, name));
-				/* Keep the de-duplicated name on the def so grouping below
-				   refers to exactly the name we emitted under proxies:. */
-				p.name = name;
-				names.add(name);
-				proxys.add(p);
+				String name = uniqueName(taken, p.name);
+				taken.add(name);
+				proxies.append(name.equals(p.name) ? p.text : renameProxy(p.text, p.name, name))
+					.append('\n');
 			}
 		}
-		if (names.isEmpty())
+		if (taken.isEmpty())
 		  throw new IOException("no upstream: add a subscription or enable a SOCKS5 server");
 
-		StringBuilder sb = new StringBuilder();
-		sb.append("proxies:\n");
-		for (String def : defs)
-		  sb.append(def).append('\n');
+		/* Group off what the proxies: section *really* contains, not off the
+		   names we intended. A de-dup rename or a quoting difference can leave
+		   a name that was never emitted, and mihomo aborts the entire config
+		   load when a group references a missing member
+		   ("proxy group[0] ... not found"). Parsing our own output back makes
+		   the two agree by construction - a node we cannot re-read is simply
+		   left out of the groups instead of poisoning the whole config. */
+		String proxiesText = "proxies:\n" + proxies;
+		List<ClashParser.ProxyDef> proxys = ClashParser.extractProxies(proxiesText);
+		if (proxys.isEmpty())
+		  throw new IOException("no usable proxy in the merged pool");
 
 		/* Block style rather than a flow mapping: with a few hundred nodes the
 		   single line would run into tens of kilobytes, and a parse failure
 		   there silently leaves MATCH pointing at a group that does not
 		   exist - which shows up as "connected but nothing goes through the
 		   proxy". One node per line cannot blow up that way. */
+		StringBuilder sb = new StringBuilder(proxiesText);
 		sb.append("proxy-groups:\n");
 		if (prefs.getAutoSelect())
 		  appendAutoGroups(sb, proxys, prefs);
@@ -195,8 +199,8 @@ public class MihomoConfig {
 			sb.append("  - name: \"").append(GROUP).append("\"\n");
 			sb.append("    type: select\n");
 			sb.append("    proxies:\n");
-			for (String name : names)
-			  sb.append("      - \"").append(escapeYaml(name)).append("\"\n");
+			for (ClashParser.ProxyDef p : proxys)
+			  sb.append("      - \"").append(escapeYaml(p.name)).append("\"\n");
 		}
 
 		sb.append("rules:\n");

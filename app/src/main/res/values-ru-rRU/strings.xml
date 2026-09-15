@@ -34,7 +34,6 @@
 	<string name="traffic">Трафик</string>
 	<string name="traffic_reset">Сбросить итоги</string>
 	<string name="traffic_empty">Данных о трафике пока нет</string>
-	<string name="traffic_hint">Данные по приложениям берутся из системных счётчиков и включают трафик вне туннеля.</string>
 	<string name="rules">Правила маршрутизации</string>
 	<string name="rules_hint">Совпадение по домену, IP или диапазону IP. Домены разрешаются при запуске туннеля; правила «напрямую» требуют Android 13+.</string>
 	<string name="rules_default_proxy">Несовпавший трафик идёт через прокси</string>

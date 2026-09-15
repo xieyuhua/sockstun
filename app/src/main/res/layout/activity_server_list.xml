@@ -42,13 +42,12 @@
 		android:layout_weight="1"
 		android:clipToPadding="false"
 		android:divider="@android:color/transparent"
-		android:dividerHeight="8dp"
+		android:dividerHeight="10dp"
 		android:paddingLeft="16dp"
 		android:paddingRight="16dp"
 		android:scrollbarStyle="outsideOverlay"/>
 	<com.google.android.material.button.MaterialButton
 		android:id="@+id/server_add"
-		style="?attr/materialButtonOutlinedStyle"
 		android:layout_width="match_parent"
 		android:layout_height="wrap_content"
 		android:layout_margin="16dp"
@@ -56,7 +55,7 @@
 		android:text="@string/server_add"
 		android:textSize="15sp"
 		app:cornerRadius="26dp"
-		app:icon="@drawable/ic_save"
+		app:icon="@drawable/ic_add"
 		app:iconGravity="textStart"
 		app:iconPadding="8dp"/>
 </LinearLayout>

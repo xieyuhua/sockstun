@@ -2,12 +2,16 @@
 <resources>
 	<string name="app_name">ProTun</string>
 	<string name="home">Home</string>
-	<string name="home_hint">Use the bottom tabs to open subscription, server, per-app and more settings</string>
 	<string name="log">Log</string>
 	<string name="log_empty">(No log yet, connect first)</string>
 	<string name="log_disabled">Logging is off (takes effect on next connect)</string>
 	<string name="log_enabled">Logging</string>
 	<string name="log_toggle_hint">Takes effect on next connect</string>
+	<string name="log_follow">自动刷新</string>
+	<string name="log_follow_on">已恢复自动刷新</string>
+	<string name="log_copy">复制</string>
+	<string name="log_copied">日志已复制到剪贴板</string>
+	<string name="log_paused_hint">已暂停自动刷新，可长按选择或点「复制」</string>
 	<string name="refresh">Refresh</string>
 	<string name="clear">Clear</string>
 	<string name="socks_addr">Socks Address</string>
@@ -64,7 +68,6 @@
 	<string name="traffic">Traffic</string>
 	<string name="traffic_reset">Reset totals</string>
 	<string name="traffic_empty">No traffic recorded yet</string>
-	<string name="traffic_hint">上方统计的是经过代理节点的流量（不含直连）；应用数据取自系统统计，包含未走隧道的部分，仅供参考。</string>
 
 	<string name="rules">Routing rules</string>
 	<string name="rules_hint">先选「分流策略」，再按需添加规则：域名后缀 / 域名关键字 / 国家(GeoIP) / IP / 进程名 → 代理或直连；未命中的按底部开关处理。订阅自带规则不参与，修改后重新连接生效。</string>
@@ -229,6 +232,21 @@
 	<string name="connection_server_sub">由订阅决定</string>
 	<string name="connection_session">本次流量</string>
 	<string name="connection_total">累计流量</string>
+	<string name="settings_config">配置文件 config.yaml</string>
+	<string name="settings_config_custom">自定义（连接时不再自动生成）</string>
+	<string name="settings_config_auto">按当前设置自动生成</string>
+	<string name="settings_config_none">尚未生成</string>
+	<string name="config_custom">使用自定义配置</string>
+	<string name="config_custom_toast">已切换，重新连接后生效</string>
+	<string name="config_hint">这里是内核实际加载的配置（files/config.yaml）。可修改后点「保存」；未开启「使用自定义配置」时，下次连接会按当前设置重新生成并覆盖。</string>
+	<string name="config_regen">按当前设置重新生成</string>
+	<string name="config_regen_ok">已重新生成</string>
+	<string name="config_regen_failed">重新生成失败：%s</string>
+	<string name="config_none">尚未生成配置：先连接一次，或点「按当前设置重新生成」</string>
+	<string name="config_read_failed">读取失败：%s</string>
+	<string name="config_saved">已保存</string>
+	<string name="config_saved_overwrite">已保存；未开启「使用自定义配置」，连接时会重新生成覆盖</string>
+	<string name="config_save_failed">保存失败：%s</string>
 	<string name="settings_version">版本</string>
 	<string name="version_info">版本信息</string>
 	<string name="version_detail">版本：%1$s（%2$d）\n内核：mihomo v1.19.30\nABI：arm64-v8a、armeabi-v7a</string>

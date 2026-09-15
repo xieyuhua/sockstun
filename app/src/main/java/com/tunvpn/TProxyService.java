@@ -161,6 +161,9 @@ public class TProxyService extends VpnService {
 	   config. The control API never binds in that case, so the error is kept
 	   around to be logged (and surfaced) instead of the failure being mute. */
 	private volatile String quickSetupError = null;
+	/* Set once a startup abort has been handled, so the asynchronous
+	   quickSetup callback and the synchronous check cannot both fire it. */
+	private volatile boolean startupAborted = false;
 
 	@Override
 	public int onStartCommand(Intent intent, int flags, int startId) {
@@ -219,12 +222,17 @@ public class TProxyService extends VpnService {
 			return;
 		}
 
-		/* Build the clash config from the stored subscription + TUN sections. */
-		File configFile;
+		/* Config: either the file the user edited by hand (custom mode) or a
+		   fresh one generated from the current settings. */
+		File configFile = new File(getFilesDir(), "config.yaml");
 		try {
-			configFile = MihomoConfig.build(this, prefs);
-			appendLog("config: " + configFile.getAbsolutePath());
-			appendLog("routing: " + MihomoConfig.describe(prefs));
+			if (prefs.getCustomConfig() && configFile.exists()) {
+				appendLog("config: 使用自定义 config.yaml（已关闭自动生成）");
+			} else {
+				configFile = MihomoConfig.build(this, prefs);
+				appendLog("config: " + configFile.getAbsolutePath());
+				appendLog("routing: " + MihomoConfig.describe(prefs));
+			}
 		} catch (Throwable e) {
 			failStartup("生成配置失败：" + e.getMessage());
 			return;
@@ -327,18 +335,27 @@ public class TProxyService extends VpnService {
 						appendLog("mihomo quickSetup OK");
 					} else {
 						/* A non-empty result is the core reporting a problem
-						   with the config it was handed (unknown proxy, bad
-						   rule, ...). When that happens the external-controller
-						   never binds, so keep the text: the selector retry and
-						   the controller check below both report it instead of
-						   the failure staying invisible. */
+						   with the config it was handed (unknown proxy / group,
+						   bad rule, ...). Nothing about the session can work
+						   then - no group, no rules, no control API - so keep
+						   the text and stop with the core's own message instead
+						   of pretending the tunnel came up. */
 						quickSetupError = result;
 						appendLog("mihomo quickSetup: " + result);
+						if (looksLikeError(result))
+						  abortOnConfigError(result);
 					}
 				}
 			});
 		} catch (Throwable e) {
 			failStartup("启动内核失败：" + e.getMessage());
+			return;
+		}
+		/* quickSetup may run its callback on the calling thread; when it did,
+		   fail right here so startTUN is never reached with a broken config. */
+		if (quickSetupError != null && looksLikeError(quickSetupError)) {
+			startupAborted = true;
+			failStartup("内核配置错误：" + quickSetupError);
 			return;
 		}
 
@@ -427,9 +444,52 @@ public class TProxyService extends VpnService {
 		p.setEnable(false);
 		QSTileService.requestUpdate(this);
 
+		/* A config error is reported asynchronously - i.e. after the VPN fd has
+		   been established - so tear that down too, otherwise the system keeps
+		   a dead VPN up. */
+		if (tunFd != null) {
+			try {
+				Clash.INSTANCE.stopTun();
+			} catch (Throwable e) {
+			}
+			try {
+				tunFd.close();
+			} catch (IOException e) {
+			}
+			tunFd = null;
+		}
+
 		Toast.makeText(this, reason, Toast.LENGTH_LONG).show();
 		stopForeground(true);
 		stopSelf();
+	}
+
+	/* Whether the core's quickSetup result describes an error. The bridge returns
+	   an empty result on success, but stay defensive so a status string is never
+	   mistaken for a fatal config error. */
+	private static boolean looksLikeError(String s) {
+		if (s == null || s.isEmpty())
+		  return false;
+		String t = s.toLowerCase();
+		return t.contains("error") || t.contains("not found") || t.contains("fail")
+			|| t.contains("invalid") || t.contains("yaml") || t.contains("unsupported")
+			|| t.contains("cannot") || t.contains("no such") || t.contains("unknown")
+			|| t.contains("proxy") || t.contains("group");
+	}
+
+	/* Stop the service with the core's own message. Runs on the main thread
+	   because the quickSetup callback may arrive on a background thread while
+	   failStartup shows a Toast, and is guarded so it fires at most once. */
+	private void abortOnConfigError(final String reason) {
+		new Handler(Looper.getMainLooper()).post(new Runnable() {
+			@Override
+			public void run() {
+				if (startupAborted)
+				  return;
+				startupAborted = true;
+				failStartup("内核配置错误：" + reason);
+			}
+		});
 	}
 
 	/* The url-test subgroup the top select group should default to. */

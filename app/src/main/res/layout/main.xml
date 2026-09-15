@@ -84,14 +84,6 @@
 						android:gravity="center"
 						android:maxLines="2"
 						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
-					<TextView
-						android:id="@+id/status_proxy"
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:layout_marginTop="4dp"
-						android:gravity="center"
-						android:textAppearance="@style/TextAppearance.TunVPN.Hint"
-						android:visibility="gone"/>
 					<com.google.android.material.button.MaterialButton
 						android:id="@+id/control"
 						android:layout_width="match_parent"
@@ -160,32 +152,8 @@
 						android:layout_marginTop="6dp"
 						android:fontFamily="monospace"
 						android:textAppearance="?attr/textAppearanceBodyMedium"/>
-					<TextView
-						android:id="@+id/stats_apps"
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:layout_marginTop="10dp"
-						android:ellipsize="end"
-						android:fontFamily="monospace"
-						android:maxLines="1"
-						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
-					<TextView
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:layout_marginTop="10dp"
-						android:text="@string/traffic_hint"
-						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 				</LinearLayout>
 			</com.google.android.material.card.MaterialCardView>
-			<TextView
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="16dp"
-				android:gravity="center"
-				android:paddingLeft="24dp"
-				android:paddingRight="24dp"
-				android:text="@string/home_hint"
-				android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 		</LinearLayout>
 	</ScrollView>
 	<View

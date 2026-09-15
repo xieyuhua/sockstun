@@ -63,6 +63,10 @@ public class Preferences
 	public static final String PROFILE_COUNT = "ProfileCount";
 	public static final String SELECTED = "Selected";
 	public static final String LOG_ENABLED = "LogEnabled";
+	/* When set, the tunnel loads files/config.yaml as-is instead of rebuilding it
+	   from the app's settings on every connect (the file is then hand-edited from
+	   the config screen). */
+	public static final String CUSTOM_CONFIG = "CustomConfig";
 	public static final String STATS_TOTAL_TX = "StatsTotalTx";
 	public static final String STATS_TOTAL_RX = "StatsTotalRx";
 	public static final String STATS_SESSION_TX = "StatsSessionTx";
@@ -839,6 +843,18 @@ public class Preferences
 	public void setLogEnabled(boolean enable) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putBoolean(LOG_ENABLED, enable);
+		editor.commit();
+	}
+
+	/* Use the on-disk config.yaml verbatim instead of regenerating it from the
+	   current settings on every connect. */
+	public boolean getCustomConfig() {
+		return prefs.getBoolean(CUSTOM_CONFIG, false);
+	}
+
+	public void setCustomConfig(boolean enable) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putBoolean(CUSTOM_CONFIG, enable);
 		editor.commit();
 	}
 

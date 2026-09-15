@@ -37,11 +37,24 @@
 					android:layout_width="match_parent"
 					android:layout_height="wrap_content"
 					android:padding="16dp">
-					<TextView
+					<LinearLayout
+						android:orientation="horizontal"
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
-						android:text="@string/section_routing"
-						android:textAppearance="@style/TextAppearance.TunVPN.Section"/>
+						android:gravity="center_vertical">
+						<ImageView
+							android:layout_width="20dp"
+							android:layout_height="20dp"
+							android:contentDescription="@string/section_routing"
+							android:src="@drawable/ic_routing"
+							android:tint="?attr/colorPrimary"/>
+						<TextView
+							android:layout_width="wrap_content"
+							android:layout_height="wrap_content"
+							android:layout_marginStart="8dp"
+							android:text="@string/section_routing"
+							android:textAppearance="@style/TextAppearance.TunVPN.Section"/>
+					</LinearLayout>
 					<androidx.appcompat.widget.SwitchCompat
 						android:id="@+id/global"
 						android:layout_width="match_parent"
@@ -99,11 +112,24 @@
 					android:layout_width="match_parent"
 					android:layout_height="wrap_content"
 					android:padding="16dp">
-					<TextView
+					<LinearLayout
+						android:orientation="horizontal"
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
-						android:text="@string/section_dns"
-						android:textAppearance="@style/TextAppearance.TunVPN.Section"/>
+						android:gravity="center_vertical">
+						<ImageView
+							android:layout_width="20dp"
+							android:layout_height="20dp"
+							android:contentDescription="@string/section_dns"
+							android:src="@drawable/ic_dns"
+							android:tint="?attr/colorPrimary"/>
+						<TextView
+							android:layout_width="wrap_content"
+							android:layout_height="wrap_content"
+							android:layout_marginStart="8dp"
+							android:text="@string/section_dns"
+							android:textAppearance="@style/TextAppearance.TunVPN.Section"/>
+					</LinearLayout>
 					<androidx.appcompat.widget.SwitchCompat
 						android:id="@+id/remote_dns"
 						android:layout_width="match_parent"
@@ -152,11 +178,24 @@
 					android:layout_width="match_parent"
 					android:layout_height="wrap_content"
 					android:padding="16dp">
-					<TextView
+					<LinearLayout
+						android:orientation="horizontal"
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
-						android:text="@string/rules"
-						android:textAppearance="@style/TextAppearance.TunVPN.Section"/>
+						android:gravity="center_vertical">
+						<ImageView
+							android:layout_width="20dp"
+							android:layout_height="20dp"
+							android:contentDescription="@string/rules"
+							android:src="@drawable/ic_rules"
+							android:tint="?attr/colorPrimary"/>
+						<TextView
+							android:layout_width="wrap_content"
+							android:layout_height="wrap_content"
+							android:layout_marginStart="8dp"
+							android:text="@string/rules"
+							android:textAppearance="@style/TextAppearance.TunVPN.Section"/>
+					</LinearLayout>
 					<TextView
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
@@ -224,14 +263,16 @@
 					</com.google.android.material.textfield.TextInputLayout>
 					<com.google.android.material.button.MaterialButton
 						android:id="@+id/rule_add"
-						style="?attr/materialButtonOutlinedStyle"
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
 						android:layout_marginTop="10dp"
 						android:minHeight="48dp"
 						android:text="@string/rule_add"
 						android:textSize="14sp"
-						app:cornerRadius="24dp"/>
+						app:cornerRadius="24dp"
+						app:icon="@drawable/ic_add"
+						app:iconGravity="textStart"
+						app:iconPadding="6dp"/>
 					<LinearLayout
 						android:id="@+id/rules_list"
 						android:orientation="vertical"
