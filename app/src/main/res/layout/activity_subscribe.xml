@@ -218,10 +218,10 @@
 		android:layout_height="match_parent"
 		android:clipToPadding="false"
 		android:divider="@android:color/transparent"
-		android:dividerHeight="8dp"
+		android:dividerHeight="10dp"
 		android:paddingLeft="16dp"
 		android:paddingRight="16dp"
-		android:paddingTop="8dp"
+		android:paddingTop="4dp"
 		android:paddingBottom="16dp"
 		android:scrollbarStyle="outsideOverlay"/>
 </LinearLayout>

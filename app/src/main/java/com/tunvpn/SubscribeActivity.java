@@ -341,6 +341,11 @@ public class SubscribeActivity extends BaseActivity {
 		return n.type == null ? "" : n.type;
 	}
 
+	/* The node's country code, or GeoIp.UNKNOWN when it has not been resolved. */
+	private static String countryCode(ClashNode n) {
+		return (n.country == null || n.country.isEmpty()) ? GeoIp.UNKNOWN : n.country;
+	}
+
 	/* Available nodes first by latency, then untested, then broken. */
 	private static long rank(ClashNode n) {
 		if (n.latency >= 0)
@@ -939,6 +944,7 @@ public class SubscribeActivity extends BaseActivity {
 				convertView = inflater.inflate(R.layout.subscribelistitem, parent, false);
 			final ClashNode n = getItem(position);
 			MaterialCardView card = (MaterialCardView) convertView;
+			TextView flag = (TextView) convertView.findViewById(R.id.item_flag);
 			TextView name = (TextView) convertView.findViewById(R.id.item_name);
 			TextView detail = (TextView) convertView.findViewById(R.id.item_detail);
 			TextView proto = (TextView) convertView.findViewById(R.id.item_proto);
@@ -947,10 +953,14 @@ public class SubscribeActivity extends BaseActivity {
 			Button use = (Button) convertView.findViewById(R.id.item_use);
 			Button test = (Button) convertView.findViewById(R.id.item_test);
 
+			String cc = countryCode(n);
+			flag.setText(Country.flag(cc));
 			name.setText(n.name);
+			/* "国家 · host:port": the country leads when it is known, and the
+			   address is what ellipsizes (in the middle, so the port survives). */
 			String detailText = n.server + ":" + n.port;
-			if (n.country != null && !n.country.isEmpty() && !n.country.equals(GeoIp.UNKNOWN))
-			  detailText += "  ·  " + Country.display(n.country);
+			if (!GeoIp.UNKNOWN.equals(cc))
+			  detailText = Country.name(cc) + "  ·  " + detailText;
 			detail.setText(detailText);
 			/* The protocol gets its own tag: sharing a line with the address
 			   meant a long host name would ellipsize it away. */
@@ -975,7 +985,6 @@ public class SubscribeActivity extends BaseActivity {
 			boolean selected = n.name.equals(prefs.getSubSelected());
 			card.setCardBackgroundColor(selected ? colorSelected : Color.TRANSPARENT);
 			badge.setVisibility(selected ? View.VISIBLE : View.GONE);
-			badge.setTextColor(colorOk);
 
 			use.setOnClickListener(new View.OnClickListener() {
 				@Override

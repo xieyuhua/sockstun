@@ -157,6 +157,10 @@ public class TProxyService extends VpnService {
 	}
 
 	private ParcelFileDescriptor tunFd = null;
+	/* Non-empty when the core reported a problem while loading the generated
+	   config. The control API never binds in that case, so the error is kept
+	   around to be logged (and surfaced) instead of the failure being mute. */
+	private volatile String quickSetupError = null;
 
 	@Override
 	public int onStartCommand(Intent intent, int flags, int startId) {
@@ -319,10 +323,18 @@ public class TProxyService extends VpnService {
 			Clash.INSTANCE.quickSetup(initParams, setupParams, new InvokeInterface() {
 				@Override
 				public void onResult(String result) {
-					if (result == null || result.isEmpty())
-					  appendLog("mihomo quickSetup OK");
-					else
-					  appendLog("mihomo quickSetup: " + result);
+					if (result == null || result.isEmpty()) {
+						appendLog("mihomo quickSetup OK");
+					} else {
+						/* A non-empty result is the core reporting a problem
+						   with the config it was handed (unknown proxy, bad
+						   rule, ...). When that happens the external-controller
+						   never binds, so keep the text: the selector retry and
+						   the controller check below both report it instead of
+						   the failure staying invisible. */
+						quickSetupError = result;
+						appendLog("mihomo quickSetup: " + result);
+					}
 				}
 			});
 		} catch (Throwable e) {
@@ -386,6 +398,11 @@ public class TProxyService extends VpnService {
 
 		/* Best-effort: apply the node the user picked in the subscription. */
 		applySelectedNode(prefs);
+		/* Independent of the selection: confirm the control API really answers,
+		   and record why it does not when it does not. Without this the core's
+		   config error only exists in its own log stream, which is easy to
+		   miss - the tunnel looks connected while 9090 is dead. */
+		verifyController();
 
 		prefs.clearLastError();
 		prefs.setEnable(true);
@@ -457,12 +474,12 @@ public class TProxyService extends VpnService {
 			   to miss (proxy traffic keeps flowing via the default node). Retry
 			   the whole apply so the selector lands once the control API is
 			   actually listening. */
-			for (int attempt = 1; attempt <= 5; attempt++) {
+			for (int attempt = 1; attempt <= 8; attempt++) {
 				if (waitForController()) {
 					applySelector(group, proxy);
 					return;
 				}
-				if (attempt < 5) {
+				if (attempt < 8) {
 					appendLog("selector: 控制接口 127.0.0.1:" + MihomoConfig.API_PORT
 						+ " 未就绪（第 " + attempt + " 次），3 秒后重试");
 					try {
@@ -474,6 +491,8 @@ public class TProxyService extends VpnService {
 			}
 			appendLog("selector set failed: 控制接口 127.0.0.1:"
 				+ MihomoConfig.API_PORT + " 未就绪（内核可能未监听）");
+			if (quickSetupError != null && !quickSetupError.isEmpty())
+			  appendLog("selector: 内核配置加载报错：" + quickSetupError);
 		}).start();
 	}
 
@@ -526,6 +545,41 @@ public class TProxyService extends VpnService {
 			}
 		}
 		return false;
+	}
+
+	/* Confirm the control API is up, and when it is not, write the reason to
+	   the log: the text the core returned for quickSetup (if any) plus the
+	   config sections it parses (everything after the proxy list). Both are
+	   what makes "connected but 9090 dead" diagnosable. */
+	private void verifyController() {
+		new Thread(() -> {
+			if (waitForController()) {
+				appendLog("controller: 127.0.0.1:" + MihomoConfig.API_PORT + " ready");
+				return;
+			}
+			appendLog("controller: 127.0.0.1:" + MihomoConfig.API_PORT + " NOT ready");
+			if (quickSetupError != null && !quickSetupError.isEmpty())
+			  appendLog("controller: 内核配置加载报错：" + quickSetupError);
+			appendLog("config tail:\n" + configTail());
+		}).start();
+	}
+
+	/* Everything in the generated config from "proxy-groups:" down (groups,
+	   rules, dns, log, tun, external-controller, mixed-port). The proxy list is
+	   skipped because it can be tens of kilobytes. */
+	private String configTail() {
+		try {
+			File f = new File(getFilesDir(), "config.yaml");
+			byte[] buf = new byte[(int) f.length()];
+			java.io.FileInputStream in = new java.io.FileInputStream(f);
+			int n = in.read(buf);
+			in.close();
+			String s = new String(buf, 0, n, "UTF-8");
+			int idx = s.indexOf("proxy-groups:");
+			return idx >= 0 ? s.substring(idx) : s;
+		} catch (Exception e) {
+			return "(读取配置失败: " + e + ")";
+		}
 	}
 
 	/* Resolve `wanted` to a real member name of `group`, tolerating the
