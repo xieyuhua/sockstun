@@ -19,11 +19,19 @@ public class Subscription {
 	public String id;
 	public String name;
 	public String url;
+	/* Whether this subscription is merged into the tunnel config. A disabled
+	   one keeps its cached nodes but contributes nothing to the proxy pool. */
+	public boolean enabled;
 
 	public Subscription(String id, String name, String url) {
+		this(id, name, url, true);
+	}
+
+	public Subscription(String id, String name, String url, boolean enabled) {
 		this.id = id;
 		this.name = name;
 		this.url = url;
+		this.enabled = enabled;
 	}
 
 	public String label() {
@@ -44,6 +52,7 @@ public class Subscription {
 				o.put("id", s.id);
 				o.put("name", s.name);
 				o.put("url", s.url);
+				o.put("enabled", s.enabled);
 				arr.put(o);
 			}
 		} catch (JSONException e) {
@@ -59,10 +68,13 @@ public class Subscription {
 			JSONArray arr = new JSONArray(json);
 			for (int i = 0; i < arr.length(); i++) {
 				JSONObject o = arr.getJSONObject(i);
+				/* Default true so subscriptions saved before this field existed
+				   stay enabled (no silent opt-out on upgrade). */
 				out.add(new Subscription(
 					o.optString("id"),
 					o.optString("name"),
-					o.optString("url")));
+					o.optString("url"),
+					o.optBoolean("enabled", true)));
 			}
 		} catch (JSONException e) {
 		}

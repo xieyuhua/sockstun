@@ -123,7 +123,8 @@ public class MihomoConfig {
 	public static String describe(Preferences prefs) {
 		int nodes = 0;
 		for (Subscription sub : prefs.getSubscriptions())
-		  nodes += ClashParser.extractProxies(prefs.getSubRaw(sub.id)).size();
+		  if (sub.enabled)
+			nodes += ClashParser.extractProxies(prefs.getSubRaw(sub.id)).size();
 		/* The catch-all target is the single most useful thing to log: if it
 		   says DIRECT, everything is bypassing the proxy no matter how healthy
 		   the node pool looks. */
@@ -162,6 +163,9 @@ public class MihomoConfig {
 		StringBuilder proxies = new StringBuilder();
 
 		for (Subscription sub : prefs.getSubscriptions()) {
+			/* A disabled subscription is kept but not merged into the pool. */
+			if (!sub.enabled)
+			  continue;
 			List<ClashParser.ProxyDef> list =
 				ClashParser.extractProxies(prefs.getSubRaw(sub.id));
 			for (ClashParser.ProxyDef p : list) {
@@ -307,6 +311,8 @@ public class MihomoConfig {
 
 		java.util.HashMap<String, Long> serverLat = new java.util.HashMap<String, Long>();
 		for (Subscription sub : prefs.getSubscriptions()) {
+			if (!sub.enabled)
+			  continue;
 			for (ClashNode n : ClashNode.decode(prefs.getSubNodes(sub.id))) {
 				if (n.latency >= 0) {
 					Long prev = serverLat.get(n.server);

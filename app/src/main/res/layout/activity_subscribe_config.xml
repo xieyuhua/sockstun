@@ -26,6 +26,22 @@
 			android:textAppearance="?attr/textAppearanceBodySmall"
 			android:textColor="?attr/colorOnSurfaceVariant"/>
 	</com.google.android.material.card.MaterialCardView>
+	<com.google.android.material.button.MaterialButton
+		android:id="@+id/subs_update"
+		style="?attr/materialButtonOutlinedStyle"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_marginLeft="16dp"
+		android:layout_marginRight="16dp"
+		android:layout_marginTop="12dp"
+		android:minHeight="44dp"
+		android:text="@string/sub_update"
+		android:textSize="14sp"
+		app:cornerRadius="22dp"
+		app:icon="@drawable/ic_subscribe"
+		app:iconGravity="textStart"
+		app:iconPadding="6dp"
+		app:iconSize="16dp"/>
 	<TextView
 		android:id="@+id/subs_empty"
 		android:layout_width="match_parent"

@@ -235,6 +235,9 @@
 	<string name="subs_none">未配置订阅，请在「设置 → 订阅配置」中添加</string>
 	<string name="subs_delete_confirm">删除订阅“%s”？</string>
 	<string name="subs_url_required">请填写订阅地址</string>
+	<string name="subs_enabled">启用（合并到节点池）</string>
+	<string name="subs_disabled">已禁用</string>
+	<string name="sub_update">更新订阅</string>
 	<string name="server_list_hint_sub">可保存多个订阅地址。拉取时会更新全部订阅，节点合并成一个池。删除订阅会同时清掉它已拉取的节点。</string>
 	<string name="settings_connection">连接信息</string>
 	<string name="settings_group_connection">连接</string>

@@ -25,12 +25,22 @@ import androidx.appcompat.app.AlertDialog;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.switchmaterial.SwitchMaterial;
 
 import java.util.ArrayList;
 import java.util.List;
 
+import com.tunvpn.ClashNode;
+import com.tunvpn.ClashParser;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+
 public class SubscribeConfigActivity extends BaseActivity {
 	private Preferences prefs;
+	private MaterialButton buttonUpdate;
 	private ListView listview;
 	private TextView textview_empty;
 	private List<Subscription> subs = new ArrayList<Subscription>();
@@ -53,6 +63,14 @@ public class SubscribeConfigActivity extends BaseActivity {
 
 		listview = (ListView) findViewById(R.id.subs_list);
 		textview_empty = (TextView) findViewById(R.id.subs_empty);
+
+		buttonUpdate = (MaterialButton) findViewById(R.id.subs_update);
+		buttonUpdate.setOnClickListener(new View.OnClickListener() {
+			@Override
+			public void onClick(View v) {
+				fetchAll();
+			}
+		});
 
 		adapter = new SubAdapter();
 		listview.setAdapter(adapter);
@@ -127,8 +145,13 @@ public class SubscribeConfigActivity extends BaseActivity {
 			editName.setText(existing.name);
 			editUrl.setText(existing.url);
 		}
+		final SwitchMaterial switchEnabled = new SwitchMaterial(this);
+		switchEnabled.setText(R.string.subs_enabled);
+		/* New subscriptions default to enabled; existing ones keep their flag. */
+		switchEnabled.setChecked(add || existing.enabled);
 		container.addView(editName);
 		container.addView(editUrl);
+		container.addView(switchEnabled);
 
 		new AlertDialog.Builder(this)
 			.setTitle(add ? R.string.subs_add : R.string.subs_edit)
@@ -145,11 +168,11 @@ public class SubscribeConfigActivity extends BaseActivity {
 					String name = editName.getText().toString().trim();
 					List<Subscription> list = prefs.getSubscriptions();
 					if (add) {
-						list.add(new Subscription(Subscription.newId(), name, url));
+						list.add(new Subscription(Subscription.newId(), name, url, switchEnabled.isChecked()));
 					} else {
 						for (int i = 0; i < list.size(); i++) {
 							if (existing.id.equals(list.get(i).id)) {
-								list.set(i, new Subscription(existing.id, name, url));
+								list.set(i, new Subscription(existing.id, name, url, switchEnabled.isChecked()));
 								break;
 							}
 						}
@@ -183,9 +206,12 @@ public class SubscribeConfigActivity extends BaseActivity {
 			name.setText(s.label());
 			/* Which subscriptions still need a fetch becomes obvious here. */
 			int cached = ClashNode.decode(prefs.getSubNodes(s.id)).size();
-			detail.setText(cached > 0
+			String detailStr = cached > 0
 				? getString(R.string.subs_cached, s.url, cached)
-				: getString(R.string.subs_not_fetched, s.url));
+				: getString(R.string.subs_not_fetched, s.url);
+			if (!s.enabled)
+				detailStr += "  ·  " + getString(R.string.subs_disabled);
+			detail.setText(detailStr);
 
 			edit.setOnClickListener(new View.OnClickListener() {
 				@Override
@@ -200,6 +226,98 @@ public class SubscribeConfigActivity extends BaseActivity {
 				}
 			});
 			return convertView;
+		}
+	}
+
+	/* Pull every (enabled) subscription's clash.yml, parse it and store the raw
+	   YAML + node list per subscription. Disabled ones are skipped, mirroring the
+	   merge logic. Refreshes the list afterwards so cached node counts update. */
+	private void fetchAll() {
+		final List<Subscription> subs = prefs.getSubscriptions();
+		if (subs.isEmpty()) {
+			Toast.makeText(this, R.string.subs_none, Toast.LENGTH_SHORT).show();
+			return;
+		}
+		buttonUpdate.setEnabled(false);
+		buttonUpdate.setText(R.string.sub_fetching);
+		new Thread(new Runnable() {
+			@Override
+			public void run() {
+				int total = 0;
+				String firstError = null;
+				try {
+					for (Subscription sub : subs) {
+						/* No point fetching a subscription we will not merge. */
+						if (!sub.enabled)
+						  continue;
+						String url = sub.url == null ? "" : sub.url.trim();
+						if (url.isEmpty())
+						  continue;
+						try {
+							String yaml = ClashParser.decodeRaw(download(url));
+							List<ClashNode> parsed = ClashParser.parseAll(yaml);
+							for (ClashNode n : parsed)
+							  n.subId = sub.id;
+							prefs.setSubRaw(sub.id, yaml);
+							prefs.setSubNodes(sub.id, ClashNode.encode(parsed));
+							total += parsed.size();
+						} catch (Exception e) {
+							if (firstError == null)
+							  firstError = sub.label() + ": " + e.getMessage();
+						}
+					}
+				} finally {
+					final int fetched = total;
+					final String error = firstError;
+					runOnUiThread(new Runnable() {
+						@Override
+						public void run() {
+							if (isFinishing() || isDestroyed())
+							  return;
+							buttonUpdate.setEnabled(true);
+							buttonUpdate.setText(R.string.sub_update);
+							load();
+							if (fetched > 0)
+							  Toast.makeText(SubscribeConfigActivity.this,
+								getString(R.string.sub_fetched, fetched),
+								Toast.LENGTH_SHORT).show();
+							else if (error != null)
+							  Toast.makeText(SubscribeConfigActivity.this,
+								getString(R.string.sub_fetch_failed, error),
+								Toast.LENGTH_LONG).show();
+							else
+							  Toast.makeText(SubscribeConfigActivity.this,
+								R.string.sub_no_nodes, Toast.LENGTH_LONG).show();
+						}
+					});
+				}
+			}
+		}).start();
+	}
+
+	private String download(String urlStr) throws Exception {
+		HttpURLConnection conn = null;
+		try {
+			URL url = new URL(urlStr);
+			conn = (HttpURLConnection) url.openConnection();
+			conn.setConnectTimeout(10000);
+			conn.setReadTimeout(10000);
+			conn.setInstanceFollowRedirects(true);
+			conn.setRequestProperty("User-Agent", "tunVPN");
+			int code = conn.getResponseCode();
+			if (code != HttpURLConnection.HTTP_OK)
+			  throw new Exception("HTTP " + code);
+			StringBuilder sb = new StringBuilder();
+			try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+					conn.getInputStream(), StandardCharsets.UTF_8))) {
+				String line;
+				while ((line = reader.readLine()) != null)
+				  sb.append(line).append('\n');
+			}
+			return sb.toString();
+		} finally {
+			if (conn != null)
+			  conn.disconnect();
 		}
 	}
 }

@@ -42,13 +42,8 @@ import com.google.android.material.switchmaterial.SwitchMaterial;
 
 import com.tunvpn.GeoIp;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -61,23 +56,16 @@ import java.util.concurrent.Executors;
 public class SubscribeActivity extends BaseActivity {
 	/* Spinner position 0 is the default, and "fastest first" is what people
 	   want, so latency is index 0 and subscription order index 1. */
-	private static final int SORT_LATENCY = 0;
-	private static final int SORT_SUB_ORDER = 1;
-	private static final int FILTER_ALL = 0;
-	private static final int FILTER_OK = 1;
-	private static final int FILTER_BAD = 2;
+
 	/* Bounds for the auto re-test interval, in minutes. */
 	private static final int MIN_INTERVAL_MIN = 1;
 	private static final int MAX_INTERVAL_MIN = 1440;
 
 	private Preferences prefs;
-	private MaterialButton button_fetch;
 	private FloatingActionButton fab_test_all;
 	private ListView listview;
 	private TextView textview_empty;
 	private TextView textview_stats;
-	private Spinner spinner_sort;
-	private Spinner spinner_filter;
 	private SwitchMaterial switch_auto;
 	private TextView textview_auto_hint;
 	private TextView textview_test_url;
@@ -117,8 +105,6 @@ public class SubscribeActivity extends BaseActivity {
 	private final Handler ui = new Handler(Looper.getMainLooper());
 
 	/* Latency order by default: fastest first is what people actually want. */
-	private int sortMode = SORT_LATENCY;
-	private int filterMode = FILTER_ALL;
 	private int pendingTests = 0;
 	/* Progress of a "test all" run, and the last time the list was fully
 	   re-filtered. Sorting hundreds of rows on every single result would cost
@@ -144,13 +130,10 @@ public class SubscribeActivity extends BaseActivity {
 			}
 		});
 
-		button_fetch = (MaterialButton) findViewById(R.id.sub_fetch);
 		fab_test_all = (FloatingActionButton) findViewById(R.id.sub_test_all);
 		listview = (ListView) findViewById(R.id.sub_list);
 		textview_empty = (TextView) findViewById(R.id.sub_empty);
 		textview_stats = (TextView) findViewById(R.id.sub_stats);
-		spinner_sort = (Spinner) findViewById(R.id.sub_sort);
-		spinner_filter = (Spinner) findViewById(R.id.sub_filter);
 		switch_auto = (SwitchMaterial) findViewById(R.id.sub_auto);
 		textview_auto_hint = (TextView) findViewById(R.id.sub_auto_hint);
 		textview_test_url = (TextView) findViewById(R.id.sub_test_url);
@@ -231,19 +214,8 @@ public class SubscribeActivity extends BaseActivity {
 		   an adapter immediately fires onItemSelected(0), which would persist 0
 		   over the saved value. Setting the selection afterwards then re-fires
 		   the listeners with the right position - and that is what applies it. */
-		final int savedSort = prefs.getSubSort();
-		final int savedFilter = prefs.getSubFilter();
-		setupSpinner(spinner_sort, R.array.sub_sort_options, true);
-		setupSpinner(spinner_filter, R.array.sub_filter_options, false);
-		spinner_sort.setSelection(savedSort);
-		spinner_filter.setSelection(savedFilter);
 
-		button_fetch.setOnClickListener(new View.OnClickListener() {
-			@Override
-			public void onClick(View v) {
-				fetch();
-			}
-		});
+
 		fab_test_all.setOnClickListener(new View.OnClickListener() {
 			@Override
 			public void onClick(View v) {
@@ -275,35 +247,16 @@ public class SubscribeActivity extends BaseActivity {
 		super.onDestroy();
 	}
 
-	private void setupSpinner(Spinner spinner, int arrayRes, final boolean isSort) {
-		/* The sort / filter row is deliberately compact, hence our own
-		   small-font item layouts instead of the platform defaults. */
-		ArrayAdapter<CharSequence> a = ArrayAdapter.createFromResource(this,
-			arrayRes, R.layout.spinner_item_small);
-		a.setDropDownViewResource(R.layout.spinner_dropdown_item_small);
-		spinner.setAdapter(a);
-		spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-			@Override
-			public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-				if (isSort) {
-				  sortMode = position;
-				  prefs.setSubSort(position);
-				} else {
-				  filterMode = position;
-				  prefs.setSubFilter(position);
-				}
-				applyView();
-			}
-			@Override
-			public void onNothingSelected(AdapterView<?> parent) {
-			}
-		});
-	}
+
 
 	/* One merged list, built from every subscription's own cache. */
 	private void loadNodes() {
 		nodes.clear();
 		for (Subscription sub : prefs.getSubscriptions()) {
+			/* Disabled subscriptions are not merged into the tunnel, so keep
+			   them out of the pooled node list as well. */
+			if (!sub.enabled)
+			  continue;
 			for (ClashNode n : ClashNode.decode(prefs.getSubNodes(sub.id))) {
 				/* Caches written before the merge carry no owner yet. */
 				if (n.subId == null || n.subId.isEmpty())
@@ -319,10 +272,11 @@ public class SubscribeActivity extends BaseActivity {
 	/* Rebuild the visible list from nodes according to filter + sort. */
 	private void applyView() {
 		shown.clear();
+		/* Default view: only reachable (available) proxies, sorted fastest-first
+		   by latency. The country chips and protocol spinner still narrow the
+		   list down further. */
 		for (ClashNode n : nodes) {
-			if (filterMode == FILTER_OK && !isAvailable(n))
-			  continue;
-			if (filterMode == FILTER_BAD && !isBroken(n))
+			if (!isAvailable(n))
 			  continue;
 			if (!filterCountry.isEmpty() && !matchesCountry(n, filterCountry))
 			  continue;
@@ -330,8 +284,7 @@ public class SubscribeActivity extends BaseActivity {
 			  continue;
 			shown.add(n);
 		}
-		if (sortMode == SORT_LATENCY)
-		  Collections.sort(shown, latencyComparator);
+		Collections.sort(shown, latencyComparator);
 		adapter.notifyDataSetChanged();
 		updateStats();
 	}
@@ -588,99 +541,7 @@ public class SubscribeActivity extends BaseActivity {
 
 	/* Fetch every subscription, so the list really is the merged pool the
 	   tunnel will run on. One failing provider does not stop the others. */
-	private void fetch() {
-		final List<Subscription> subs = prefs.getSubscriptions();
-		if (subs.isEmpty()) {
-			Toast.makeText(this, R.string.subs_none, Toast.LENGTH_SHORT).show();
-			return;
-		}
-		button_fetch.setEnabled(false);
-		button_fetch.setText(R.string.sub_fetching);
-		new Thread(new Runnable() {
-			@Override
-			public void run() {
-				int total = 0;
-				String firstError = null;
-				try {
-					for (Subscription sub : subs) {
-						String url = sub.url == null ? "" : sub.url.trim();
-						if (url.isEmpty())
-						  continue;
-						try {
-							/* Keep the raw clash.yml (base64-decoded) for the
-							   core, and the parsed list for display + tests. */
-							String yaml = ClashParser.decodeRaw(download(url));
-							List<ClashNode> parsed = ClashParser.parseAll(yaml);
-							for (ClashNode n : parsed)
-							  n.subId = sub.id;
-							prefs.setSubRaw(sub.id, yaml);
-							prefs.setSubNodes(sub.id, ClashNode.encode(parsed));
-							total += parsed.size();
-						} catch (Exception e) {
-							if (firstError == null)
-							  firstError = sub.label() + ": " + e.getMessage();
-						}
-					}
-				} finally {
-					final int fetched = total;
-					final String error = firstError;
-					ui.post(new Runnable() {
-						@Override
-						public void run() {
-							if (isFinishing() || isDestroyed())
-							  return;
-							button_fetch.setEnabled(true);
-							button_fetch.setText(R.string.sub_fetch);
-							loadNodes();
-							/* New nodes have no country yet; probe them so the
-							   auto-mode country picker has something to show. */
-							if (prefs.getAutoSelect())
-							  resolveCountries();
-							if (fetched > 0)
-							  Toast.makeText(SubscribeActivity.this,
-								getString(R.string.sub_fetched, fetched),
-								Toast.LENGTH_SHORT).show();
-							else if (error != null)
-							  Toast.makeText(SubscribeActivity.this,
-								getString(R.string.sub_fetch_failed, error),
-								Toast.LENGTH_LONG).show();
-							else
-							  Toast.makeText(SubscribeActivity.this,
-								R.string.sub_no_nodes, Toast.LENGTH_LONG).show();
-						}
-					});
-				}
-			}
-		}).start();
-	}
 
-	private String download(String urlStr) throws Exception {
-		HttpURLConnection conn = null;
-		try {
-			URL url = new URL(urlStr);
-			conn = (HttpURLConnection) url.openConnection();
-			conn.setConnectTimeout(10000);
-			conn.setReadTimeout(10000);
-			conn.setInstanceFollowRedirects(true);
-			conn.setRequestProperty("User-Agent", "tunVPN");
-			int code = conn.getResponseCode();
-			if (code != HttpURLConnection.HTTP_OK)
-			  throw new Exception("HTTP " + code);
-			StringBuilder sb = new StringBuilder();
-			/* Close the reader, not just the connection: disconnect() alone
-			   leaves the decoded stream alive until GC. */
-			try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-					conn.getInputStream(), StandardCharsets.UTF_8))) {
-				String line;
-				while ((line = reader.readLine()) != null)
-				  sb.append(line).append('\n');
-			}
-			return sb.toString();
-		} finally {
-			if (conn != null)
-			  conn.disconnect();
-		}
-	}
 
 	private void testAll() {
 		if (nodes.isEmpty())

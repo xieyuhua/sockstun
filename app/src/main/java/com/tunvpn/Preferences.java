@@ -426,12 +426,17 @@ public class Preferences
 	}
 
 	public boolean hasSubscription() {
-		String raw = getSubRaw();
-		if (raw != null && !raw.trim().isEmpty())
-		  return true;
-		/* With no "default" subscription recorded, fall back to scanning every
-		   subscription's own cache. */
+		/* Only an enabled subscription counts as a usable upstream: a disabled
+		   one is kept but never merged, so it must not satisfy "configured". */
+		Subscription active = getActiveSubscription();
+		if (active != null && active.enabled) {
+			String raw = getSubRaw(active.id);
+			if (raw != null && !raw.trim().isEmpty())
+			  return true;
+		}
 		for (Subscription s : getSubscriptions()) {
+			if (!s.enabled)
+			  continue;
 			String r = getSubRaw(s.id);
 			if (r != null && !r.trim().isEmpty())
 			  return true;

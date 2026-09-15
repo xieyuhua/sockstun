@@ -25,19 +25,50 @@
 			android:layout_width="match_parent"
 			android:layout_height="wrap_content"
 			android:padding="12dp">
-			<com.google.android.material.button.MaterialButton
-				android:id="@+id/sub_fetch"
-				style="?attr/materialButtonOutlinedStyle"
+			<!-- ② 筛选：国家（左右滑动）/ 协议 -->
+			<TextView
 				android:layout_width="match_parent"
 				android:layout_height="wrap_content"
-				android:minHeight="40dp"
-				android:text="@string/sub_fetch"
-				android:textSize="13sp"
-				app:cornerRadius="20dp"
-				app:icon="@drawable/ic_subscribe"
-				app:iconGravity="textStart"
-				app:iconPadding="4dp"
-				app:iconSize="16dp"/>
+				android:text="@string/sub_section_filter"
+				android:textAppearance="?attr/textAppearanceTitleSmall"
+				android:textColor="?attr/colorPrimary"
+				android:textStyle="bold"/>
+			<!-- 国家：一行 chip，左右滑动选择；「全部」= 所有代理 -->
+			<HorizontalScrollView
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="6dp"
+				android:fillViewport="true"
+				android:scrollbars="none">
+				<com.google.android.material.chip.ChipGroup
+					android:id="@+id/sub_country_chips"
+					android:layout_width="wrap_content"
+					android:layout_height="wrap_content"
+					app:selectionRequired="true"
+					app:singleLine="true"
+					app:singleSelection="true"/>
+			</HorizontalScrollView>
+			<LinearLayout
+				android:orientation="horizontal"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="6dp"
+				android:gravity="center_vertical">
+				<TextView
+					android:layout_width="wrap_content"
+					android:layout_height="wrap_content"
+					android:text="@string/sub_proto_filter_label"
+					android:textAppearance="?attr/textAppearanceBodyMedium"
+					android:textColor="?attr/colorOnSurface"/>
+				<Spinner
+					android:id="@+id/sub_proto_filter"
+					android:layout_width="0dp"
+					android:layout_height="wrap_content"
+					android:layout_weight="1"
+					android:layout_marginStart="10dp"
+					android:minHeight="30dp"
+					android:spinnerMode="dropdown"/>
+			</LinearLayout>
 
 			<!-- ① 自动选择：最快节点 / 按国家挑最快 -->
 			<TextView
@@ -133,72 +164,6 @@
 					android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 			</LinearLayout>
 
-			<!-- ② 筛选：排序 / 可用性 / 国家（左右滑动）/ 协议 -->
-			<TextView
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="14dp"
-				android:text="@string/sub_section_filter"
-				android:textAppearance="?attr/textAppearanceTitleSmall"
-				android:textColor="?attr/colorPrimary"
-				android:textStyle="bold"/>
-			<LinearLayout
-				android:orientation="horizontal"
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="6dp">
-				<Spinner
-					android:id="@+id/sub_sort"
-					android:layout_width="0dp"
-					android:layout_weight="1"
-					android:layout_height="wrap_content"
-					android:minHeight="30dp"
-					android:spinnerMode="dropdown"/>
-				<Spinner
-					android:id="@+id/sub_filter"
-					android:layout_width="0dp"
-					android:layout_weight="1"
-					android:layout_height="wrap_content"
-					android:layout_marginStart="10dp"
-					android:minHeight="30dp"
-					android:spinnerMode="dropdown"/>
-			</LinearLayout>
-			<!-- 国家：一行 chip，左右滑动选择；「全部」= 所有代理 -->
-			<HorizontalScrollView
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="6dp"
-				android:fillViewport="true"
-				android:scrollbars="none">
-				<com.google.android.material.chip.ChipGroup
-					android:id="@+id/sub_country_chips"
-					android:layout_width="wrap_content"
-					android:layout_height="wrap_content"
-					app:selectionRequired="true"
-					app:singleLine="true"
-					app:singleSelection="true"/>
-			</HorizontalScrollView>
-			<LinearLayout
-				android:orientation="horizontal"
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="6dp"
-				android:gravity="center_vertical">
-				<TextView
-					android:layout_width="wrap_content"
-					android:layout_height="wrap_content"
-					android:text="@string/sub_proto_filter_label"
-					android:textAppearance="?attr/textAppearanceBodyMedium"
-					android:textColor="?attr/colorOnSurface"/>
-				<Spinner
-					android:id="@+id/sub_proto_filter"
-					android:layout_width="0dp"
-					android:layout_height="wrap_content"
-					android:layout_weight="1"
-					android:layout_marginStart="10dp"
-					android:minHeight="30dp"
-					android:spinnerMode="dropdown"/>
-			</LinearLayout>
 			<TextView
 				android:id="@+id/sub_stats"
 				android:layout_width="match_parent"
