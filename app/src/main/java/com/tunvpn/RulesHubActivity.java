@@ -59,6 +59,8 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 	private CompoundButton switch_default_proxy;
 	private Spinner spinner_type;
 	private Spinner spinner_action;
+	/* Value field's container, so its hint can follow the picked rule type. */
+	private TextInputLayout til_rule_value;
 	private Spinner spinner_strategy;
 	private TextView textview_mode_hint;
 	private EditText edit_value;
@@ -111,6 +113,7 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		switch_default_proxy = (CompoundButton) findViewById(R.id.rules_default_proxy);
 		spinner_type = (Spinner) findViewById(R.id.rule_type);
 		spinner_action = (Spinner) findViewById(R.id.rule_action);
+		til_rule_value = (TextInputLayout) findViewById(R.id.til_rule_value);
 		edit_value = (EditText) findViewById(R.id.rule_value);
 		rules_list = (LinearLayout) findViewById(R.id.rules_list);
 		rules_empty = (TextView) findViewById(R.id.rules_empty);
@@ -118,6 +121,17 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 
 		setupSpinner(spinner_type, R.array.rule_types);
 		setupSpinner(spinner_action, R.array.rule_actions);
+		/* The expected value differs per rule type, so the hint follows the
+		   picker (it fires right away with position 0). */
+		spinner_type.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+			@Override
+			public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+				updateValueHint(position);
+			}
+			@Override
+			public void onNothingSelected(AdapterView<?> parent) {
+			}
+		});
 
 		/* Routing strategy: rule mode / global proxy / global direct. */
 		spinner_strategy = (Spinner) findViewById(R.id.rules_strategy);
@@ -309,9 +323,31 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 				return getString(R.string.rule_type_geoip);
 			case Preferences.Rule.TYPE_PROCESS:
 				return getString(R.string.rule_type_process);
+			case Preferences.Rule.TYPE_DOMAIN_FULL:
+				return getString(R.string.rule_type_domain_full);
+			case Preferences.Rule.TYPE_GEOSITE:
+				return getString(R.string.rule_type_geosite);
+			case Preferences.Rule.TYPE_PROCESS_PATH:
+				return getString(R.string.rule_type_process_path);
+			case Preferences.Rule.TYPE_DST_PORT:
+				return getString(R.string.rule_type_dst_port);
+			case Preferences.Rule.TYPE_SRC_PORT:
+				return getString(R.string.rule_type_src_port);
+			case Preferences.Rule.TYPE_NETWORK:
+				return getString(R.string.rule_type_network);
 			default:
 				return "?";
 		}
+	}
+
+	/* The value field's hint follows the picked rule type, so the expected
+	   format is visible instead of guessed. */
+	private void updateValueHint(int type) {
+		String[] hints = getResources().getStringArray(R.array.rule_value_hints);
+		if (type >= 0 && type < hints.length)
+		  til_rule_value.setHint(hints[type]);
+		else
+		  til_rule_value.setHint(R.string.rule_value_hint);
 	}
 
 	private void renderRules() {
@@ -405,6 +441,22 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 				return value.matches("^[A-Za-z]{2}$");
 			case Preferences.Rule.TYPE_PROCESS:
 				return true;
+			case Preferences.Rule.TYPE_DOMAIN_FULL:
+				/* An exact domain: no path, no leading dot. */
+				return value.indexOf('/') < 0 && !value.startsWith(".");
+			case Preferences.Rule.TYPE_GEOSITE:
+				/* A geosite tag, e.g. "geolocation-cn" or "openai". */
+				return value.matches("^[A-Za-z0-9_\\-]+$");
+			case Preferences.Rule.TYPE_PROCESS_PATH:
+				return true;
+			case Preferences.Rule.TYPE_DST_PORT:
+			case Preferences.Rule.TYPE_SRC_PORT:
+				return value.matches("^\\d{1,5}(-\\d{1,5})?$");
+			case Preferences.Rule.TYPE_NETWORK: {
+				String v = value.toLowerCase();
+				return v.equals("tcp") || v.equals("udp")
+					|| v.equals("tcp,udp") || v.equals("udp,tcp");
+			}
 			default:
 				return false;
 		}

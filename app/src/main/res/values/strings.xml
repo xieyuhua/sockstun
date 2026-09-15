@@ -70,22 +70,28 @@
 	<string name="traffic_empty">No traffic recorded yet</string>
 
 	<string name="rules">Routing rules</string>
-	<string name="rules_hint">先选「分流策略」，再按需添加规则：域名后缀 / 域名关键字 / 国家(GeoIP) / IP / 进程名 → 代理或直连；未命中的按底部开关处理。订阅自带规则不参与，修改后重新连接生效。</string>
+	<string name="rules_hint">先选「分流策略」，再按需添加规则：域名后缀 / 精确域名 / 关键字 / IP / IP 段 / 国家(GeoIP) / 域名分类(GeoSite) / 进程名 / 进程路径 / 端口 / 网络类型 → 代理或直连；未命中的按底部开关处理。订阅自带规则不参与，修改后重新连接生效。</string>
 	<string name="routing_scope_hint">Two routing layers: (1) Global / per-App decides which apps traffic enters the tunnel (VPN scope, evaluated first); (2) the routing strategy (rules / global-proxy / global-direct) only applies to traffic already inside the tunnel. Excluded apps use the system network directly and ignore the routing rules.</string>
 	<string name="routing_scope_empty_warn">"Per-App" is on but no app is selected: no traffic will enter the tunnel (i.e. nothing is proxied). Tap "Apps" to pick apps, or enable "Global".</string>
 	<string name="rules_default_proxy">Unmatched traffic uses the proxy</string>
 	<string name="rule_add">Add</string>
 	<string name="rule_delete">Delete</string>
-	<string name="rule_value_hint">Domain / IP / CIDR (e.g. 10.0.0.0/8)</string>
+	<string name="rule_value_hint">按所选类型填写，如 google.com / 10.0.0.0/8 / 443</string>
 	<string name="rule_empty">No rules, everything follows the switch above</string>
 	<string name="rule_invalid">Enter a valid value</string>
 	<string name="rule_exists">That rule already exists</string>
-	<string name="rule_type_domain">Domain</string>
+	<string name="rule_type_domain">域名后缀</string>
 	<string name="rule_type_ip">IP</string>
-	<string name="rule_type_cidr">CIDR</string>
-	<string name="rule_type_keyword">Keyword</string>
+	<string name="rule_type_cidr">IP 段</string>
+	<string name="rule_type_keyword">域名关键字</string>
 	<string name="rule_type_geoip">GeoIP 国家</string>
 	<string name="rule_type_process">进程名</string>
+	<string name="rule_type_domain_full">域名(精确)</string>
+	<string name="rule_type_geosite">域名分类(GeoSite)</string>
+	<string name="rule_type_process_path">进程路径</string>
+	<string name="rule_type_dst_port">目标端口</string>
+	<string name="rule_type_src_port">源端口</string>
+	<string name="rule_type_network">网络类型</string>
 	<string name="rule_action_proxy">Proxy</string>
 	<string name="rule_action_direct">Direct</string>
 	<string name="rule_strategy_label">分流策略</string>
@@ -95,6 +101,8 @@
 	<string name="rules_mode_hint_rules">规则模式：按下方规则分流，未命中的流量走「未命中默认」开关。</string>
 	<string name="rules_mode_hint_global">全局代理：所有流量都走代理，下方规则不生效。</string>
 	<string name="rules_mode_hint_direct">全局直连：所有流量都不走代理，下方规则不生效。</string>
+	<!-- Order matters: the spinner position IS the rule type (see
+	     Preferences.Rule.TYPE_*), so new entries must be appended, never inserted. -->
 	<string-array name="rule_types">
 		<item>@string/rule_type_domain</item>
 		<item>@string/rule_type_ip</item>
@@ -102,6 +110,27 @@
 		<item>@string/rule_type_keyword</item>
 		<item>@string/rule_type_geoip</item>
 		<item>@string/rule_type_process</item>
+		<item>@string/rule_type_domain_full</item>
+		<item>@string/rule_type_geosite</item>
+		<item>@string/rule_type_process_path</item>
+		<item>@string/rule_type_dst_port</item>
+		<item>@string/rule_type_src_port</item>
+		<item>@string/rule_type_network</item>
+	</string-array>
+	<!-- Same order as rule_types: the hint shown in the value field. -->
+	<string-array name="rule_value_hints">
+		<item>如 google.com（匹配该域名及其所有子域）</item>
+		<item>如 1.2.3.4</item>
+		<item>如 10.0.0.0/8 或 2001:db8::/32</item>
+		<item>如 google（域名中含该关键字）</item>
+		<item>两位国家码，如 CN / US</item>
+		<item>如 com.android.chrome</item>
+		<item>如 www.google.com（完全匹配）</item>
+		<item>如 geolocation-cn / openai</item>
+		<item>如 /system/bin/ping</item>
+		<item>如 443 或 1000-2000</item>
+		<item>如 12345 或 1000-2000</item>
+		<item>tcp / udp / tcp,udp</item>
 	</string-array>
 	<string-array name="rule_actions">
 		<item>@string/rule_action_proxy</item>
@@ -135,6 +164,9 @@
 	<string name="sub_applied">已应用：%s</string>
 	<string name="sub_sort">排序</string>
 	<string name="sub_filter">筛选</string>
+	<string name="sub_section_auto">自动选择</string>
+	<string name="sub_section_filter">筛选</string>
+	<string name="sub_country_switched">已切换：%s</string>
 	<string-array name="sub_sort_options">
 		<item>订阅顺序</item>
 		<item>按延迟（快→慢）</item>
@@ -238,7 +270,9 @@
 	<string name="settings_config_none">尚未生成</string>
 	<string name="config_custom">使用自定义配置</string>
 	<string name="config_custom_toast">已切换，重新连接后生效</string>
-	<string name="config_hint">这里是内核实际加载的配置（files/config.yaml）。可修改后点「保存」；未开启「使用自定义配置」时，下次连接会按当前设置重新生成并覆盖。</string>
+	<string name="config_custom_hint">开启后，连接时不再按当前设置自动生成，直接加载下面这份配置</string>
+	<string name="config_status">共 %1$d 行 · %2$s</string>
+	<string name="config_status_none">尚未生成</string>
 	<string name="config_regen">按当前设置重新生成</string>
 	<string name="config_regen_ok">已重新生成</string>
 	<string name="config_regen_failed">重新生成失败：%s</string>

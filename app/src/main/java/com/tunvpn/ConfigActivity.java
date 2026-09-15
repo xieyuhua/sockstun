@@ -17,6 +17,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.android.material.appbar.MaterialToolbar;
@@ -34,6 +35,7 @@ public class ConfigActivity extends BaseActivity implements View.OnClickListener
 
 	private Preferences prefs;
 	private EditText edittext_config;
+	private TextView textview_status;
 	private SwitchMaterial switch_custom;
 
 	@Override
@@ -52,6 +54,7 @@ public class ConfigActivity extends BaseActivity implements View.OnClickListener
 		});
 
 		edittext_config = (EditText) findViewById(R.id.config_text);
+		textview_status = (TextView) findViewById(R.id.config_status);
 		switch_custom = (SwitchMaterial) findViewById(R.id.config_custom);
 		switch_custom.setChecked(prefs.getCustomConfig());
 		switch_custom.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
@@ -89,6 +92,7 @@ public class ConfigActivity extends BaseActivity implements View.OnClickListener
 		File f = file();
 		if (!f.exists()) {
 			edittext_config.setText("");
+			updateStatus();
 			Toast.makeText(this, R.string.config_none, Toast.LENGTH_LONG).show();
 			return;
 		}
@@ -98,6 +102,26 @@ public class ConfigActivity extends BaseActivity implements View.OnClickListener
 			Toast.makeText(this, getString(R.string.config_read_failed, e.getMessage()),
 				Toast.LENGTH_LONG).show();
 		}
+		updateStatus();
+	}
+
+	/* "共 N 行 · 12.3 KB" for what is on disk, or "尚未生成". */
+	private void updateStatus() {
+		File f = file();
+		if (!f.exists()) {
+			textview_status.setText(R.string.config_status_none);
+			return;
+		}
+		String text = edittext_config.getText().toString();
+		int lines = 0;
+		for (int i = 0; i < text.length(); i++) {
+			if (text.charAt(i) == '\n')
+			  lines++;
+		}
+		if (text.length() > 0 && text.charAt(text.length() - 1) != '\n')
+		  lines++;
+		textview_status.setText(getString(R.string.config_status,
+			lines, TProxyService.formatBytes(f.length())));
 	}
 
 	/* Rebuild the file from the current subscription / rules / DNS settings. */
@@ -105,6 +129,7 @@ public class ConfigActivity extends BaseActivity implements View.OnClickListener
 		try {
 			File f = MihomoConfig.build(this, prefs);
 			edittext_config.setText(read(f));
+			updateStatus();
 			Toast.makeText(this, R.string.config_regen_ok, Toast.LENGTH_SHORT).show();
 		} catch (Throwable e) {
 			Toast.makeText(this, getString(R.string.config_regen_failed, e.getMessage()),
@@ -115,6 +140,7 @@ public class ConfigActivity extends BaseActivity implements View.OnClickListener
 	private void save() {
 		try {
 			write(file(), edittext_config.getText().toString());
+			updateStatus();
 			/* Without "use custom config" the next connect regenerates the file,
 			   so say so rather than letting the edit look permanent. */
 			Toast.makeText(this, prefs.getCustomConfig()

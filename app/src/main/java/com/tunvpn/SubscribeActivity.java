@@ -157,10 +157,29 @@ public class SubscribeActivity extends BaseActivity {
 				if (position < 0 || position >= countryCodes.size())
 				  return;
 				String code = countryCodes.get(position);
+				/* refreshCountrySpinner() re-selects the stored value; ignore that
+				   so a programmatic refresh is not mistaken for a user change. */
+				String stored = prefs.getAutoSelectCountry();
+				if (stored == null || stored.isEmpty())
+				  stored = Country.GLOBAL;
+				if (code.equals(stored))
+				  return;
 				prefs.setAutoSelectCountry(code);
-				if (prefs.getEnable())
-				  Toast.makeText(SubscribeActivity.this,
-					R.string.sub_auto_restart, Toast.LENGTH_LONG).show();
+				if (!prefs.getEnable())
+				  return;
+				if (Country.AUTO.equals(code)) {
+					/* The best country is picked when the config is built. */
+					Toast.makeText(SubscribeActivity.this,
+						R.string.sub_auto_restart, Toast.LENGTH_LONG).show();
+				} else {
+					/* Every country already has its own url-test group in the
+					   running config, so the switch applies without a reconnect. */
+					startService(new Intent(SubscribeActivity.this, TProxyService.class)
+						.setAction(TProxyService.ACTION_SELECT));
+					Toast.makeText(SubscribeActivity.this,
+						getString(R.string.sub_country_switched, Country.display(code)),
+						Toast.LENGTH_SHORT).show();
+				}
 			}
 			@Override
 			public void onNothingSelected(AdapterView<?> parent) {

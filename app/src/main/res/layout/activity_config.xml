@@ -12,40 +12,44 @@
 		app:navigationIcon="?attr/homeAsUpIndicator"
 		app:title="@string/settings_config"
 		app:titleTextAppearance="@style/TextAppearance.TunVPN.Toolbar"/>
-	<LinearLayout
+	<com.google.android.material.card.MaterialCardView
+		style="@style/Widget.TunVPN.Card"
 		android:layout_width="match_parent"
 		android:layout_height="wrap_content"
-		android:orientation="horizontal"
-		android:gravity="center_vertical"
-		android:paddingStart="16dp"
-		android:paddingEnd="16dp"
-		android:paddingTop="8dp">
-		<com.google.android.material.switchmaterial.SwitchMaterial
-			android:id="@+id/config_custom"
-			android:layout_width="0dp"
+		android:layout_marginLeft="16dp"
+		android:layout_marginRight="16dp"
+		android:layout_marginTop="8dp">
+		<LinearLayout
+			android:orientation="horizontal"
+			android:layout_width="match_parent"
 			android:layout_height="wrap_content"
-			android:layout_weight="1"
-			android:text="@string/config_custom"
-			android:textSize="15sp"/>
-		<com.google.android.material.button.MaterialButton
-			android:id="@+id/config_copy"
-			style="?attr/materialButtonOutlinedStyle"
-			android:layout_width="wrap_content"
-			android:layout_height="wrap_content"
-			android:minHeight="36dp"
-			android:text="@string/log_copy"
-			android:textSize="13sp"
-			app:cornerRadius="18dp"/>
-	</LinearLayout>
-	<TextView
-		android:layout_width="match_parent"
-		android:layout_height="wrap_content"
-		android:paddingLeft="16dp"
-		android:paddingRight="16dp"
-		android:paddingTop="6dp"
-		android:paddingBottom="8dp"
-		android:text="@string/config_hint"
-		android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
+			android:gravity="center_vertical"
+			android:padding="16dp">
+			<LinearLayout
+				android:orientation="vertical"
+				android:layout_width="0dp"
+				android:layout_height="wrap_content"
+				android:layout_weight="1">
+				<TextView
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"
+					android:text="@string/config_custom"
+					android:textAppearance="?attr/textAppearanceTitleSmall"
+					android:textStyle="bold"/>
+				<TextView
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"
+					android:layout_marginTop="2dp"
+					android:text="@string/config_custom_hint"
+					android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
+			</LinearLayout>
+			<com.google.android.material.switchmaterial.SwitchMaterial
+				android:id="@+id/config_custom"
+				android:layout_width="wrap_content"
+				android:layout_height="wrap_content"
+				android:layout_marginStart="12dp"/>
+		</LinearLayout>
+	</com.google.android.material.card.MaterialCardView>
 	<com.google.android.material.card.MaterialCardView
 		style="@style/Widget.TunVPN.Card"
 		android:layout_width="match_parent"
@@ -53,24 +57,58 @@
 		android:layout_weight="1"
 		android:layout_marginLeft="16dp"
 		android:layout_marginRight="16dp"
+		android:layout_marginTop="12dp"
 		android:layout_marginBottom="12dp">
-		<EditText
-			android:id="@+id/config_text"
+		<LinearLayout
+			android:orientation="vertical"
 			android:layout_width="match_parent"
 			android:layout_height="match_parent"
-			android:background="@android:color/transparent"
-			android:fontFamily="monospace"
-			android:gravity="top|start"
-			android:importantForAutofill="no"
-			android:inputType="textMultiLine|textNoSuggestions"
-			android:padding="12dp"
-			android:scrollbars="vertical"
-			android:textSize="12sp"/>
+			android:paddingLeft="12dp"
+			android:paddingRight="12dp"
+			android:paddingTop="8dp"
+			android:paddingBottom="12dp">
+			<LinearLayout
+				android:orientation="horizontal"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:gravity="center_vertical">
+				<TextView
+					android:id="@+id/config_status"
+					android:layout_width="0dp"
+					android:layout_height="wrap_content"
+					android:layout_weight="1"
+					android:maxLines="1"
+					android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
+				<com.google.android.material.button.MaterialButton
+					android:id="@+id/config_copy"
+					style="?attr/materialButtonOutlinedStyle"
+					android:layout_width="wrap_content"
+					android:layout_height="wrap_content"
+					android:layout_marginStart="8dp"
+					android:minHeight="32dp"
+					android:text="@string/log_copy"
+					android:textSize="12sp"
+					app:cornerRadius="16dp"/>
+			</LinearLayout>
+			<EditText
+				android:id="@+id/config_text"
+				android:layout_width="match_parent"
+				android:layout_height="0dp"
+				android:layout_weight="1"
+				android:layout_marginTop="6dp"
+				android:background="@android:color/transparent"
+				android:fontFamily="monospace"
+				android:gravity="top|start"
+				android:importantForAutofill="no"
+				android:inputType="textMultiLine|textNoSuggestions"
+				android:scrollbars="vertical"
+				android:textSize="12sp"/>
+		</LinearLayout>
 	</com.google.android.material.card.MaterialCardView>
 	<LinearLayout
+		android:orientation="horizontal"
 		android:layout_width="match_parent"
 		android:layout_height="wrap_content"
-		android:orientation="horizontal"
 		android:paddingStart="16dp"
 		android:paddingEnd="16dp"
 		android:paddingBottom="16dp">
@@ -93,6 +131,10 @@
 			android:minHeight="48dp"
 			android:text="@string/save"
 			android:textSize="13sp"
-			app:cornerRadius="24dp"/>
+			app:cornerRadius="24dp"
+			app:icon="@drawable/ic_save"
+			app:iconGravity="textStart"
+			app:iconPadding="6dp"
+			app:iconSize="18dp"/>
 	</LinearLayout>
 </LinearLayout>

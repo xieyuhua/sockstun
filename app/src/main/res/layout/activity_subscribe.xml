@@ -59,6 +59,110 @@
 					app:iconPadding="4dp"
 					app:iconSize="16dp"/>
 			</LinearLayout>
+
+			<!-- ① 自动选择：最快节点 / 按国家挑最快 -->
+			<TextView
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="14dp"
+				android:text="@string/sub_section_auto"
+				android:textAppearance="?attr/textAppearanceTitleSmall"
+				android:textColor="?attr/colorPrimary"
+				android:textStyle="bold"/>
+			<LinearLayout
+				android:orientation="horizontal"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="6dp"
+				android:gravity="center_vertical">
+				<LinearLayout
+					android:orientation="vertical"
+					android:layout_width="0dp"
+					android:layout_height="wrap_content"
+					android:layout_weight="1">
+					<TextView
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:text="@string/sub_auto"
+						android:textAppearance="?attr/textAppearanceBodyMedium"
+						android:textColor="?attr/colorOnSurface"/>
+					<TextView
+						android:id="@+id/sub_auto_hint"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:paddingTop="2dp"
+						android:textAppearance="?attr/textAppearanceBodySmall"
+						android:textColor="?attr/colorPrimary"/>
+					<TextView
+						android:id="@+id/sub_test_url"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:ellipsize="middle"
+						android:maxLines="1"
+						android:paddingBottom="2dp"
+						android:textAppearance="?attr/textAppearanceBodySmall"
+						android:textColor="?attr/colorPrimary"/>
+				</LinearLayout>
+				<com.google.android.material.switchmaterial.SwitchMaterial
+					android:id="@+id/sub_auto"
+					android:layout_width="wrap_content"
+					android:layout_height="wrap_content"
+					android:layout_marginStart="8dp"/>
+			</LinearLayout>
+			<!-- 国家选择（仅自动模式显示）：自动最优 / 指定国家 / 全局最快 -->
+			<LinearLayout
+				android:id="@+id/sub_country_row"
+				android:orientation="vertical"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="8dp"
+				android:visibility="gone">
+				<LinearLayout
+					android:orientation="horizontal"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"
+					android:gravity="center_vertical">
+					<TextView
+						android:layout_width="0dp"
+						android:layout_height="wrap_content"
+						android:layout_weight="1"
+						android:text="@string/sub_country_label"
+						android:textAppearance="?attr/textAppearanceBodyMedium"
+						android:textColor="?attr/colorOnSurface"/>
+					<Spinner
+						android:id="@+id/sub_country"
+						android:layout_width="0dp"
+						android:layout_height="wrap_content"
+						android:layout_weight="1"
+						android:minHeight="30dp"
+						android:spinnerMode="dropdown"/>
+					<com.google.android.material.button.MaterialButton
+						android:id="@+id/sub_detect_country"
+						style="?attr/materialButtonOutlinedStyle"
+						android:layout_width="wrap_content"
+						android:layout_height="wrap_content"
+						android:layout_marginStart="8dp"
+						android:minHeight="32dp"
+						android:text="@string/sub_detect"
+						android:textSize="12sp"/>
+				</LinearLayout>
+				<TextView
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"
+					android:layout_marginTop="4dp"
+					android:text="@string/sub_auto_country_hint"
+					android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
+			</LinearLayout>
+
+			<!-- ② 筛选：排序 / 可用性 / 国家 / 协议 -->
+			<TextView
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content"
+				android:layout_marginTop="14dp"
+				android:text="@string/sub_section_filter"
+				android:textAppearance="?attr/textAppearanceTitleSmall"
+				android:textColor="?attr/colorPrimary"
+				android:textStyle="bold"/>
 			<LinearLayout
 				android:orientation="horizontal"
 				android:layout_width="match_parent"
@@ -122,87 +226,15 @@
 					android:minHeight="30dp"
 					android:spinnerMode="dropdown"/>
 			</LinearLayout>
-			<LinearLayout
-				android:orientation="horizontal"
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="6dp"
-				android:gravity="center_vertical">
-				<LinearLayout
-					android:orientation="vertical"
-					android:layout_width="0dp"
-					android:layout_height="wrap_content"
-					android:layout_weight="1">
-					<TextView
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:text="@string/sub_auto"
-						android:textAppearance="?attr/textAppearanceBodyMedium"
-						android:textColor="?attr/colorOnSurface"/>
-					<TextView
-						android:id="@+id/sub_auto_hint"
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:paddingTop="2dp"
-						android:textAppearance="?attr/textAppearanceBodySmall"
-						android:textColor="?attr/colorPrimary"/>
-					<TextView
-						android:id="@+id/sub_test_url"
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"
-						android:ellipsize="middle"
-						android:maxLines="1"
-						android:paddingBottom="2dp"
-						android:textAppearance="?attr/textAppearanceBodySmall"
-						android:textColor="?attr/colorPrimary"/>
-				</LinearLayout>
-				<com.google.android.material.switchmaterial.SwitchMaterial
-					android:id="@+id/sub_auto"
-					android:layout_width="wrap_content"
-					android:layout_height="wrap_content"
-					android:layout_marginStart="8dp"/>
-			</LinearLayout>
-			<LinearLayout
-				android:id="@+id/sub_country_row"
-				android:orientation="horizontal"
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="6dp"
-				android:gravity="center_vertical"
-				android:visibility="gone">
-				<TextView
-					android:layout_width="0dp"
-					android:layout_height="wrap_content"
-					android:layout_weight="1"
-					android:text="@string/sub_country_label"
-					android:textAppearance="?attr/textAppearanceBodyMedium"
-					android:textColor="?attr/colorOnSurface"/>
-				<Spinner
-					android:id="@+id/sub_country"
-					android:layout_width="0dp"
-					android:layout_height="wrap_content"
-					android:layout_weight="1"
-					android:minHeight="30dp"
-					android:spinnerMode="dropdown"/>
-				<com.google.android.material.button.MaterialButton
-					android:id="@+id/sub_detect_country"
-					style="?attr/materialButtonOutlinedStyle"
-					android:layout_width="wrap_content"
-					android:layout_height="wrap_content"
-					android:layout_marginStart="8dp"
-					android:minHeight="32dp"
-					android:text="@string/sub_detect"
-					android:textSize="12sp"/>
-			</LinearLayout>
 			<TextView
 				android:id="@+id/sub_stats"
 				android:layout_width="match_parent"
 				android:layout_height="wrap_content"
-				android:layout_marginTop="4dp"
+				android:layout_marginTop="8dp"
 				android:textAppearance="?attr/textAppearanceBodySmall"
 				android:textColor="?attr/colorOnSurfaceVariant"/>
-			</LinearLayout>
-			</com.google.android.material.card.MaterialCardView>
+		</LinearLayout>
+	</com.google.android.material.card.MaterialCardView>
 	<TextView
 		android:id="@+id/sub_empty"
 		android:layout_width="match_parent"

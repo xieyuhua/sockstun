@@ -407,13 +407,26 @@ public class MihomoConfig {
 			case Preferences.Rule.TYPE_CIDR:
 				if (!value.contains("/"))
 				  return null;
-				return "IP-CIDR," + value + "," + target;
+				/* IPv6 needs its own rule type, otherwise mihomo rejects it. */
+				return (value.contains(":") ? "IP-CIDR6," : "IP-CIDR,") + value + "," + target;
 			case Preferences.Rule.TYPE_IP:
 				if (isIpv4(value))
 				  return "IP-CIDR," + value + "/32," + target;
 				if (value.contains(":"))
-				  return "IP-CIDR," + value + "/128," + target;
+				  return "IP-CIDR6," + value + "/128," + target;
 				return null;
+			case Preferences.Rule.TYPE_DOMAIN_FULL:
+				return "DOMAIN," + value + "," + target;
+			case Preferences.Rule.TYPE_GEOSITE:
+				return "GEOSITE," + value + "," + target;
+			case Preferences.Rule.TYPE_PROCESS_PATH:
+				return "PROCESS-PATH," + value + "," + target;
+			case Preferences.Rule.TYPE_DST_PORT:
+				return "DST-PORT," + value + "," + target;
+			case Preferences.Rule.TYPE_SRC_PORT:
+				return "SRC-PORT," + value + "," + target;
+			case Preferences.Rule.TYPE_NETWORK:
+				return "NETWORK," + value.toLowerCase() + "," + target;
 			case Preferences.Rule.TYPE_DOMAIN:
 			default:
 				return "DOMAIN-SUFFIX," + value + "," + target;

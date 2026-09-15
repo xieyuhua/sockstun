@@ -121,10 +121,19 @@ public class Preferences
 	public static class Rule {
 		public static final int TYPE_DOMAIN = 0;   /* DOMAIN-SUFFIX */
 		public static final int TYPE_IP = 1;       /* single IP -> IP-CIDR /32|/128 */
-		public static final int TYPE_CIDR = 2;     /* IP-CIDR */
+		public static final int TYPE_CIDR = 2;     /* IP-CIDR / IP-CIDR6 */
 		public static final int TYPE_KEYWORD = 3;  /* DOMAIN-KEYWORD */
 		public static final int TYPE_GEOIP = 4;    /* GEOIP,<country> */
 		public static final int TYPE_PROCESS = 5;  /* PROCESS-NAME */
+		/* Added later; the numeric values must stay stable because they are what
+		   gets persisted, and the rule_types array order in strings.xml has to
+		   match them (the spinner position is the type). */
+		public static final int TYPE_DOMAIN_FULL = 6;   /* DOMAIN (exact) */
+		public static final int TYPE_GEOSITE = 7;       /* GEOSITE,<name> */
+		public static final int TYPE_PROCESS_PATH = 8;  /* PROCESS-PATH */
+		public static final int TYPE_DST_PORT = 9;      /* DST-PORT */
+		public static final int TYPE_SRC_PORT = 10;     /* SRC-PORT */
+		public static final int TYPE_NETWORK = 11;      /* NETWORK,tcp|udp */
 
 		public int type;
 		public String value;

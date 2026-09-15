@@ -91,6 +91,9 @@ public class TProxyService extends VpnService {
 	   two polls is missed, so this is a close approximation, not an exact
 	   figure. */
 	private final Map<String, long[]> connSeen = new HashMap<String, long[]>();
+	/* Consecutive failed /connections polls, so the "stats are stuck at 0"
+	   case is reported instead of being invisible. */
+	private int connFailStreak = 0;
 	private long proxyBaseTx, proxyBaseRx;
 	private long proxySessionTx, proxySessionRx;
 	private long lastProxyTx, lastProxyRx;
@@ -228,6 +231,7 @@ public class TProxyService extends VpnService {
 		try {
 			if (prefs.getCustomConfig() && configFile.exists()) {
 				appendLog("config: 使用自定义 config.yaml（已关闭自动生成）");
+				ensureControlApi(configFile, prefs);
 			} else {
 				configFile = MihomoConfig.build(this, prefs);
 				appendLog("config: " + configFile.getAbsolutePath());
@@ -355,7 +359,7 @@ public class TProxyService extends VpnService {
 		   fail right here so startTUN is never reached with a broken config. */
 		if (quickSetupError != null && looksLikeError(quickSetupError)) {
 			startupAborted = true;
-			failStartup("内核配置错误：" + quickSetupError);
+			failStartup("内核配置错误：" + configErrorReason(quickSetupError));
 			return;
 		}
 
@@ -487,15 +491,92 @@ public class TProxyService extends VpnService {
 				if (startupAborted)
 				  return;
 				startupAborted = true;
-				failStartup("内核配置错误：" + reason);
+				failStartup("内核配置错误：" + configErrorReason(reason));
 			}
 		});
 	}
 
-	/* The url-test subgroup the top select group should default to. */
+	/* Turn the core's config error into something actionable. A broken
+	   hand-edited config is the common case: it references a proxy/group that
+	   does not exist, so stop using it - otherwise every reconnect fails the
+	   same way - and let the next connect regenerate a working file. */
+	private String configErrorReason(String reason) {
+		String msg = reason;
+		Preferences p = new Preferences(this);
+		if (p.getCustomConfig()) {
+			p.setCustomConfig(false);
+			msg += "\n自定义配置有误，已关闭「使用自定义配置」，下次连接会按当前设置自动重新生成。";
+		}
+		return msg;
+	}
+
+	/* The node picker, the proxy-traffic counters and the "is it proxied" check
+	   all talk to the core over the loopback control API, so the loaded config
+	   must expose it. A hand-edited custom config often does not - which is
+	   exactly why the tunnel can carry traffic while the home-screen counters
+	   stay at zero. Add the missing keys (and say so) rather than silently
+	   reporting 0. */
+	private void ensureControlApi(File configFile, Preferences prefs) {
+		try {
+			byte[] buf = new byte[(int) configFile.length()];
+			java.io.FileInputStream in = new java.io.FileInputStream(configFile);
+			int n = in.read(buf);
+			in.close();
+			String text = new String(buf, 0, n, "UTF-8");
+
+			StringBuilder extra = new StringBuilder();
+			String ec = topLevelLine(text, "external-controller:");
+			if (ec == null) {
+				extra.append("external-controller: 127.0.0.1:")
+					.append(MihomoConfig.API_PORT).append('\n');
+			} else if (!ec.contains(String.valueOf(MihomoConfig.API_PORT))) {
+				/* A different host/port means the app still cannot reach it, and
+				   appending a second key would be invalid YAML - so warn. */
+				appendLog("config: 注意 external-controller 不是 127.0.0.1:"
+					+ MihomoConfig.API_PORT + "，App 将读不到流量与连接数据：" + ec);
+			}
+			if (!hasTopLevelKey(text, "mixed-port:") && !hasTopLevelKey(text, "port:"))
+			  extra.append("mixed-port: ").append(prefs.getProxyPort()).append('\n');
+			if (extra.length() == 0)
+			  return;
+
+			String prefix = text.endsWith("\n") || text.isEmpty() ? "" : "\n";
+			java.io.FileOutputStream out = new java.io.FileOutputStream(configFile, true);
+			out.write((prefix + extra).getBytes("UTF-8"));
+			out.close();
+			appendLog("config: 自定义配置缺少 App 必需项，已自动补上：\n" + extra);
+		} catch (Exception e) {
+			appendLog("config: 检查自定义配置失败：" + e);
+		}
+	}
+
+	/* True when "key" appears as a top-level YAML key (column 0). */
+	private static boolean hasTopLevelKey(String text, String key) {
+		return topLevelLine(text, key) != null;
+	}
+
+	/* The whole top-level line that starts with `key`, or null. */
+	private static String topLevelLine(String text, String key) {
+		int idx = 0;
+		while ((idx = text.indexOf(key, idx)) >= 0) {
+			int lineStart = text.lastIndexOf('\n', idx) + 1;
+			if (idx - lineStart == 0) {
+				int end = text.indexOf('\n', idx);
+				return end < 0 ? text.substring(idx).trim()
+					: text.substring(idx, end).trim();
+			}
+			idx += key.length();
+		}
+		return null;
+	}
+
+	/* The url-test subgroup the top select group should default to, or null when
+	   there is nothing to select because the config already picked it. */
 	private static String autoTargetGroup(Preferences prefs) {
 		String chosen = prefs.getAutoSelectCountry();
-		if (chosen == null || chosen.isEmpty() || "GLOBAL".equals(chosen))
+		if (Country.AUTO.equals(chosen))
+		  return null;   /* the config defaults to the best country itself */
+		if (chosen == null || chosen.isEmpty() || Country.GLOBAL.equals(chosen))
 		  return MihomoConfig.GLOBAL_GROUP;
 		return MihomoConfig.countryGroup(chosen);
 	}
@@ -506,7 +587,11 @@ public class TProxyService extends VpnService {
 	   in manual mode we select the exact node the user tapped. */
 	private void applySelectedNode(Preferences prefs) {
 		if (prefs.getAutoSelect()) {
-			selectInGroup(MihomoConfig.GROUP, autoTargetGroup(prefs));
+			String target = autoTargetGroup(prefs);
+			/* null = "auto best country": the generated config already lists that
+			   country's url-test group first, so there is nothing to select. */
+			if (target != null)
+			  selectInGroup(MihomoConfig.GROUP, target);
 			return;
 		}
 		String sel = prefs.getSubSelected();
@@ -535,13 +620,19 @@ public class TProxyService extends VpnService {
 			   the whole apply so the selector lands once the control API is
 			   actually listening. */
 			for (int attempt = 1; attempt <= 8; attempt++) {
+				/* When the config failed to load the control API will never
+				   bind, and the shutdown path already logged the real reason -
+				   so stop rather than adding more misleading "not ready" lines. */
+				if (startupAborted)
+				  return;
 				if (waitForController()) {
 					applySelector(group, proxy);
 					return;
 				}
+				if (attempt == 1)
+				  appendLog("selector: 控制接口 127.0.0.1:" + MihomoConfig.API_PORT
+					+ " 未就绪，后台重试中");
 				if (attempt < 8) {
-					appendLog("selector: 控制接口 127.0.0.1:" + MihomoConfig.API_PORT
-						+ " 未就绪（第 " + attempt + " 次），3 秒后重试");
 					try {
 						Thread.sleep(3000);
 					} catch (InterruptedException e) {
@@ -549,10 +640,10 @@ public class TProxyService extends VpnService {
 					}
 				}
 			}
+			if (startupAborted)
+			  return;
 			appendLog("selector set failed: 控制接口 127.0.0.1:"
 				+ MihomoConfig.API_PORT + " 未就绪（内核可能未监听）");
-			if (quickSetupError != null && !quickSetupError.isEmpty())
-			  appendLog("selector: 内核配置加载报错：" + quickSetupError);
 		}).start();
 	}
 
@@ -620,26 +711,7 @@ public class TProxyService extends VpnService {
 			appendLog("controller: 127.0.0.1:" + MihomoConfig.API_PORT + " NOT ready");
 			if (quickSetupError != null && !quickSetupError.isEmpty())
 			  appendLog("controller: 内核配置加载报错：" + quickSetupError);
-			appendLog("config tail:\n" + configTail());
 		}).start();
-	}
-
-	/* Everything in the generated config from "proxy-groups:" down (groups,
-	   rules, dns, log, tun, external-controller, mixed-port). The proxy list is
-	   skipped because it can be tens of kilobytes. */
-	private String configTail() {
-		try {
-			File f = new File(getFilesDir(), "config.yaml");
-			byte[] buf = new byte[(int) f.length()];
-			java.io.FileInputStream in = new java.io.FileInputStream(f);
-			int n = in.read(buf);
-			in.close();
-			String s = new String(buf, 0, n, "UTF-8");
-			int idx = s.indexOf("proxy-groups:");
-			return idx >= 0 ? s.substring(idx) : s;
-		} catch (Exception e) {
-			return "(读取配置失败: " + e + ")";
-		}
 	}
 
 	/* Resolve `wanted` to a real member name of `group`, tolerating the
@@ -947,8 +1019,18 @@ public class TProxyService extends VpnService {
 	   contributing as it transfers. */
 	private void accumulateProxy() {
 		String body = httpGet("http://127.0.0.1:" + MihomoConfig.API_PORT + "/connections");
-		if (body == null)
-		  return;
+		if (body == null) {
+			/* A silent zero is impossible to diagnose, so say once that the
+			   control API is unreachable (and again when it recovers). */
+			connFailStreak++;
+			if (connFailStreak == 5)
+			  appendLog("流量统计：无法读取 /connections（控制接口 127.0.0.1:"
+				+ MihomoConfig.API_PORT + " 未就绪），代理流量将显示为 0");
+			return;
+		}
+		if (connFailStreak >= 5)
+		  appendLog("流量统计：/connections 已恢复");
+		connFailStreak = 0;
 		try {
 			JSONObject root = new JSONObject(body);
 			JSONArray arr = root.optJSONArray("connections");
