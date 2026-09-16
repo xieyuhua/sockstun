@@ -146,13 +146,12 @@ public class MihomoConfig {
 			+ (prefs.getRulesDefaultProxy() ? GROUP : "DIRECT") + ")";
 	}
 
-	/* One-line description of which sub-group auto mode will default to. */
+	/* One-line description of which pool auto mode picks the fastest node from.
+	   The pool is already narrowed to the chosen country by mergedConfig. */
 	private static String autoCountryLabel(Preferences prefs) {
-		String c = prefs.getAutoSelectCountry();
+		String c = prefs.getSubCountryFilter();
 		if (c == null || c.isEmpty())
 		  return " (global)";
-		if (Country.AUTO.equals(c))
-		  return " (auto-best)";
 		return " (country=" + c + ")";
 	}
 
@@ -162,6 +161,12 @@ public class MihomoConfig {
 		List<String> taken = new ArrayList<String>();
 		StringBuilder proxies = new StringBuilder();
 
+		/* The subscribe page's country chip narrows the whole tunnel to one
+		   country's proxies, so "auto fastest" and a manual pick both stay
+		   inside that country. An empty filter means "all countries". */
+		String cc = prefs.getSubCountryFilter();
+		boolean ccSet = (cc != null && !cc.isEmpty());
+
 		for (Subscription sub : prefs.getSubscriptions()) {
 			/* A disabled subscription is kept but not merged into the pool. */
 			if (!sub.enabled)
@@ -169,6 +174,17 @@ public class MihomoConfig {
 			List<ClashParser.ProxyDef> list =
 				ClashParser.extractProxies(prefs.getSubRaw(sub.id));
 			for (ClashParser.ProxyDef p : list) {
+				if (ccSet) {
+					String pc = prefs.getServerCountry(p.server);
+					boolean match = cc.equals(pc);
+					/* "Unknown" also covers nodes whose country has not been
+					   resolved yet (empty server->country map). */
+					if (!match && GeoIp.UNKNOWN.equals(cc)
+							&& (pc == null || pc.isEmpty()))
+					  match = true;
+					if (!match)
+					  continue;
+				}
 				String name = uniqueName(taken, p.name);
 				taken.add(name);
 				proxies.append(name.equals(p.name) ? p.text : renameProxy(p.text, p.name, name))
@@ -176,7 +192,9 @@ public class MihomoConfig {
 			}
 		}
 		if (taken.isEmpty())
-		  throw new IOException("no upstream: add a subscription or enable a SOCKS5 server");
+		  throw new IOException(ccSet
+			  ? ("no upstream in country " + cc)
+			  : "no upstream: add a subscription or enable a SOCKS5 server");
 
 		/* Group off what the proxies: section *really* contains, not off the
 		   names we intended. A de-dup rename or a quoting difference can leave
@@ -254,17 +272,10 @@ public class MihomoConfig {
 			global.add(p.name);
 		}
 
-		String chosen = prefs.getAutoSelectCountry();
-		String defaultSub;
-		if (Country.AUTO.equals(chosen)) {
-			String best = bestCountryForAuto(prefs, byCountry, proxys);
-			defaultSub = (best != null && byCountry.containsKey(best))
-				? countryGroup(best) : GLOBAL_GROUP;
-		} else if (chosen != null && !chosen.isEmpty() && !Country.GLOBAL.equals(chosen)
-				&& byCountry.containsKey(chosen))
-		  defaultSub = countryGroup(chosen);
-		else
-		  defaultSub = GLOBAL_GROUP;
+		/* The country pool is already narrowed by the subscribe page's filter
+		   (MihomoConfig.mergedConfig), so "auto fastest" simply means the
+		   global url-test group inside that pool. */
+		String defaultSub = GLOBAL_GROUP;
 
 		/* mihomo resolves a proxy-group's members in definition order: a group
 		   may only reference proxies/groups declared BEFORE it. The per-country

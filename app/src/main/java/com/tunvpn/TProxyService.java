@@ -601,12 +601,10 @@ public class TProxyService extends VpnService {
 	/* The url-test subgroup the top select group should default to, or null when
 	   there is nothing to select because the config already picked it. */
 	private static String autoTargetGroup(Preferences prefs) {
-		String chosen = prefs.getAutoSelectCountry();
-		if (Country.AUTO.equals(chosen))
-		  return null;   /* the config defaults to the best country itself */
-		if (chosen == null || chosen.isEmpty() || Country.GLOBAL.equals(chosen))
-		  return MihomoConfig.GLOBAL_GROUP;
-		return MihomoConfig.countryGroup(chosen);
+		/* The generated config already defaults the top group to GLOBAL_GROUP,
+		   which is the url-test group of the whole (country-filtered) pool, so
+		   there is nothing to select in auto mode. */
+		return null;
 	}
 
 	/* Ask mihomo to select the chosen proxy/group inside the group we built.

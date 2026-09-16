@@ -119,50 +119,6 @@
 					android:layout_height="wrap_content"
 					android:layout_marginStart="8dp"/>
 			</LinearLayout>
-			<!-- 国家选择（仅自动模式显示）：自动最优 / 指定国家 / 全局最快 -->
-			<LinearLayout
-				android:id="@+id/sub_country_row"
-				android:orientation="vertical"
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="8dp"
-				android:visibility="gone">
-				<LinearLayout
-					android:orientation="horizontal"
-					android:layout_width="match_parent"
-					android:layout_height="wrap_content"
-					android:gravity="center_vertical">
-					<TextView
-						android:layout_width="0dp"
-						android:layout_height="wrap_content"
-						android:layout_weight="1"
-						android:text="@string/sub_country_label"
-						android:textAppearance="?attr/textAppearanceBodyMedium"
-						android:textColor="?attr/colorOnSurface"/>
-					<Spinner
-						android:id="@+id/sub_country"
-						android:layout_width="0dp"
-						android:layout_height="wrap_content"
-						android:layout_weight="1"
-						android:minHeight="30dp"
-						android:spinnerMode="dropdown"/>
-					<com.google.android.material.button.MaterialButton
-						android:id="@+id/sub_detect_country"
-						style="?attr/materialButtonOutlinedStyle"
-						android:layout_width="wrap_content"
-						android:layout_height="wrap_content"
-						android:layout_marginStart="8dp"
-						android:minHeight="32dp"
-						android:text="@string/sub_detect"
-						android:textSize="12sp"/>
-				</LinearLayout>
-				<TextView
-					android:layout_width="match_parent"
-					android:layout_height="wrap_content"
-					android:layout_marginTop="4dp"
-					android:text="@string/sub_auto_country_hint"
-					android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
-			</LinearLayout>
 
 			<TextView
 				android:id="@+id/sub_stats"

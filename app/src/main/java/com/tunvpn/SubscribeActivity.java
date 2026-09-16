@@ -69,15 +69,10 @@ public class SubscribeActivity extends BaseActivity {
 	private SwitchMaterial switch_auto;
 	private TextView textview_auto_hint;
 	private TextView textview_test_url;
-	/* Country picker, shown only while auto-select is on: the user picks which
-	   country's url-test group the tunnel should default to. */
-	private LinearLayout countryRow;
-	private Spinner spinner_country;
-	private MaterialButton button_detect;
-	private ArrayAdapter<String> countryAdapter;
-	private final List<String> countryCodes = new ArrayList<String>();
-	private final List<String> countryLabels = new ArrayList<String>();
-	private int pendingGeo = 0;
+	/* Country chips: a single row the user swipes sideways; "" = all countries
+	   (= every proxy in the pool). The picked country actually narrows the
+	   tunnel's node pool (MihomoConfig.mergedConfig), so there is no separate
+	   auto-select country picker anymore. */
 	/* Country filter for the node list: an extra dropdown that narrows the
 	   visible list to a single country, independent of the auto-select target
 	   spinner above. "" means "all countries". */
@@ -137,54 +132,7 @@ public class SubscribeActivity extends BaseActivity {
 		switch_auto = (SwitchMaterial) findViewById(R.id.sub_auto);
 		textview_auto_hint = (TextView) findViewById(R.id.sub_auto_hint);
 		textview_test_url = (TextView) findViewById(R.id.sub_test_url);
-		countryRow = (LinearLayout) findViewById(R.id.sub_country_row);
-		spinner_country = (Spinner) findViewById(R.id.sub_country);
-		button_detect = (MaterialButton) findViewById(R.id.sub_detect_country);
 
-		countryAdapter = new ArrayAdapter<String>(this,
-			R.layout.spinner_item_small, countryLabels);
-		countryAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item_small);
-		spinner_country.setAdapter(countryAdapter);
-		spinner_country.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-			@Override
-			public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-				if (position < 0 || position >= countryCodes.size())
-				  return;
-				String code = countryCodes.get(position);
-				/* refreshCountrySpinner() re-selects the stored value; ignore that
-				   so a programmatic refresh is not mistaken for a user change. */
-				String stored = prefs.getAutoSelectCountry();
-				if (stored == null || stored.isEmpty())
-				  stored = Country.GLOBAL;
-				if (code.equals(stored))
-				  return;
-				prefs.setAutoSelectCountry(code);
-				if (!prefs.getEnable())
-				  return;
-				if (Country.AUTO.equals(code)) {
-					/* The best country is picked when the config is built. */
-					Toast.makeText(SubscribeActivity.this,
-						R.string.sub_auto_restart, Toast.LENGTH_LONG).show();
-				} else {
-					/* Every country already has its own url-test group in the
-					   running config, so the switch applies without a reconnect. */
-					startService(new Intent(SubscribeActivity.this, TProxyService.class)
-						.setAction(TProxyService.ACTION_SELECT));
-					Toast.makeText(SubscribeActivity.this,
-						getString(R.string.sub_country_switched, Country.display(code)),
-						Toast.LENGTH_SHORT).show();
-				}
-			}
-			@Override
-			public void onNothingSelected(AdapterView<?> parent) {
-			}
-		});
-		button_detect.setOnClickListener(new View.OnClickListener() {
-			@Override
-			public void onClick(View v) {
-				resolveCountries();
-			}
-		});
 		countryChips = (ChipGroup) findViewById(R.id.sub_country_chips);
 		spinner_proto_filter = (Spinner) findViewById(R.id.sub_proto_filter);
 		protoFilterAdapter = new ArrayAdapter<String>(this,
@@ -353,43 +301,7 @@ public class SubscribeActivity extends BaseActivity {
 		textview_stats.setText(sb.toString());
 	}
 
-	/* Rebuild the country dropdown from the nodes already parsed. Index 0 is
-	   always "GLOBAL" (fastest anywhere); the rest are ISO codes with counts,
-	   sorted by count descending. */
-	private void refreshCountrySpinner() {
-		countryCodes.clear();
-		countryLabels.clear();
-		/* Index 0 = fastest anywhere; index 1 = auto-pick the fastest country.
-		   Both are sentinels; the rest are real ISO codes with node counts. */
-		countryCodes.add(Country.GLOBAL);
-		countryLabels.add(Country.display(Country.GLOBAL));
-		countryCodes.add(Country.AUTO);
-		countryLabels.add(Country.display(Country.AUTO));
-		Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
-		for (ClashNode n : nodes) {
-			String cc = (n.country == null || n.country.isEmpty()) ? GeoIp.UNKNOWN : n.country;
-			Integer c = counts.get(cc);
-			counts.put(cc, c == null ? 1 : c + 1);
-		}
-		List<Map.Entry<String, Integer>> entries =
-			new ArrayList<Map.Entry<String, Integer>>(counts.entrySet());
-		Collections.sort(entries, new Comparator<Map.Entry<String, Integer>>() {
-			@Override
-			public int compare(Map.Entry<String, Integer> a, Map.Entry<String, Integer> b) {
-				return b.getValue().compareTo(a.getValue());
-			}
-		});
-		for (Map.Entry<String, Integer> e : entries) {
-			countryCodes.add(e.getKey());
-			countryLabels.add(Country.displayWithCount(e.getKey(), e.getValue()));
-		}
-		countryAdapter.notifyDataSetChanged();
-		String cur = prefs.getAutoSelectCountry();
-		int idx = countryCodes.indexOf(cur);
-		if (idx < 0)
-		  idx = 0;
-		spinner_country.setSelection(idx);
-	}
+
 
 	/* Rebuild the country chip row: "全部" first (that is the whole proxy pool),
 	   then one chip per country with its node count, busiest first. The row
@@ -443,6 +355,12 @@ public class SubscribeActivity extends BaseActivity {
 				filterCountry = code;
 				prefs.setSubCountryFilter(filterCountry);
 				applyView();
+				/* The tunnel's node pool is baked in at startup
+				   (MihomoConfig.mergedConfig), so a running tunnel keeps the
+				   old country until it is reconnected. */
+				if (prefs.getEnable())
+				  Toast.makeText(SubscribeActivity.this,
+					  R.string.sub_country_filter_reconnect, Toast.LENGTH_LONG).show();
 			}
 		});
 		return chip;
@@ -483,48 +401,7 @@ public class SubscribeActivity extends BaseActivity {
 		spinner_proto_filter.setSelection(idx);
 	}
 
-	/* Resolve each node's country via GeoIp (server IP -> GeoIP), inside the
-	   test pool so a few hundred nodes don't block the UI. Results are cached
-	   into Preferences, then the spinner and list refresh. */
-	private void resolveCountries() {
-		if (nodes.isEmpty())
-		  return;
-		final List<ClashNode> todo = new ArrayList<ClashNode>();
-		for (ClashNode n : nodes) {
-			if (n.country == null || n.country.isEmpty() || n.country.equals(GeoIp.UNKNOWN))
-			  todo.add(n);
-		}
-		if (todo.isEmpty()) {
-			Toast.makeText(this, R.string.sub_detect_none, Toast.LENGTH_SHORT).show();
-			return;
-		}
-		Toast.makeText(this, R.string.sub_detecting, Toast.LENGTH_SHORT).show();
-		pendingGeo = todo.size();
-		for (final ClashNode n : todo) {
-			testPool.execute(new Runnable() {
-				@Override
-				public void run() {
-					String cc = GeoIp.countryOf(prefs, n.server);
-					n.country = cc;
-					ui.post(new Runnable() {
-						@Override
-						public void run() {
-							if (isFinishing() || isDestroyed())
-							  return;
-							pendingGeo--;
-							if (pendingGeo <= 0) {
-								saveNodes();
-								refreshCountrySpinner();
-								refreshCountryChips();
-								refreshProtoFilterSpinner();
-								applyView();
-							}
-						}
-					});
-				}
-			});
-		}
-	}
+
 
 	/* Latency results belong to the subscription a node came from, so write
 	   each group back to its own cache. */
@@ -604,7 +481,6 @@ public class SubscribeActivity extends BaseActivity {
 							  return;
 						}
 						saveNodes();
-						refreshCountrySpinner();
 						refreshCountryChips();
 						refreshProtoFilterSpinner();
 						applyView();
@@ -656,10 +532,7 @@ public class SubscribeActivity extends BaseActivity {
 			public void onCheckedChanged(CompoundButton button, boolean checked) {
 				prefs.setAutoSelect(checked);
 				updateAutoUi();
-				/* Turning auto on with no country data yet: probe the nodes so
-				   the picker is populated. */
-				if (checked)
-				  resolveCountries();
+
 				/* The group type is baked in when the tunnel starts, so a
 				   running tunnel keeps its old behaviour until reconnected. */
 				if (prefs.getEnable())
@@ -695,10 +568,7 @@ public class SubscribeActivity extends BaseActivity {
 		textview_test_url.setVisibility(auto ? View.VISIBLE : View.GONE);
 		textview_test_url.setText(getString(R.string.sub_test_url,
 			prefs.getAutoTestUrl()));
-		/* The country picker only makes sense in auto mode. */
-		countryRow.setVisibility(auto ? View.VISIBLE : View.GONE);
-		if (auto)
-		  refreshCountrySpinner();
+
 	}
 
 	private int intervalMinutes() {

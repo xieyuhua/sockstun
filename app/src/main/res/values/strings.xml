@@ -184,6 +184,7 @@
 	<string name="sub_manual_hint">手动模式：使用你点选的那个节点</string>
 	<string name="sub_country_label">自动选择国家/地区</string>
 	<string name="sub_country_filter_label">按国家筛选</string>
+	<string name="sub_country_filter_reconnect">已切换国家,重新连接后生效(配置只含该国的代理)</string>
 	<string name="sub_country_all">全部</string>
 	<string name="sub_country_all_label">全部国家</string>
 	<string name="sub_visible">显示 %d 个</string>
