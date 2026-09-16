@@ -15,6 +15,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -200,18 +201,24 @@ public class SubscribeConfigActivity extends BaseActivity {
 			final Subscription s = getItem(position);
 			TextView name = (TextView) convertView.findViewById(R.id.item_name);
 			TextView detail = (TextView) convertView.findViewById(R.id.item_detail);
+			SwitchMaterial sw = (SwitchMaterial) convertView.findViewById(R.id.item_enabled);
 			Button edit = (Button) convertView.findViewById(R.id.item_edit);
 			Button delete = (Button) convertView.findViewById(R.id.item_delete);
 
 			name.setText(s.label());
-			/* Which subscriptions still need a fetch becomes obvious here. */
-			int cached = ClashNode.decode(prefs.getSubNodes(s.id)).size();
-			String detailStr = cached > 0
-				? getString(R.string.subs_cached, s.url, cached)
-				: getString(R.string.subs_not_fetched, s.url);
-			if (!s.enabled)
-				detailStr += "  ·  " + getString(R.string.subs_disabled);
-			detail.setText(detailStr);
+			detail.setText(buildDetail(s));
+
+			/* Toggle enabled straight from the list, no need to open the dialog. */
+			sw.setOnCheckedChangeListener(null);
+			sw.setChecked(s.enabled);
+			sw.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+				@Override
+				public void onCheckedChanged(CompoundButton button, boolean isChecked) {
+					s.enabled = isChecked;
+					prefs.setSubscriptions(subs);
+					detail.setText(buildDetail(s));
+				}
+			});
 
 			edit.setOnClickListener(new View.OnClickListener() {
 				@Override
@@ -227,6 +234,18 @@ public class SubscribeConfigActivity extends BaseActivity {
 			});
 			return convertView;
 		}
+	}
+
+	/* Detail line: cached node count, plus a "disabled" marker so the state is
+	   visible without expanding the item. */
+	private String buildDetail(Subscription s) {
+		int cached = ClashNode.decode(prefs.getSubNodes(s.id)).size();
+		String detailStr = cached > 0
+			? getString(R.string.subs_cached, s.url, cached)
+			: getString(R.string.subs_not_fetched, s.url);
+		if (!s.enabled)
+			detailStr += "  ·  " + getString(R.string.subs_disabled);
+		return detailStr;
 	}
 
 	/* Pull every (enabled) subscription's clash.yml, parse it and store the raw

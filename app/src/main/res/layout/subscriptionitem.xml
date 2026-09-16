@@ -25,6 +25,12 @@
 				android:maxLines="1"
 				android:textAppearance="?attr/textAppearanceTitleMedium"
 				android:textStyle="bold"/>
+			<com.google.android.material.switchmaterial.SwitchMaterial
+				android:id="@+id/item_enabled"
+				android:layout_width="wrap_content"
+				android:layout_height="wrap_content"
+				android:layout_marginStart="8dp"
+				android:contentDescription="@string/subs_enabled"/>
 		</LinearLayout>
 		<TextView
 			android:id="@+id/item_detail"
