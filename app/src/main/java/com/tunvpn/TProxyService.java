@@ -1068,6 +1068,7 @@ public class TProxyService extends VpnService {
 			  return;
 
 			Set<String> alive = new HashSet<String>();
+			int proxyConnCount = 0;
 			for (int i = 0; i < arr.length(); i++) {
 				JSONObject c = arr.optJSONObject(i);
 				if (c == null)
@@ -1078,6 +1079,7 @@ public class TProxyService extends VpnService {
 				alive.add(id);
 				if (isDirectConnection(c))
 				  continue;
+				proxyConnCount++;
 
 				long up = c.optLong("upload");
 				long down = c.optLong("download");
@@ -1097,6 +1099,13 @@ public class TProxyService extends VpnService {
 			}
 			/* Drop finished connections so the map cannot grow forever. */
 			connSeen.keySet().retainAll(alive);
+			/* A zero proxy count while traffic is clearly flowing usually means
+			   the filter is wrong (field name, or every connection routed
+			   DIRECT) - make it visible instead of a silent blank counter. */
+			if (trafficSamples <= 3 || (trafficSamples % 60) == 0)
+			  appendLog("流量统计：活跃连接=" + arr.length()
+				+ " 代理连接=" + proxyConnCount
+				+ " session tx/rx=" + proxySessionTx + "/" + proxySessionRx);
 
 			long now = SystemClock.elapsedRealtime();
 			long dt = now - lastProxyTime;
@@ -1112,9 +1121,19 @@ public class TProxyService extends VpnService {
 	}
 
 	/* An empty chain, or a DIRECT hop in it, means the request never reached a
-	   proxy node. */
+	   proxy node. mihomo has exposed the proxy path as both "chains" (array) and
+	   "chain" (single string) across builds, so accept either spelling -
+	   otherwise a field-name mismatch makes every connection look direct and the
+	   proxied counters stay at zero. */
 	private static boolean isDirectConnection(JSONObject c) {
 		JSONArray chains = c.optJSONArray("chains");
+		if (chains == null) {
+			String single = c.optString("chain", null);
+			if (single != null && !single.isEmpty()) {
+				chains = new JSONArray();
+				chains.put(single);
+			}
+		}
 		if (chains == null || chains.length() == 0)
 		  return true;
 		for (int i = 0; i < chains.length(); i++) {

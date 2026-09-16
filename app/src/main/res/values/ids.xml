@@ -11,4 +11,5 @@
 	<item name="settings_config" type="id"/>
 	<item name="settings_theme" type="id"/>
 	<item name="settings_version" type="id"/>
+	<item name="settings_test_url" type="id"/>
 </resources>

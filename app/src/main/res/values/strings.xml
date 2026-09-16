@@ -265,7 +265,11 @@
 	<string name="connections_close_toast">已请求断开全部连接</string>
 	<string name="settings_port_hint">1024 – 65535</string>
 	<string name="settings_port_clamped">已调整为 %1$d</string>
+	<string name="settings_port_desc">局域网内其他设备连接此端口即可走代理。允许范围 1024–65535。</string>
+	<string name="settings_port_default">默认 (7890)</string>
+	<string name="sub_auto_pick">自动选择已开启，将按延迟自动切换节点（%s 不会被固定）</string>
 	<string name="settings_restart_needed">设置已保存，重新连接后生效</string>
+	<string name="apps_applied_restart">应用列表已保存，正在重新连接以应用</string>
 	<string name="connection_state">状态</string>
 	<string name="connection_node">节点</string>
 	<string name="connection_server">服务器</string>

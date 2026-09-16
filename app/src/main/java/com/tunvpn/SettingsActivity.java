@@ -98,6 +98,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			Integer.toString(prefs.getProxyPort()), R.id.settings_proxy_port);
 		addRow(group_subscription, R.drawable.ic_subscribe, R.string.subs_config,
 			subsSubtitle(), R.id.settings_subscription);
+		addRow(group_subscription, R.drawable.ic_routing, R.string.sub_test_url_title,
+			getString(R.string.sub_test_url, prefs.getAutoTestUrl()), R.id.settings_test_url);
 		addRow(group_general, R.drawable.ic_log, R.string.log,
 			logSubtitle(), R.id.settings_log);
 		addRow(group_general, R.drawable.ic_rules, R.string.settings_config,
@@ -165,6 +167,46 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  Toast.makeText(this, R.string.settings_restart_needed, Toast.LENGTH_LONG).show();
 	}
 
+	/* The URL mihomo's url-test groups measure against. If a node's network
+	   cannot reach this host, every node scores as failed there even though the
+	   node itself works — the usual cause of "tested OK but unusable". */
+	private void editTestUrl() {
+		final EditText input = new EditText(this);
+		input.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
+		input.setSingleLine(true);
+		input.setHint(R.string.sub_test_url_title);
+		input.setText(prefs.getAutoTestUrl());
+		input.setSelection(input.getText().length());
+		int pad = (int) (20 * getResources().getDisplayMetrics().density);
+		input.setPadding(pad, pad / 2, pad, 0);
+
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.sub_test_url_title)
+			.setMessage(R.string.sub_test_url_hint)
+			.setView(input)
+			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface d, int which) {
+					String url = input.getText().toString().trim();
+					if (!url.isEmpty() && !isHttpUrl(url)) {
+						Toast.makeText(SettingsActivity.this,
+							R.string.sub_test_url_invalid, Toast.LENGTH_LONG).show();
+						return;
+					}
+					prefs.setAutoTestUrl(url);
+					buildList();
+					afterNetworkChange();
+				}
+			})
+			.setNegativeButton(android.R.string.cancel, null)
+			.show();
+	}
+
+	private static boolean isHttpUrl(String url) {
+		String u = url.toLowerCase();
+		return u.startsWith("http://") || u.startsWith("https://");
+	}
+
 	private void editPort() {
 		final EditText input = new EditText(this);
 		input.setInputType(InputType.TYPE_CLASS_NUMBER);
@@ -176,8 +218,14 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 
 		new AlertDialog.Builder(this)
 			.setTitle(R.string.settings_lan_port)
-			.setMessage(R.string.settings_port_hint)
+			.setMessage(R.string.settings_port_desc)
 			.setView(input)
+			.setNeutralButton(R.string.settings_port_default, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface d, int which) {
+					applyProxyPort(Preferences.DEFAULT_PROXY_PORT);
+				}
+			})
 			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
 				@Override
 				public void onClick(DialogInterface d, int which) {
@@ -187,19 +235,25 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 					} catch (NumberFormatException e) {
 						port = prefs.getProxyPort();
 					}
-					int clamped = Math.max(Preferences.MIN_PROXY_PORT,
-						Math.min(Preferences.MAX_PROXY_PORT, port));
-					if (clamped != port)
-					  Toast.makeText(SettingsActivity.this,
-						getString(R.string.settings_port_clamped, clamped),
-						Toast.LENGTH_SHORT).show();
-					prefs.setProxyPort(clamped);
-					buildList();
-					afterNetworkChange();
+					applyProxyPort(port);
 				}
 			})
 			.setNegativeButton(android.R.string.cancel, null)
 			.show();
+	}
+
+	/* Shared save path for the proxy port: clamp into the valid range, persist,
+	   refresh the settings row, and re-apply if the tunnel is live. */
+	private void applyProxyPort(int port) {
+		int clamped = Math.max(Preferences.MIN_PROXY_PORT,
+			Math.min(Preferences.MAX_PROXY_PORT, port));
+		if (clamped != port)
+		  Toast.makeText(SettingsActivity.this,
+			getString(R.string.settings_port_clamped, clamped),
+			Toast.LENGTH_SHORT).show();
+		prefs.setProxyPort(clamped);
+		buildList();
+		afterNetworkChange();
 	}
 
 	private View makeDivider() {
@@ -294,6 +348,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  startActivity(new Intent(this, ConnectionsActivity.class));
 		else if (id == R.id.settings_subscription)
 		  startActivity(new Intent(this, SubscribeConfigActivity.class));
+		else if (id == R.id.settings_test_url)
+		  editTestUrl();
 		else if (id == R.id.settings_proxy_port)
 		  editPort();
 		else if (id == R.id.settings_log)

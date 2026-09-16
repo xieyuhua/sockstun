@@ -194,13 +194,19 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		edittext_dns_ipv6.setText(prefs.getDnsIpv6());
 
 		boolean editable = !prefs.getEnable();
-		checkbox_global.setEnabled(editable);
+		/* The global/per-app switch must stay togglable while connected, since
+		   "per-app" is the only way the app allow-list takes effect. With it
+		   locked, a running tunnel could never leave global mode, making the
+		   app list (edited in AppListActivity) permanently ignored. */
+		checkbox_global.setEnabled(true);
 		checkbox_ipv4.setEnabled(editable);
 		checkbox_ipv6.setEnabled(editable);
 		checkbox_udp_in_tcp.setEnabled(editable);
 		checkbox_remote_dns.setEnabled(editable);
 
-		button_apps.setEnabled(editable && !checkbox_global.isChecked());
+		/* Allow entering the app list while connected too; AppListActivity
+		   now rebuilds the tunnel on save so the new scope applies live. */
+		button_apps.setEnabled(!checkbox_global.isChecked());
 		applyDnsEnabled(editable, checkbox_remote_dns.isChecked());
 		/* Rule controls depend on both editability and the chosen strategy, so
 		   let updateModeUi() own them. */
@@ -291,14 +297,25 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 			return;
 		}
 		if (view == checkbox_global) {
-			boolean editable = !prefs.getEnable();
-			button_apps.setEnabled(editable && !checkbox_global.isChecked());
+			boolean global = checkbox_global.isChecked();
+			prefs.setGlobal(global);
+			button_apps.setEnabled(!global);
 			updateScopeHint();
-			if (!checkbox_global.isChecked()) {
+			if (!global) {
 				Set<String> apps = prefs.getApps();
 				if (apps == null || apps.isEmpty())
 				  Toast.makeText(RulesHubActivity.this,
 					R.string.routing_scope_empty_warn, Toast.LENGTH_LONG).show();
+			}
+			/* Global vs per-app scope is decided when the tunnel is
+			   established, so toggling it on a live connection must rebuild
+			   the tunnel for the change to take effect. */
+			if (prefs.getEnable()) {
+				startService(new Intent(this, TProxyService.class)
+					.setAction(TProxyService.ACTION_DISCONNECT));
+				startService(new Intent(this, TProxyService.class)
+					.setAction(TProxyService.ACTION_CONNECT));
+				Toast.makeText(this, R.string.apps_applied_restart, Toast.LENGTH_LONG).show();
 			}
 			return;
 		}

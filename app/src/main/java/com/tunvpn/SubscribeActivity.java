@@ -68,7 +68,6 @@ public class SubscribeActivity extends BaseActivity {
 	private TextView textview_stats;
 	private SwitchMaterial switch_auto;
 	private TextView textview_auto_hint;
-	private TextView textview_test_url;
 	/* Country chips: a single row the user swipes sideways; "" = all countries
 	   (= every proxy in the pool). The picked country actually narrows the
 	   tunnel's node pool (MihomoConfig.mergedConfig), so there is no separate
@@ -131,7 +130,6 @@ public class SubscribeActivity extends BaseActivity {
 		textview_stats = (TextView) findViewById(R.id.sub_stats);
 		switch_auto = (SwitchMaterial) findViewById(R.id.sub_auto);
 		textview_auto_hint = (TextView) findViewById(R.id.sub_auto_hint);
-		textview_test_url = (TextView) findViewById(R.id.sub_test_url);
 
 		countryChips = (ChipGroup) findViewById(R.id.sub_country_chips);
 		spinner_proto_filter = (Spinner) findViewById(R.id.sub_proto_filter);
@@ -313,10 +311,16 @@ public class SubscribeActivity extends BaseActivity {
 		countryChips.addView(makeCountryChip(getString(R.string.sub_country_all), ""));
 
 		Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
+		Map<String, Integer> avail = new LinkedHashMap<String, Integer>();
 		for (ClashNode n : nodes) {
 			String cc = countryCode(n);
 			Integer c = counts.get(cc);
 			counts.put(cc, c == null ? 1 : c + 1);
+			/* Only a node that passed a latency test counts as usable. */
+			if (n.latency >= 0) {
+				Integer a = avail.get(cc);
+				avail.put(cc, a == null ? 1 : a + 1);
+			}
 		}
 		List<Map.Entry<String, Integer>> entries =
 			new ArrayList<Map.Entry<String, Integer>>(counts.entrySet());
@@ -328,8 +332,10 @@ public class SubscribeActivity extends BaseActivity {
 		});
 		for (Map.Entry<String, Integer> e : entries) {
 			filterCountryCodes.add(e.getKey());
+			int total = e.getValue();
+			int ok = avail.containsKey(e.getKey()) ? avail.get(e.getKey()) : 0;
 			countryChips.addView(makeCountryChip(
-				Country.displayWithCount(e.getKey(), e.getValue()), e.getKey()));
+				Country.displayWithAvail(e.getKey(), ok, total), e.getKey()));
 		}
 
 		int idx = filterCountryCodes.indexOf(filterCountry);
@@ -492,16 +498,12 @@ public class SubscribeActivity extends BaseActivity {
 	}
 
 	private void useNode(final ClashNode n) {
-		/* Tapping a node means the user wants exactly that one, so auto-select
-		   has to go off - otherwise the url-test group would switch away from
-		   it on the next health check. */
-		boolean wasAuto = prefs.getAutoSelect();
-		if (wasAuto) {
-			prefs.setAutoSelect(false);
-			updateAutoUi();
-		}
-		/* The app owns the routing, so "use" just remembers the pick;
-		   TProxyService selects it in our own group when the tunnel starts. */
+		/* Tapping a node while auto-select is on: the url-test group keeps
+		   picking the fastest node, so the tap is only a hint. We used to flip
+		   auto-select off here, which silently discarded the user's choice
+		   ("I turned it on, came back, it was off"). Auto-select now stays on
+		   and persists; the tap is acknowledged with a hint. */
+		boolean auto = prefs.getAutoSelect();
 		prefs.setSubSelected(n.name);
 		/* Picking a subscription node hands the upstream back to the
 		   subscription, so any enabled SOCKS5 server is disabled. */
@@ -510,14 +512,14 @@ public class SubscribeActivity extends BaseActivity {
 		if (prefs.getEnable()) {
 			startService(new Intent(this, TProxyService.class)
 				.setAction(TProxyService.ACTION_SELECT));
-			/* The running tunnel still has the url-test group and that group
-			   re-tests on a timer, so a hand-picked node is only guaranteed to
-			   stick after a restart switches the group to select. */
-			msg = wasAuto
-				? getString(R.string.sub_switched_restart, n.name)
-				: getString(R.string.sub_switched, n.name);
-		} else
-			msg = getString(R.string.sub_applied_hint, n.name);
+			msg = auto
+				? getString(R.string.sub_auto_pick, n.name)
+				: getString(R.string.sub_switched_restart, n.name);
+		} else {
+			msg = auto
+				? getString(R.string.sub_auto_pick, n.name)
+				: getString(R.string.sub_applied_hint, n.name);
+		}
 		Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
 		adapter.notifyDataSetChanged();
 	}
@@ -546,12 +548,6 @@ public class SubscribeActivity extends BaseActivity {
 				editInterval();
 			}
 		});
-		textview_test_url.setOnClickListener(new View.OnClickListener() {
-			@Override
-			public void onClick(View v) {
-				editTestUrl();
-			}
-		});
 		updateAutoUi();
 	}
 
@@ -564,11 +560,6 @@ public class SubscribeActivity extends BaseActivity {
 		textview_auto_hint.setText(auto
 			? getString(R.string.sub_auto_hint, intervalLabel())
 			: getString(R.string.sub_manual_hint));
-		/* The check target only matters while url-test is in charge. */
-		textview_test_url.setVisibility(auto ? View.VISIBLE : View.GONE);
-		textview_test_url.setText(getString(R.string.sub_test_url,
-			prefs.getAutoTestUrl()));
-
 	}
 
 	private int intervalMinutes() {
@@ -663,47 +654,6 @@ public class SubscribeActivity extends BaseActivity {
 		if (prefs.getEnable())
 		  Toast.makeText(SubscribeActivity.this,
 			R.string.sub_auto_restart, Toast.LENGTH_LONG).show();
-	}
-
-	/* The URL url-test measures against. Worth exposing: if a provider treats
-	   this particular host badly, every node would score poorly even though
-	   normal traffic is fine. */
-	private void editTestUrl() {
-		if (!prefs.getAutoSelect())
-		  return;
-		final EditText input = new EditText(this);
-		input.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
-		input.setSingleLine(true);
-		input.setHint(R.string.sub_test_url_title);
-		input.setText(prefs.getAutoTestUrl());
-		input.setSelection(input.getText().length());
-		int pad = (int) (20 * getResources().getDisplayMetrics().density);
-		input.setPadding(pad, pad / 2, pad, 0);
-
-		new AlertDialog.Builder(this)
-			.setTitle(R.string.sub_test_url_title)
-			.setMessage(R.string.sub_test_url_hint)
-			.setView(input)
-			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface d, int which) {
-					String url = input.getText().toString().trim();
-					if (!url.isEmpty() && !isHttpUrl(url)) {
-						Toast.makeText(SubscribeActivity.this,
-							R.string.sub_test_url_invalid, Toast.LENGTH_LONG).show();
-						return;
-					}
-					prefs.setAutoTestUrl(url);
-					afterAutoSelectChange();
-				}
-			})
-			.setNegativeButton(android.R.string.cancel, null)
-			.show();
-	}
-
-	private static boolean isHttpUrl(String url) {
-		String u = url.toLowerCase();
-		return u.startsWith("http://") || u.startsWith("https://");
 	}
 
 	private void showHelp() {

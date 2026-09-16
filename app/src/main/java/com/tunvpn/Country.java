@@ -146,4 +146,10 @@ public class Country {
 	public static String displayWithCount(String cc, int count) {
 		return display(cc) + " (" + count + ")";
 	}
+
+	/* Label with "usable/total" for the country chips: only latency-tested,
+	   reachable nodes count as usable (latency >= 0). */
+	public static String displayWithAvail(String cc, int avail, int total) {
+		return display(cc) + " (" + avail + "/" + total + ")";
+	}
 }

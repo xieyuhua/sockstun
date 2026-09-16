@@ -27,10 +27,12 @@ import android.widget.CompoundButton;
 import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
+import android.widget.Toast;
 import android.widget.EditText;
 import android.text.TextWatcher;
 import android.text.Editable;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.drawable.Drawable;
 import android.content.pm.PackageInfo;
@@ -279,6 +281,18 @@ public class AppListActivity extends BaseActivity {
 			}
 
 			prefs.setApps(apps);
+			/* The per-app allow-list is only read when the VPN tunnel is
+			   established (VpnService.Builder.addAllowedApplication). If the
+			   tunnel is already up, saving alone leaves the old scope in place,
+			   so the selection looks "not working" until a reconnect. Rebuild
+			   the tunnel so the new app scope takes effect immediately. */
+			if (prefs.getEnable()) {
+				startService(new Intent(this, TProxyService.class)
+					.setAction(TProxyService.ACTION_DISCONNECT));
+				startService(new Intent(this, TProxyService.class)
+					.setAction(TProxyService.ACTION_CONNECT));
+				Toast.makeText(this, R.string.apps_applied_restart, Toast.LENGTH_LONG).show();
+			}
 		}
 
 		super.onDestroy();
