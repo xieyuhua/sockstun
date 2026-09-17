@@ -965,6 +965,18 @@ public class Preferences
 		editor.commit();
 	}
 
+	/* Recent requests: a JSON array of compact objects recorded by TProxyService
+	   each time a connection closes, so the UI can show "what went where" after
+	   the fact. Keeping it as JSON (not a packed "k:v;..." string) preserves the
+	   field names and makes the reader trivial. */
+	private static final String RECENT_REQUESTS = "recentRequests";
+	public void setRecentRequests(String json) {
+		prefs.edit().putString(RECENT_REQUESTS, json).apply();
+	}
+	public String getRecentRequests() {
+		return prefs.getString(RECENT_REQUESTS, "");
+	}
+
 	/* Per-app snapshots: "pkg:tx:rx;pkg:tx:rx;...". */
 	public String getAppBase() {
 		return prefs.getString(STATS_APP_BASE, "");

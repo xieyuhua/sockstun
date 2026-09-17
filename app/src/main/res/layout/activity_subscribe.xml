@@ -25,14 +25,6 @@
 			android:layout_width="match_parent"
 			android:layout_height="wrap_content"
 			android:padding="12dp">
-			<!-- ② 筛选：国家（左右滑动）/ 协议 -->
-			<TextView
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:text="@string/sub_section_filter"
-				android:textAppearance="?attr/textAppearanceTitleSmall"
-				android:textColor="?attr/colorPrimary"
-				android:textStyle="bold"/>
 			<!-- 国家：一行 chip，左右滑动选择；「全部」= 所有代理 -->
 			<HorizontalScrollView
 				android:layout_width="match_parent"

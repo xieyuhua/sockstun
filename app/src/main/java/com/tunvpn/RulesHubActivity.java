@@ -312,9 +312,7 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 			   the tunnel for the change to take effect. */
 			if (prefs.getEnable()) {
 				startService(new Intent(this, TProxyService.class)
-					.setAction(TProxyService.ACTION_DISCONNECT));
-				startService(new Intent(this, TProxyService.class)
-					.setAction(TProxyService.ACTION_CONNECT));
+					.setAction(TProxyService.ACTION_RECONNECT));
 				Toast.makeText(this, R.string.apps_applied_restart, Toast.LENGTH_LONG).show();
 			}
 			return;

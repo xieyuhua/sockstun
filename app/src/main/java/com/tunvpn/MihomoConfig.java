@@ -22,6 +22,8 @@ import android.content.Context;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -41,8 +43,45 @@ public class MihomoConfig {
 	}
 	/* mihomo's RESTful API. Bound to loopback only: it exposes every
 	   connection's target and must never be reachable from the LAN, which is
-	   also why it ignores the allow-lan setting. */
-	public static final int API_PORT = 9090;
+	   also why it ignores the allow-lan setting. Not final: at startup we scan
+	   9090..9100 and switch to the first free loopback port, because a port
+	   already held by another process makes mihomo silently fail to bind the
+	   control API (symptom: tunnel up but /connections is connection-refused
+	   and every counter stays 0). */
+	public static int API_PORT = 9090;
+
+	/* Find a free loopback port for the clash-api and store it in API_PORT.
+	   Returns the chosen port. Falls back to 9090 if the whole range is taken,
+	   letting mihomo report the real bind error instead of us guessing. */
+	public static int pickApiPort() {
+		for (int p = 9090; p <= 9100; p++) {
+			if (isPortFree(p)) {
+				API_PORT = p;
+				return p;
+			}
+		}
+		API_PORT = 9090;
+		return API_PORT;
+	}
+
+	/* True when nothing on this device is already listening on 127.0.0.1:port.
+	   We bind a throwaway socket the same way mihomo will, so a port we can
+	   bind is one mihomo can bind too. */
+	private static boolean isPortFree(int port) {
+		java.net.ServerSocket ss = null;
+		try {
+			ss = new java.net.ServerSocket();
+			ss.setReuseAddress(true);
+			ss.bind(new java.net.InetSocketAddress("127.0.0.1", port));
+			return true;
+		} catch (Throwable e) {
+			return false;
+		} finally {
+			if (ss != null) {
+				try { ss.close(); } catch (Throwable ignore) { }
+			}
+		}
+	}
 	/* Bail-out threshold for the auto re-test interval. */
 	private static final int MIN_INTERVAL = 30;
 	private static final int MAX_INTERVAL = 86400;
@@ -93,6 +132,13 @@ public class MihomoConfig {
 		   traffic (the point of the home screen's counters). */
 		if (!sectionExists(cfg, "external-controller:"))
 			cfg.append("external-controller: 127.0.0.1:").append(API_PORT).append('\n');
+
+		/* Match flclash: resolve the originating app for every connection so the
+		   "connections" and "recent requests" screens can show which app made the
+		   request. Without it mihomo leaves metadata.process empty and the app
+		   column stays blank. */
+		if (!sectionExists(cfg, "find-process-mode:"))
+			cfg.append("find-process-mode: strict\n");
 
 		/* The home screen asks an echo service for the public IP through the
 		   core's local HTTP port, and the "allow LAN" setting exposes it to the

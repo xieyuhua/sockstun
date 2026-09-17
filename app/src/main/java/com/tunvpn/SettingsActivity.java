@@ -14,7 +14,9 @@ import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.View;
 import android.widget.CompoundButton;
 import android.widget.EditText;
@@ -28,6 +30,8 @@ import androidx.appcompat.app.AlertDialog;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.color.MaterialColors;
 import com.google.android.material.switchmaterial.SwitchMaterial;
+import com.google.android.material.textfield.TextInputEditText;
+import com.google.android.material.textfield.TextInputLayout;
 
 import java.io.File;
 import java.util.Set;
@@ -84,6 +88,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			appsSubtitle(), R.id.settings_apps);
 		addRow(group_connection, R.drawable.ic_routing, R.string.settings_connections,
 			getString(R.string.settings_connections_hint), R.id.settings_connections);
+		addRow(group_connection, R.drawable.ic_routing, R.string.settings_recent_requests,
+			getString(R.string.settings_recent_requests_hint), R.id.settings_recent_requests);
 
 		addSwitchRow(group_lan, R.drawable.ic_routing, R.string.settings_allow_lan,
 			R.string.settings_allow_lan_hint, prefs.getAllowLan(),
@@ -100,6 +106,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			subsSubtitle(), R.id.settings_subscription);
 		addRow(group_subscription, R.drawable.ic_routing, R.string.sub_test_url_title,
 			getString(R.string.sub_test_url, prefs.getAutoTestUrl()), R.id.settings_test_url);
+		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_autosel_interval,
+			autoSelectIntervalSubtitle(), R.id.settings_autosel_interval);
 		addRow(group_general, R.drawable.ic_log, R.string.log,
 			logSubtitle(), R.id.settings_log);
 		addRow(group_general, R.drawable.ic_rules, R.string.settings_config,
@@ -170,36 +178,31 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 	/* The URL mihomo's url-test groups measure against. If a node's network
 	   cannot reach this host, every node scores as failed there even though the
 	   node itself works — the usual cause of "tested OK but unusable". */
+	/* Test URL: blank restores the default; any value must be an http(s) URL,
+	   validated live so a bad entry is caught before saving. */
 	private void editTestUrl() {
-		final EditText input = new EditText(this);
-		input.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
-		input.setSingleLine(true);
-		input.setHint(R.string.sub_test_url_title);
-		input.setText(prefs.getAutoTestUrl());
-		input.setSelection(input.getText().length());
-		int pad = (int) (20 * getResources().getDisplayMetrics().density);
-		input.setPadding(pad, pad / 2, pad, 0);
-
-		new AlertDialog.Builder(this)
-			.setTitle(R.string.sub_test_url_title)
-			.setMessage(R.string.sub_test_url_hint)
-			.setView(input)
-			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface d, int which) {
-					String url = input.getText().toString().trim();
-					if (!url.isEmpty() && !isHttpUrl(url)) {
-						Toast.makeText(SettingsActivity.this,
-							R.string.sub_test_url_invalid, Toast.LENGTH_LONG).show();
-						return;
-					}
-					prefs.setAutoTestUrl(url);
+		showInputDialog(R.string.sub_test_url_title,
+			getString(R.string.sub_test_url_title),
+			getString(R.string.sub_test_url_hint),
+			InputType.TYPE_TEXT_VARIATION_URI | InputType.TYPE_CLASS_TEXT,
+			prefs.getAutoTestUrl(),
+			new InputValidator() {
+				@Override public String validate(String v) {
+					if (v.isEmpty())
+					  return null;
+					if (!isHttpUrl(v))
+					  return getString(R.string.sub_test_url_invalid);
+					return null;
+				}
+			},
+			new OnValue() {
+				@Override public void onReceiveValue(String v) {
+					prefs.setAutoTestUrl(v.trim());
 					buildList();
 					afterNetworkChange();
 				}
-			})
-			.setNegativeButton(android.R.string.cancel, null)
-			.show();
+			},
+			null);
 	}
 
 	private static boolean isHttpUrl(String url) {
@@ -207,39 +210,43 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		return u.startsWith("http://") || u.startsWith("https://");
 	}
 
+	/* Proxy port: a numeric field with live range checking; "默认" restores the
+	   built-in default. applyProxyPort() still clamps, so an in-range value is
+	   saved as-is. */
 	private void editPort() {
-		final EditText input = new EditText(this);
-		input.setInputType(InputType.TYPE_CLASS_NUMBER);
-		input.setHint(R.string.settings_port_hint);
-		input.setText(Integer.toString(prefs.getProxyPort()));
-		input.setSelection(input.getText().length());
-		int pad = (int) (20 * getResources().getDisplayMetrics().density);
-		input.setPadding(pad, pad / 2, pad, 0);
-
-		new AlertDialog.Builder(this)
-			.setTitle(R.string.settings_lan_port)
-			.setMessage(R.string.settings_port_desc)
-			.setView(input)
-			.setNeutralButton(R.string.settings_port_default, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface d, int which) {
-					applyProxyPort(Preferences.DEFAULT_PROXY_PORT);
+		showInputDialog(R.string.settings_lan_port,
+			getString(R.string.settings_port_hint),
+			getString(R.string.settings_port_desc),
+			InputType.TYPE_CLASS_NUMBER,
+			Integer.toString(prefs.getProxyPort()),
+			new InputValidator() {
+				@Override public String validate(String v) {
+					if (v.isEmpty())
+					  return getString(R.string.settings_port_invalid);
+					try {
+						Integer.parseInt(v);
+					} catch (NumberFormatException e) {
+						return getString(R.string.settings_port_invalid);
+					}
+					return null;
 				}
-			})
-			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface d, int which) {
+			},
+			new OnValue() {
+				@Override public void onReceiveValue(String v) {
 					int port;
 					try {
-						port = Integer.parseInt(input.getText().toString().trim());
+						port = Integer.parseInt(v);
 					} catch (NumberFormatException e) {
 						port = prefs.getProxyPort();
 					}
 					applyProxyPort(port);
 				}
-			})
-			.setNegativeButton(android.R.string.cancel, null)
-			.show();
+			},
+			new Runnable() {
+				@Override public void run() {
+					applyProxyPort(Preferences.DEFAULT_PROXY_PORT);
+				}
+			});
 	}
 
 	/* Shared save path for the proxy port: clamp into the valid range, persist,
@@ -267,6 +274,71 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		divider.setBackgroundColor(MaterialColors.getColor(this,
 			com.google.android.material.R.attr.colorOutlineVariant, 0));
 		return divider;
+	}
+
+	/* Shared, polished single-field editor: an outlined Material input with a
+	   live validation error and an optional help line. Replaces the bare
+	   EditText dialogs so the test URL, proxy port and auto-test interval all
+	   get a consistent, legible UI with inline error feedback. */
+	private interface InputValidator {
+		String validate(String value);
+	}
+	private interface OnValue {
+		void onReceiveValue(String value);
+	}
+
+	private AlertDialog showInputDialog(int titleRes, String hint, String help,
+			int inputType, String initial, final InputValidator validator,
+			final OnValue onOk, final Runnable onDefault) {
+		View v = getLayoutInflater().inflate(R.layout.dialog_input, null);
+		final TextInputLayout til = (TextInputLayout) v.findViewById(R.id.til);
+		final TextInputEditText edit = (TextInputEditText) v.findViewById(R.id.edit_text);
+		TextView helpView = (TextView) v.findViewById(R.id.help_text);
+		til.setHint(hint);
+		edit.setInputType(inputType);
+		if (help != null && !help.isEmpty()) {
+			helpView.setText(help);
+			helpView.setVisibility(View.VISIBLE);
+		} else {
+			helpView.setVisibility(View.GONE);
+		}
+		if (initial != null) {
+			edit.setText(initial);
+			edit.setSelection(initial.length());
+		}
+		AlertDialog.Builder b = new AlertDialog.Builder(this)
+			.setTitle(titleRes)
+			.setView(v)
+			.setPositiveButton(R.string.save, null)
+			.setNegativeButton(android.R.string.cancel, null);
+		if (onDefault != null)
+			b.setNeutralButton(R.string.settings_port_default,
+				new DialogInterface.OnClickListener() {
+					@Override public void onClick(DialogInterface di, int w) {
+						onDefault.run();
+					}
+				});
+		final AlertDialog d = b.show();
+		edit.addTextChangedListener(new TextWatcher() {
+			@Override public void beforeTextChanged(CharSequence s, int a, int b, int c) { }
+			@Override public void onTextChanged(CharSequence s, int a, int b, int c) { }
+			@Override public void afterTextChanged(Editable s) {
+				til.setError(validator.validate(s.toString().trim()));
+			}
+		});
+		d.getButton(DialogInterface.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+			@Override public void onClick(View vv) {
+				String val = edit.getText().toString().trim();
+				String err = validator.validate(val);
+				if (err != null) {
+					til.setError(err);
+					return;
+				}
+				d.dismiss();
+				onOk.onReceiveValue(val);
+			}
+		});
+		return d;
 	}
 
 	/* What the tunnel has moved this session. This row is the connection's
@@ -337,6 +409,55 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		}
 	}
 
+	/* Auto re-test interval for the url-test group, moved here from the
+	   subscription page so its auto-select row can stay a plain on/off switch.
+	   The value is in minutes and applies when the tunnel is (re)started. */
+	private String autoSelectIntervalSubtitle() {
+		return getString(R.string.sub_minutes,
+			Math.max(1, Math.round(prefs.getAutoSelectInterval() / 60f)));
+	}
+
+	/* Auto re-test interval: a single minute field (1–1440), replacing the old
+	   preset-list-then-custom flow. Blank or out-of-range is caught inline. */
+	private void editAutoSelectInterval() {
+		final int cur = Math.max(1, Math.round(prefs.getAutoSelectInterval() / 60f));
+		showInputDialog(R.string.sub_interval_title,
+			getString(R.string.sub_interval_hint),
+			getString(R.string.sub_interval_custom_title),
+			InputType.TYPE_CLASS_NUMBER,
+			Integer.toString(cur),
+			new InputValidator() {
+				@Override public String validate(String v) {
+					if (v.isEmpty())
+					  return getString(R.string.sub_interval_invalid);
+					int m;
+					try {
+						m = Integer.parseInt(v);
+					} catch (NumberFormatException e) {
+						return getString(R.string.sub_interval_invalid);
+					}
+					if (m < 1 || m > 1440)
+					  return getString(R.string.sub_interval_invalid);
+					return null;
+				}
+			},
+			new OnValue() {
+				@Override public void onReceiveValue(String v) {
+					int m;
+					try {
+						m = Integer.parseInt(v);
+					} catch (NumberFormatException e) {
+						m = cur;
+					}
+					int clamped = Math.max(1, Math.min(1440, m));
+					prefs.setAutoSelectInterval(clamped * 60);
+					buildList();
+					afterNetworkChange();
+				}
+			},
+			null);
+	}
+
 	@Override
 	public void onClick(View view) {
 		int id = view.getId();
@@ -346,6 +467,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  startActivity(new Intent(this, AppListActivity.class));
 		else if (id == R.id.settings_connections)
 		  startActivity(new Intent(this, ConnectionsActivity.class));
+		else if (id == R.id.settings_recent_requests)
+		  startActivity(new Intent(this, RecentRequestsActivity.class));
 		else if (id == R.id.settings_subscription)
 		  startActivity(new Intent(this, SubscribeConfigActivity.class));
 		else if (id == R.id.settings_test_url)
@@ -360,6 +483,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  showThemeDialog();
 		else if (id == R.id.settings_version)
 		  showVersionDialog();
+		else if (id == R.id.settings_autosel_interval)
+		  editAutoSelectInterval();
 	}
 
 	/* Live snapshot of the running tunnel: the real state (including a failed

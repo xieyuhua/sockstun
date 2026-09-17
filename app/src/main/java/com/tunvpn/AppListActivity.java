@@ -288,9 +288,7 @@ public class AppListActivity extends BaseActivity {
 			   the tunnel so the new app scope takes effect immediately. */
 			if (prefs.getEnable()) {
 				startService(new Intent(this, TProxyService.class)
-					.setAction(TProxyService.ACTION_DISCONNECT));
-				startService(new Intent(this, TProxyService.class)
-					.setAction(TProxyService.ACTION_CONNECT));
+					.setAction(TProxyService.ACTION_RECONNECT));
 				Toast.makeText(this, R.string.apps_applied_restart, Toast.LENGTH_LONG).show();
 			}
 		}

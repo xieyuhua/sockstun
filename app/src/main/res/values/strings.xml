@@ -202,7 +202,10 @@
 	<string name="sub_interval_custom_title">自定义间隔</string>
 	<string name="sub_interval_hint">分钟数，范围 1 – 1440</string>
 	<string name="sub_interval_clamped">已调整为 %1$d 分钟</string>
+	<string name="sub_interval_invalid">请输入 1 – 1440 之间的分钟数</string>
 	<string name="sub_auto_restart">设置已保存，重新连接后生效</string>
+	<string name="sub_auto_on_hint">自动模式：按延迟自动选择最快节点</string>
+	<string name="settings_autosel_interval">自动测速间隔</string>
 	<string name="sub_test_url">测试地址：%1$s</string>
 	<string name="sub_test_url_title">测速测试地址</string>
 	<string name="sub_test_url_hint">自动选择时用它判断节点快慢，需为可正常访问的 http 或 https 地址；清空则恢复默认。</string>
@@ -255,6 +258,13 @@
 	<string name="settings_lan_port">代理端口</string>
 	<string name="settings_connections">活跃连接</string>
 	<string name="settings_connections_hint">查看当前正在使用代理的连接</string>
+	<string name="settings_recent_requests">最近请求</string>
+	<string name="settings_recent_requests_hint">记录最近经过代理的请求与去向</string>
+	<string name="recent_requests_empty">还没有记录到请求</string>
+	<string name="recent_requests_summary">共 %1$d 条请求</string>
+	<string name="recent_requests_search_hint">搜索目标 / 规则 / 节点 / 应用</string>
+	<string name="recent_requests_no_match">无匹配请求</string>
+	<string name="recent_requests_unavailable">无法读取请求记录</string>
 	<string name="connections_empty">当前没有活跃连接</string>
 	<string name="connections_summary">共 %1$d 条 · 上行 %2$s · 下行 %3$s</string>
 	<string name="connections_unavailable">无法读取连接信息（隧道可能未运行）</string>
@@ -265,6 +275,7 @@
 	<string name="connections_close_toast">已请求断开全部连接</string>
 	<string name="settings_port_hint">1024 – 65535</string>
 	<string name="settings_port_clamped">已调整为 %1$d</string>
+	<string name="settings_port_invalid">请输入 1024 – 65535 之间的端口号</string>
 	<string name="settings_port_desc">局域网内其他设备连接此端口即可走代理。允许范围 1024–65535。</string>
 	<string name="settings_port_default">默认 (7890)</string>
 	<string name="sub_auto_pick">自动选择已开启，将按延迟自动切换节点（%s 不会被固定）</string>

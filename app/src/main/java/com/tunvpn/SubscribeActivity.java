@@ -57,10 +57,6 @@ public class SubscribeActivity extends BaseActivity {
 	/* Spinner position 0 is the default, and "fastest first" is what people
 	   want, so latency is index 0 and subscription order index 1. */
 
-	/* Bounds for the auto re-test interval, in minutes. */
-	private static final int MIN_INTERVAL_MIN = 1;
-	private static final int MAX_INTERVAL_MIN = 1440;
-
 	private Preferences prefs;
 	private FloatingActionButton fab_test_all;
 	private ListView listview;
@@ -361,6 +357,7 @@ public class SubscribeActivity extends BaseActivity {
 				filterCountry = code;
 				prefs.setSubCountryFilter(filterCountry);
 				applyView();
+				refreshProtoFilterSpinner();
 				/* The tunnel's node pool is baked in at startup
 				   (MihomoConfig.mergedConfig), so a running tunnel keeps the
 				   old country until it is reconnected. */
@@ -373,8 +370,11 @@ public class SubscribeActivity extends BaseActivity {
 	}
 
 	/* Rebuild the protocol filter dropdown from the node types we parsed. The
-	   first entry is "all protocols"; the rest are proxy types with counts,
-	   busiest first. */
+	   first entry is "all protocols"; the rest are proxy types with their
+	   AVAILABLE count within the currently selected country, busiest first.
+	   The count tracks what the node list shows: pick a country chip and the
+	   numbers shrink to that country; a latency test repopulates only the
+	   reachable nodes. */
 	private void refreshProtoFilterSpinner() {
 		filterProtoTypes.clear();
 		filterProtoLabels.clear();
@@ -382,8 +382,14 @@ public class SubscribeActivity extends BaseActivity {
 		filterProtoLabels.add(getString(R.string.sub_proto_all));
 		Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
 		for (ClashNode n : nodes) {
+			/* Scope to the picked country, exactly like applyView() does. */
+			if (!filterCountry.isEmpty() && !matchesCountry(n, filterCountry))
+				continue;
 			String t = nodeType(n);
 			if (t.isEmpty())
+			  continue;
+			/* Only a node that passed a latency test is usable. */
+			if (n.latency < 0)
 			  continue;
 			Integer c = counts.get(t);
 			counts.put(t, c == null ? 1 : c + 1);
@@ -542,12 +548,6 @@ public class SubscribeActivity extends BaseActivity {
 					R.string.sub_auto_restart, Toast.LENGTH_LONG).show();
 			}
 		});
-		textview_auto_hint.setOnClickListener(new View.OnClickListener() {
-			@Override
-			public void onClick(View v) {
-				editInterval();
-			}
-		});
 		updateAutoUi();
 	}
 
@@ -556,105 +556,12 @@ public class SubscribeActivity extends BaseActivity {
 		/* setChecked() only fires the listener when the value actually
 		   changes, so this cannot recurse. */
 		switch_auto.setChecked(auto);
-		textview_auto_hint.setEnabled(auto);
 		textview_auto_hint.setText(auto
-			? getString(R.string.sub_auto_hint, intervalLabel())
+			? getString(R.string.sub_auto_on_hint)
 			: getString(R.string.sub_manual_hint));
 	}
 
-	private int intervalMinutes() {
-		return Math.max(MIN_INTERVAL_MIN,
-			Math.round(prefs.getAutoSelectInterval() / 60f));
-	}
 
-	private String intervalLabel() {
-		return getString(R.string.sub_minutes, intervalMinutes());
-	}
-
-	/* Presets cover what people actually use; "custom" falls through to a
-	   free-form field for everything else. */
-	private void editInterval() {
-		if (!prefs.getAutoSelect())
-		  return;
-
-		final int[] presets = { 1, 5, 10, 30, 60 };
-		final int current = intervalMinutes();
-		int checked = presets.length;
-		final String[] labels = new String[presets.length + 1];
-		for (int i = 0; i < presets.length; i++) {
-			labels[i] = getString(R.string.sub_minutes, presets[i]);
-			if (presets[i] == current)
-			  checked = i;
-		}
-		labels[presets.length] = getString(R.string.sub_interval_custom, current);
-
-		new AlertDialog.Builder(this)
-			.setTitle(R.string.sub_interval_title)
-			.setSingleChoiceItems(labels, checked, null)
-			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface d, int which) {
-					int sel = ((AlertDialog) d).getListView().getCheckedItemPosition();
-					if (sel < 0)
-					  return;
-					if (sel >= presets.length) {
-						askCustomInterval();
-						return;
-					}
-					prefs.setAutoSelectInterval(presets[sel] * 60);
-					afterAutoSelectChange();
-				}
-			})
-			.setNegativeButton(android.R.string.cancel, null)
-			.show();
-	}
-
-	/* Free-form fallback. The value is clamped instead of rejected, so a
-	   stray keypress cannot silently throw the setting away. */
-	private void askCustomInterval() {
-		final EditText input = new EditText(this);
-		input.setInputType(InputType.TYPE_CLASS_NUMBER);
-		input.setHint(R.string.sub_interval_hint);
-		input.setText(Integer.toString(intervalMinutes()));
-		input.setSelection(input.getText().length());
-		int pad = (int) (20 * getResources().getDisplayMetrics().density);
-		input.setPadding(pad, pad / 2, pad, 0);
-
-		new AlertDialog.Builder(this)
-			.setTitle(R.string.sub_interval_custom_title)
-			.setMessage(R.string.sub_interval_hint)
-			.setView(input)
-			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
-				@Override
-				public void onClick(DialogInterface d, int which) {
-					int minutes;
-					try {
-						minutes = Integer.parseInt(input.getText().toString().trim());
-					} catch (NumberFormatException e) {
-						minutes = intervalMinutes();
-					}
-					int clamped = Math.max(MIN_INTERVAL_MIN,
-						Math.min(MAX_INTERVAL_MIN, minutes));
-					if (clamped != minutes)
-					  Toast.makeText(SubscribeActivity.this,
-						getString(R.string.sub_interval_clamped, clamped),
-						Toast.LENGTH_SHORT).show();
-					prefs.setAutoSelectInterval(clamped * 60);
-					afterAutoSelectChange();
-				}
-			})
-			.setNegativeButton(android.R.string.cancel, null)
-			.show();
-	}
-
-	/* Shared tail of every auto-select edit: the group is written when the
-	   tunnel starts, so a running tunnel keeps the old setting. */
-	private void afterAutoSelectChange() {
-		updateAutoUi();
-		if (prefs.getEnable())
-		  Toast.makeText(SubscribeActivity.this,
-			R.string.sub_auto_restart, Toast.LENGTH_LONG).show();
-	}
 
 	private void showHelp() {
 		new AlertDialog.Builder(this)

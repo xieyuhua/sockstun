@@ -30,6 +30,7 @@ import android.app.NotificationManager;
 import android.content.Context;
 import android.os.Build;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.os.ParcelFileDescriptor;
@@ -51,7 +52,10 @@ import java.lang.reflect.Method;
 import java.io.FileDescriptor;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -65,6 +69,7 @@ import io.github.oviron.libmihomo.InvokeInterface;
 public class TProxyService extends VpnService {
 	public static final String ACTION_CONNECT = "tunvpn.CONNECT";
 	public static final String ACTION_DISCONNECT = "tunvpn.DISCONNECT";
+	public static final String ACTION_RECONNECT = "tunvpn.RECONNECT";
 	/* Switch the selected node while the tunnel keeps running. */
 	public static final String ACTION_SELECT = "tunvpn.SELECT";
 
@@ -75,6 +80,12 @@ public class TProxyService extends VpnService {
 
 	private Handler statsHandler = null;
 	private Runnable statsTask = null;
+	/* The polling loop must run off the main thread: accumulateProxy() does a
+	   synchronous httpGet() to the core's control API, and the main thread
+	   throws NetworkOnMainThreadException on any network call. That exception
+	   was being swallowed by httpGet's catch, leaving body null and the proxied
+	   traffic counters stuck at 0 forever - exactly the "stats always 0" report. */
+	private HandlerThread statsThread = null;
 	private Preferences statsPrefs = null;
 	private long lastTx, lastRx, lastTime;
 	private long sessionTx, sessionRx;
@@ -91,12 +102,44 @@ public class TProxyService extends VpnService {
 	   two polls is missed, so this is a close approximation, not an exact
 	   figure. */
 	private final Map<String, long[]> connSeen = new HashMap<String, long[]>();
+	/* Recent-requests recorder: when a connection disappears from /connections
+	   we log it here so the UI can show "what went where" historically. connInfo
+	   tracks each live connection's metadata + last counters; recentRequests is
+	   the bounded history serialized to Preferences. */
+	private final Map<String, ConnInfo> connInfo = new HashMap<String, ConnInfo>();
+	private final List<RecentRequest> recentRequests = new ArrayList<RecentRequest>();
+	private long lastRecentFlush = 0;
+	private static final int MAX_RECENT_REQUESTS = 200;
+
+	/* One live connection we are tracking for history. */
+	private static class ConnInfo {
+		long startMs;
+		String target;
+		String rule;
+		String chain;
+		String process;
+		long up;
+		long down;
+	}
+	/* One closed connection, ready to be shown. */
+	private static class RecentRequest {
+		long startMs;
+		long endMs;
+		String target;
+		String rule;
+		String chain;
+		String process;
+		long up;
+		long down;
+	}
 	/* Consecutive failed /connections polls, so the "stats are stuck at 0"
 	   case is reported instead of being invisible. */
 	private int connFailStreak = 0;
 	/* Last exception seen while probing the control API, so a failed probe says
 	   whether nothing is listening (refused) or it is up but not answering. */
 	private volatile String lastControllerError = null;
+	private volatile String proxyTestStatus = "";
+	private static final String PROXY_TEST_URL = "http://www.gstatic.com/generate_204";
 	private long proxyBaseTx, proxyBaseRx;
 	private long proxySessionTx, proxySessionRx;
 	private long lastProxyTx, lastProxyRx;
@@ -177,6 +220,14 @@ public class TProxyService extends VpnService {
 			stopService();
 			return START_NOT_STICKY;
 		}
+		/* A live change to a setting read only at establish() time (per-app
+		   scope, global mode): stop the old fd without destroying the service
+		   and rebuild, as one action - avoids the DISCONNECT-then-CONNECT race
+		   where the new tunnel gets torn down by the pending stopSelf(). */
+		if (intent != null && ACTION_RECONNECT.equals(intent.getAction())) {
+			rebuildTunnel();
+			return START_STICKY;
+		}
 		/* mihomo can change a selector while running, so a newly picked node
 		   takes effect immediately instead of waiting for a restart. */
 		if (intent != null && ACTION_SELECT.equals(intent.getAction())) {
@@ -227,6 +278,14 @@ public class TProxyService extends VpnService {
 			failStartup("内核加载失败：" + e);
 			return;
 		}
+
+		/* Pick a free loopback port for the clash-api BEFORE writing config: a
+		   port already held by another process (stale tunnel, another proxy, an
+		   ADB forward, an emulator) makes mihomo silently fail to bind the
+		   control API, which reads as "connected but /connections refuses and
+		   every counter stays 0". */
+		int apiPort = MihomoConfig.pickApiPort();
+		appendLog("config: clash-api port = " + apiPort);
 
 		/* Config: either the file the user edited by hand (custom mode) or a
 		   fresh one generated from the current settings. */
@@ -283,24 +342,26 @@ public class TProxyService extends VpnService {
 		   (their traffic is the tunnel's job) yet the UI shows no traffic stats
 		   and reports "代理不通". Always exclude ourselves, in both global and
 		   per-app scope. */
-		boolean selfExcluded = true;
-		try {
-			builder.addDisallowedApplication(getApplicationContext().getPackageName());
-		} catch (NameNotFoundException e) {
-			selfExcluded = false;
-		}
-
-		/* Per-app routing stays at the VpnService level: only the selected
-		   apps have their traffic routed into the VPN; everything else (and
-		   us) bypasses it. */
-		boolean perAppScope = false;
+		/* VpnService forbids mixing addAllowedApplication and
+		   addDisallowedApplication on one builder, so the two scopes use
+		   different calls:
+		   - global: disallow only ourselves, every other app goes through;
+		   - per-app: allow exactly the selected apps. We are simply NOT in
+		     that list, so our own traffic (external-controller, mixed-port)
+		     naturally bypasses the tunnel - no explicit disallow is needed,
+		     and adding one would throw IllegalArgumentException and drop the
+		     whole app scope. */
 		if (prefs.getGlobal()) {
-			/* Default: all other apps through the tunnel. */
+			/* Default: all other apps through the tunnel; keep our own
+			   sockets out of it. */
+			try {
+				builder.addDisallowedApplication(getApplicationContext().getPackageName());
+			} catch (NameNotFoundException e) {
+			}
 		} else {
 			for (String appName : prefs.getApps()) {
 				try {
 					builder.addAllowedApplication(appName);
-					perAppScope = true;
 				} catch (NameNotFoundException e) {
 				}
 			}
@@ -311,7 +372,7 @@ public class TProxyService extends VpnService {
 		   captured - both look exactly like "connected but not proxied". */
 		appendLog("vpn: ipv4=" + ipv4 + " ipv6=" + ipv6 + " mtu=" + prefs.getTunnelMtu()
 			+ " scope=" + (prefs.getGlobal() ? "all apps" : prefs.getApps().size() + " app(s)")
-			+ " excludeSelf=" + selfExcluded);
+			+ " excludeSelf=" + prefs.getGlobal());
 		/* Per-app mode with no apps selected captures nothing: the tunnel comes
 		   up "connected" but proxies zero traffic. Spell it out in the log. */
 		if (!prefs.getGlobal() && prefs.getApps().isEmpty())
@@ -430,6 +491,10 @@ public class TProxyService extends VpnService {
 		   config error only exists in its own log stream, which is easy to
 		   miss - the tunnel looks connected while 9090 is dead. */
 		verifyController();
+		/* FlClash-style real reachability: actually push a request through the
+		   selected node and measure latency, rather than only checking the API
+		   answers (which can be green while no traffic flows). */
+		testProxyConnectivity();
 
 		prefs.clearLastError();
 		prefs.setEnable(true);
@@ -530,27 +595,41 @@ public class TProxyService extends VpnService {
 			in.close();
 			String text = new String(buf, 0, n, "UTF-8");
 
-			StringBuilder extra = new StringBuilder();
 			String ec = topLevelLine(text, "external-controller:");
-			if (ec == null) {
-				extra.append("external-controller: 127.0.0.1:")
-					.append(MihomoConfig.API_PORT).append('\n');
-			} else if (!ec.contains(String.valueOf(MihomoConfig.API_PORT))) {
-				/* A different host/port means the app still cannot reach it, and
-				   appending a second key would be invalid YAML - so warn. */
-				appendLog("config: 注意 external-controller 不是 127.0.0.1:"
-					+ MihomoConfig.API_PORT + "，App 将读不到流量与连接数据：" + ec);
-			}
-			if (!hasTopLevelKey(text, "mixed-port:") && !hasTopLevelKey(text, "port:"))
-			  extra.append("mixed-port: ").append(prefs.getProxyPort()).append('\n');
-			if (extra.length() == 0)
-			  return;
+			boolean needEc = (ec == null)
+				|| !ec.contains("127.0.0.1:" + MihomoConfig.API_PORT);
+			boolean needMp = !hasTopLevelKey(text, "mixed-port:")
+				&& !hasTopLevelKey(text, "port:");
+			if (!needEc && !needMp)
+				return;
 
-			String prefix = text.endsWith("\n") || text.isEmpty() ? "" : "\n";
-			java.io.FileOutputStream out = new java.io.FileOutputStream(configFile, true);
-			out.write((prefix + extra).getBytes("UTF-8"));
-			out.close();
-			appendLog("config: 自定义配置缺少 App 必需项，已自动补上：\n" + extra);
+			/* Rebuild the file once: rewrite the external-controller line to the
+			   chosen loopback port (or append it), then append mixed-port if
+			   missing. Appending a second external-controller key would be
+			   invalid YAML, so we replace in place (see docs/内核接口说明.md 6.7). */
+			StringBuilder out = new StringBuilder();
+			boolean ecWritten = false;
+			for (String line : text.split("\n", -1)) {
+				if (needEc && topLevelLine(line + "\n", "external-controller:") != null) {
+					out.append("external-controller: 127.0.0.1:")
+					   .append(MihomoConfig.API_PORT).append('\n');
+					ecWritten = true;
+				} else {
+					out.append(line).append('\n');
+				}
+			}
+			if (needEc && !ecWritten)
+				out.append("external-controller: 127.0.0.1:")
+				   .append(MihomoConfig.API_PORT).append('\n');
+			if (needMp)
+				out.append("mixed-port: ").append(prefs.getProxyPort()).append('\n');
+
+			java.io.FileOutputStream fos = new java.io.FileOutputStream(configFile, false);
+			fos.write(out.toString().getBytes("UTF-8"));
+			fos.close();
+			appendLog("config: 自定义配置已对齐 App 必需项（external-controller=127.0.0.1:"
+				+ MihomoConfig.API_PORT
+				+ (needMp ? ", mixed-port=" + prefs.getProxyPort() : "") + "）");
 		} catch (Exception e) {
 			appendLog("config: 检查自定义配置失败：" + e);
 		}
@@ -645,10 +724,12 @@ public class TProxyService extends VpnService {
 			   to miss (proxy traffic keeps flowing via the default node). Retry
 			   the whole apply so the selector lands once the control API is
 			   actually listening. */
-			for (int attempt = 1; attempt <= 8; attempt++) {
-				/* When the config failed to load the control API will never
-				   bind, and the shutdown path already logged the real reason -
-				   so stop rather than adding more misleading "not ready" lines. */
+			/* The core brings the TUN up before its external-controller HTTP
+			   listener binds, and a large subscription can keep that listener
+			   closed for many seconds. Keep retrying until it answers (or the
+			   tunnel is torn down), instead of giving up after one short window
+			   and silently dropping the user's pick. */
+			for (int attempt = 1; attempt <= 120; attempt++) {
 				if (startupAborted)
 				  return;
 				if (waitForController()) {
@@ -657,19 +738,20 @@ public class TProxyService extends VpnService {
 				}
 				if (attempt == 1)
 				  appendLog("selector: 控制接口 127.0.0.1:" + MihomoConfig.API_PORT
-					+ " 未就绪，后台重试中");
-				if (attempt < 8) {
-					try {
-						Thread.sleep(3000);
-					} catch (InterruptedException e) {
-						return;
-					}
+					+ " 未就绪，后台持续重试中");
+				if (attempt % 20 == 0)
+				  appendLog("selector: 仍等待 127.0.0.1:" + MihomoConfig.API_PORT
+					+ "（" + lastControllerError + "）");
+				try {
+					Thread.sleep(3000);
+				} catch (InterruptedException e) {
+					return;
 				}
 			}
 			if (startupAborted)
 			  return;
 			appendLog("selector set failed: 控制接口 127.0.0.1:"
-				+ MihomoConfig.API_PORT + " 未就绪（内核可能未监听）");
+				+ MihomoConfig.API_PORT + " 未就绪（内核可能未监听）：" + lastControllerError);
 		}).start();
 	}
 
@@ -690,6 +772,7 @@ public class TProxyService extends VpnService {
 			if (!target.equals(proxy))
 			  note += " (resolved to " + target + ")";
 			appendLog("selector set: " + note);
+			testProxyConnectivity();
 		} catch (Throwable e) {
 			appendLog("selector set skipped: " + e);
 		}
@@ -726,22 +809,181 @@ public class TProxyService extends VpnService {
 		return false;
 	}
 
-	/* Confirm the control API is up, and when it is not, write the reason to
-	   the log: the text the core returned for quickSetup (if any) plus the
-	   config sections it parses (everything after the proxy list). Both are
-	   what makes "connected but 9090 dead" diagnosable. */
+	/* Confirm the control API is up. mihomo binds the clash-api HTTP listener
+	   only after it has finished bringing the TUN up and parsing a possibly
+	   large config, so poll for a bounded 90s instead of giving up in 6s - a
+	   too-early "NOT ready" is exactly the misleading signal we keep hitting.
+	   When it truly never listens, say so and point at the core's own log. */
 	private void verifyController() {
 		new Thread(() -> {
-			if (waitForController()) {
+			boolean ok = false;
+			for (int i = 0; i < 90; i++) {
+				if (isControllerUp())
+				  { ok = true; break; }
+				try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
+			}
+			if (ok) {
 				appendLog("controller: 127.0.0.1:" + MihomoConfig.API_PORT + " ready");
 				return;
 			}
-			appendLog("controller: 127.0.0.1:" + MihomoConfig.API_PORT + " NOT ready");
+			appendLog("controller: 127.0.0.1:" + MihomoConfig.API_PORT
+				+ " NOT ready（90s 内未监听，核心未启动 clash-api）");
 			if (lastControllerError != null)
 			  appendLog("controller: 最后一次探测：" + lastControllerError);
 			if (quickSetupError != null && !quickSetupError.isEmpty())
 			  appendLog("controller: 内核配置加载报错：" + quickSetupError);
+			/* Some Android builds only expose the IPv6 loopback to the app
+			   process; if mihomo bound [::1] the IPv4 probe fails even though
+			   the API is alive - probe it so we can tell the two apart. */
+			if (probeHost("::1"))
+			  appendLog("controller: 但 [::1]:" + MihomoConfig.API_PORT
+				  + " 通了 —— 核心绑在 IPv6 回环，App 走 IPv4 才失败");
+			dumpConfigTail();
 		}).start();
+	}
+
+	/* Quick TCP connect probe to host:API_PORT, used to tell an IPv4-only
+	   failure apart from "the API is up but on a different loopback". */
+	private boolean probeHost(String host) {
+		java.net.Socket s = null;
+		try {
+			s = new java.net.Socket();
+			s.connect(new java.net.InetSocketAddress(host, MihomoConfig.API_PORT), 800);
+			return true;
+		} catch (Throwable e) {
+			return false;
+		} finally {
+			if (s != null) {
+				try { s.close(); } catch (Throwable ignore) { }
+			}
+		}
+	}
+
+	/* When the API never binds, the generated config is the first thing to
+	   suspect (a malformed external-controller line, a stray duplicate key, an
+	   indentation slip). Dump the tail of config.yaml - the sections the app
+	   appends (dns/log/tun/external-controller/...) - so the log is
+	   self-contained for diagnosis without pulling the file off the device. */
+	private void dumpConfigTail() {
+		File f = new File(getFilesDir(), "config.yaml");
+		if (!f.exists()) {
+			appendLog("controller: 配置未生成（config.yaml 不存在）");
+			return;
+		}
+		try {
+			java.util.List<String> lines = new java.util.ArrayList<String>();
+			try (BufferedReader r = new BufferedReader(new java.io.FileReader(f))) {
+				String l;
+				while ((l = r.readLine()) != null)
+				  lines.add(l);
+			}
+			int start = Math.max(0, lines.size() - 50);
+			StringBuilder sb = new StringBuilder("controller: config.yaml 尾部（共 ")
+				.append(lines.size()).append(" 行）：\n");
+			for (int i = start; i < lines.size(); i++)
+			  sb.append("  ").append(lines.get(i)).append('\n');
+			appendLog(sb.toString());
+		} catch (Throwable e) {
+			appendLog("controller: 读取配置失败：" + e);
+		}
+	}
+
+	/* One quick reachability probe of the control API (no retries). Used by
+	   verifyController; the selector/test loops use waitForController which
+	   retries internally. */
+	private boolean isControllerUp() {
+		HttpURLConnection c = null;
+		try {
+			c = (HttpURLConnection) new URL("http://127.0.0.1:"
+				+ MihomoConfig.API_PORT + "/version").openConnection();
+			c.setConnectTimeout(500);
+			c.setReadTimeout(500);
+			int code = c.getResponseCode();
+			return code >= 200 && code < 300;
+		} catch (Throwable e) {
+			lastControllerError = e.getClass().getSimpleName()
+				+ (e.getMessage() == null ? "" : (": " + e.getMessage()));
+			return false;
+		} finally {
+			if (c != null)
+			  c.disconnect();
+		}
+	}
+
+	/* FlClash-style real reachability: push a request THROUGH the core's
+	   currently-selected node and measure latency. Unlike the bare "/version"
+	   probe (which only proves the control API answers), this only succeeds
+	   when bytes actually leave via the proxy and come back - so it cannot look
+	   "available" while the tunnel is dead. Retries until the API is up, then
+	   reports the result to the log and the notification. */
+	private void testProxyConnectivity() {
+		new Thread(() -> {
+			for (int i = 0; i < 40; i++) {
+				if (startupAborted)
+				  return;
+				if (!waitForController()) {
+					try { Thread.sleep(2000); } catch (InterruptedException e) { return; }
+					continue;
+				}
+				try {
+					String url = "http://127.0.0.1:" + MihomoConfig.API_PORT
+						+ "/proxies/" + java.net.URLEncoder.encode(MihomoConfig.GROUP, "UTF-8")
+						+ "/delay?timeout=5000&url="
+						+ java.net.URLEncoder.encode(PROXY_TEST_URL, "UTF-8");
+					String body = httpGetAny(url);
+					if (body != null) {
+						long delay = jsonBytes(body, "delay");
+						if (delay >= 0) {
+							proxyTestStatus = "代理实测可用（延迟 " + delay + "ms）";
+							appendLog("proxy test: 可用（延迟 " + delay + "ms，经 "
+								+ PROXY_TEST_URL + "）");
+							updateNotification();
+							return;
+						}
+						proxyTestStatus = "代理实测不可用：节点未连通（" + body + "）";
+						appendLog("proxy test: 节点未连通（" + body + "）");
+					} else {
+						proxyTestStatus = "代理实测不可用：控制接口无响应（" + lastControllerError + "）";
+						appendLog("proxy test: 无法经代理取到响应（" + lastControllerError + "）");
+					}
+				} catch (Throwable e) {
+					proxyTestStatus = "代理实测异常：" + e;
+					appendLog("proxy test: 异常 " + e);
+				}
+				updateNotification();
+				try { Thread.sleep(8000); } catch (InterruptedException e) { return; }
+			}
+			proxyTestStatus = "代理实测多次失败：节点可能失效或 TUN 未真正捕获流量";
+			appendLog("proxy test: 多次尝试仍不可用，代理可能未真正连通（节点失效 / TUN 未捕获流量）");
+			updateNotification();
+		}).start();
+	}
+
+	/* Like httpGet but returns the body even on a non-2xx status, so a failed
+	   proxy-delay test still surfaces the reason (e.g. the node's connect error)
+	   instead of being swallowed as "no response". */
+	private String httpGetAny(String url) {
+		HttpURLConnection conn = null;
+		try {
+			conn = (HttpURLConnection) new URL(url).openConnection();
+			conn.setConnectTimeout(6000);
+			conn.setReadTimeout(6000);
+			java.io.InputStream is = conn.getResponseCode() < 400
+				? conn.getInputStream() : conn.getErrorStream();
+			StringBuilder sb = new StringBuilder();
+			try (BufferedReader r = new BufferedReader(
+					new InputStreamReader(is, StandardCharsets.UTF_8))) {
+				String line;
+				while ((line = r.readLine()) != null)
+				  sb.append(line);
+			}
+			return sb.toString();
+		} catch (Exception e) {
+			return null;
+		} finally {
+			if (conn != null)
+			  conn.disconnect();
+		}
 	}
 
 	/* Resolve `wanted` to a real member name of `group`, tolerating the
@@ -860,6 +1102,24 @@ public class TProxyService extends VpnService {
 		stopSelf();
 	}
 
+	/* Tear the live tunnel down and bring it straight back up, as a single
+	   onStartCommand action. Used when a setting that only applies at
+	   establish() time changes while connected (per-app scope, global mode).
+	   Sending DISCONNECT then CONNECT as two separate intents races: the
+	   CONNECT can reach onStartCommand while the DISCONNECT's stopSelf() is
+	   still pending, and the freshly built tunnel gets destroyed with it -
+	   which is exactly why "configure per-app, and the tunnel never came
+	   back up". Here we stop the old fd WITHOUT stopSelf, then rebuild. */
+	private void rebuildTunnel() {
+		if (tunFd != null) {
+			stopStats();
+			try { Clash.INSTANCE.stopTun(); } catch (Throwable ignore) { }
+			try { tunFd.close(); } catch (IOException ignore) { }
+			tunFd = null;
+		}
+		startService();
+	}
+
 	private void createNotification() {
 		Notification notify = buildNotification();
 		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -888,7 +1148,8 @@ public class TProxyService extends VpnService {
 		if (node.isEmpty())
 		  node = p.hasSubscription() ? getString(R.string.node_default)
 									 : getString(R.string.node_none);
-		String bigText = getString(R.string.notify_node, node) + "\n" + big;
+		String bigText = getString(R.string.notify_node, node)
+			+ (proxyTestStatus.isEmpty() ? "" : ("\n" + proxyTestStatus)) + "\n" + big;
 
 		Intent i = new Intent(this, MainActivity.class);
 		i.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
@@ -936,17 +1197,27 @@ public class TProxyService extends VpnService {
 		proxyRateTx = proxyRateRx = 0;
 		lastProxyTime = SystemClock.elapsedRealtime();
 		connSeen.clear();
+		loadRecentRequests();
 
 		prefs.setStats(totalTx, totalRx, 0, 0, 0, 0);
 		prefs.setProxyStats(proxyBaseTx, proxyBaseRx, 0, 0, 0, 0);
 		prefs.setAppStats(snapshotApps(this, prefs), prefs.getAppTotal());
 
-		statsHandler = new Handler(Looper.getMainLooper());
+		/* Run the sampler on a dedicated background thread: it performs a
+		   synchronous httpGet() to the core, which the main thread forbids. */
+		if (statsThread != null) {
+			statsThread.quitSafely();
+			statsThread = null;
+		}
+		statsThread = new HandlerThread("traffic-stats");
+		statsThread.start();
+		statsHandler = new Handler(statsThread.getLooper());
 		statsTask = new Runnable() {
 			@Override
 			public void run() {
 				sampleStats(true);
-				statsHandler.postDelayed(this, STATS_INTERVAL);
+				if (statsHandler != null)
+				  statsHandler.postDelayed(this, STATS_INTERVAL);
 			}
 		};
 		statsHandler.postDelayed(statsTask, STATS_INTERVAL);
@@ -1055,7 +1326,8 @@ public class TProxyService extends VpnService {
 			connFailStreak++;
 			if (connFailStreak == 5)
 			  appendLog("流量统计：无法读取 /connections（控制接口 127.0.0.1:"
-				+ MihomoConfig.API_PORT + " 未就绪），代理流量将显示为 0");
+				+ MihomoConfig.API_PORT + " 未就绪，" + lastControllerError
+				+ "），代理流量将显示为 0");
 			return;
 		}
 		if (connFailStreak >= 5)
@@ -1077,6 +1349,7 @@ public class TProxyService extends VpnService {
 				if (id.isEmpty())
 				  continue;
 				alive.add(id);
+				recordConnInfo(id, c);
 				if (isDirectConnection(c))
 				  continue;
 				proxyConnCount++;
@@ -1096,9 +1369,40 @@ public class TProxyService extends VpnService {
 					  proxySessionRx += down - prev[1];
 				}
 				connSeen.put(id, new long[] { up, down });
-			}
-			/* Drop finished connections so the map cannot grow forever. */
-			connSeen.keySet().retainAll(alive);
+				}
+				/* A connection missing from this poll has closed: record it as a recent
+				request (where it went, which rule/chain, how much it moved, how long
+				it lasted) so history survives past the live view. */
+				if (!connInfo.isEmpty()) {
+				long endMs = SystemClock.elapsedRealtime();
+				Iterator<String> it = connInfo.keySet().iterator();
+				boolean changed = false;
+				while (it.hasNext()) {
+					String cid = it.next();
+					if (!alive.contains(cid)) {
+						ConnInfo info = connInfo.get(cid);
+						RecentRequest rr = new RecentRequest();
+						rr.startMs = info.startMs;
+						rr.endMs = endMs;
+						rr.target = info.target;
+						rr.rule = info.rule;
+						rr.chain = info.chain;
+						rr.process = info.process;
+						rr.up = info.up;
+						rr.down = info.down;
+						recentRequests.add(0, rr);
+						it.remove();
+						changed = true;
+					}
+				}
+				if (changed) {
+					while (recentRequests.size() > MAX_RECENT_REQUESTS)
+					  recentRequests.remove(recentRequests.size() - 1);
+					flushRecentRequests(endMs);
+				}
+				}
+				/* Drop finished connections so the map cannot grow forever. */
+				connSeen.keySet().retainAll(alive);
 			/* A zero proxy count while traffic is clearly flowing usually means
 			   the filter is wrong (field name, or every connection routed
 			   DIRECT) - make it visible instead of a silent blank counter. */
@@ -1116,6 +1420,111 @@ public class TProxyService extends VpnService {
 			}
 			lastProxyTx = proxySessionTx;
 			lastProxyRx = proxySessionRx;
+		} catch (Exception e) {
+		}
+	}
+
+	/* Remember a connection's metadata the first time we see it, then keep its
+	   last counters current; this drives the recent-requests history. */
+	private void recordConnInfo(String id, JSONObject c) {
+		ConnInfo info = connInfo.get(id);
+		long up = c.optLong("upload");
+		long down = c.optLong("download");
+		if (info == null) {
+			info = new ConnInfo();
+			info.startMs = SystemClock.elapsedRealtime();
+			info.target = connTarget(c);
+			info.rule = c.optString("rule", "");
+			info.chain = connChain(c);
+			info.process = connProcess(c);
+			info.up = up;
+			info.down = down;
+			connInfo.put(id, info);
+		} else {
+			info.up = up;
+			info.down = down;
+		}
+	}
+	private static String connTarget(JSONObject c) {
+		JSONObject meta = c.optJSONObject("metadata");
+		if (meta == null)
+		  return "";
+		String host = meta.optString("host", "");
+		if (host.isEmpty())
+		  host = meta.optString("destinationIP", "");
+		String port = meta.optString("destinationPort", "");
+		if (host.isEmpty())
+		  return port;
+		return port.isEmpty() ? host : host + ":" + port;
+	}
+	private static String connChain(JSONObject c) {
+		JSONArray chains = c.optJSONArray("chains");
+		if (chains == null || chains.length() == 0)
+		  return "";
+		StringBuilder sb = new StringBuilder();
+		for (int i = 0; i < chains.length(); i++) {
+			if (i > 0)
+			  sb.append(" → ");
+			sb.append(chains.optString(i));
+		}
+		return sb.toString();
+	}
+	private static String connProcess(JSONObject c) {
+		JSONObject meta = c.optJSONObject("metadata");
+		return meta != null ? meta.optString("process", "") : "";
+	}
+
+	/* Serialize the recent-requests history to Preferences, throttled so we are
+	   not writing to disk on every poll. */
+	private void flushRecentRequests(long now) {
+		if (statsPrefs == null)
+		  return;
+		if (now - lastRecentFlush < 2000 && recentRequests.size() < 20)
+		  return;
+		lastRecentFlush = now;
+		JSONArray arr = new JSONArray();
+		for (RecentRequest rr : recentRequests) {
+			JSONObject o = new JSONObject();
+			try {
+				o.put("t", rr.target);
+				o.put("r", rr.rule);
+				o.put("c", rr.chain);
+				o.put("p", rr.process);
+				o.put("u", rr.up);
+				o.put("d", rr.down);
+				o.put("s", rr.startMs);
+				o.put("e", rr.endMs);
+				arr.put(o);
+			} catch (Exception e) {
+			}
+		}
+		statsPrefs.setRecentRequests(arr.toString());
+	}
+	private void loadRecentRequests() {
+		recentRequests.clear();
+		connInfo.clear();
+		if (statsPrefs == null)
+		  return;
+		String raw = statsPrefs.getRecentRequests();
+		if (raw == null || raw.isEmpty())
+		  return;
+		try {
+			JSONArray arr = new JSONArray(raw);
+			for (int i = 0; i < arr.length(); i++) {
+				JSONObject o = arr.optJSONObject(i);
+				if (o == null)
+				  continue;
+				RecentRequest rr = new RecentRequest();
+				rr.target = o.optString("t", "");
+				rr.rule = o.optString("r", "");
+				rr.chain = o.optString("c", "");
+				rr.process = o.optString("p", "");
+				rr.up = o.optLong("u", 0);
+				rr.down = o.optLong("d", 0);
+				rr.startMs = o.optLong("s", 0);
+				rr.endMs = o.optLong("e", 0);
+				recentRequests.add(rr);
+			}
 		} catch (Exception e) {
 		}
 	}
@@ -1197,9 +1606,13 @@ public class TProxyService extends VpnService {
 			statsHandler = null;
 			statsTask = null;
 		}
+		if (statsThread != null) {
+			statsThread.quitSafely();
+			statsThread = null;
+		}
 		if (statsPrefs != null) {
-			sampleStats(false);
 			saveStats();
+			flushRecentRequests(SystemClock.elapsedRealtime());
 			accumulateApps(this, statsPrefs);
 			statsPrefs = null;
 		}
