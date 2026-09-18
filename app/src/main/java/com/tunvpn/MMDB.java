@@ -94,7 +94,11 @@ public final class MMDB {
 				node = (int) rec;
 				continue;
 			}
-			long off = (long) searchTreeSize + (rec - nodeCount);
+			/* Data records resolve against the start of the data section, which is
+			   searchTreeSize + 16 (the same base used for pointers inside
+			   decodeField). Using searchTreeSize here instead would read every
+			   record 16 bytes too early and decode the wrong country. */
+			long off = (long) dataSectionStart + (rec - nodeCount);
 			return decodeField(new int[] { (int) off }, dataSectionStart, 0);
 		}
 		return null;

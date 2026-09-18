@@ -56,11 +56,22 @@ public class GeoIp {
 	   database is unavailable — a network lookup. Returns UNKNOWN on any
 	   failure (and does not cache that failure). */
 	public static String countryOf(Preferences prefs, String server) {
+		return countryOf(prefs, server, false);
+	}
+
+	/* refresh=true re-resolves the country from the source and overwrites any
+	   cached value, so a mislabeled node (e.g. a stale "RU" for a US IP) can be
+	   corrected by re-running the speed test instead of being stuck forever.
+	   The in-memory cache is still consulted so a single test pass does not hit
+	   the network twice for the same server. */
+	public static String countryOf(Preferences prefs, String server, boolean refresh) {
 		if (server == null || server.isEmpty())
 		  return UNKNOWN;
-		String cached = prefs.getServerCountry(server);
-		if (cached != null && !cached.isEmpty())
-		  return cached;
+		if (!refresh) {
+			String cached = prefs.getServerCountry(server);
+			if (cached != null && !cached.isEmpty())
+			  return cached;
+		}
 		String mem = cache.get(server);
 		if (mem != null)
 		  return mem;

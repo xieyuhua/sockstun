@@ -492,11 +492,15 @@ public class SubscribeActivity extends BaseActivity {
 				} catch (Exception e) {
 					n.latency = -2;
 				}
-				/* Resolve the node's country as part of the same test pass
-				   (offline cache first, so repeats cost nothing). This makes a
-				   single "测速" both measure speed and tag the country. */
-				if (n.country == null || n.country.isEmpty() || n.country.equals(GeoIp.UNKNOWN))
-				  n.country = GeoIp.countryOf(prefs, n.server);
+				/* (Re)resolve the node's country on every test pass and overwrite
+				   the cached value, so a mislabeled flag (e.g. a stale "RU" for a
+				   US IP) self-heals instead of being stuck forever. The in-memory
+				   cache still dedupes repeated servers within this run. A failed
+				   lookup (offline / rate-limited) yields UNKNOWN, which we keep out
+				   so a good cached value is never clobbered into "unknown". */
+				String cc = GeoIp.countryOf(prefs, n.server, true);
+				if (cc != null && !cc.isEmpty() && !GeoIp.UNKNOWN.equals(cc))
+				  n.country = cc;
 				ui.post(new Runnable() {
 					@Override
 					public void run() {
