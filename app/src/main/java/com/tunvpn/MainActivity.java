@@ -204,15 +204,18 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		prefs = new Preferences(this);
 		/* Proxied traffic only: the counters behind these come from the core's
 		   connection list filtered by chain, so direct traffic is excluded. */
+		/* 隧道总流量来自核心 getTotalTraffic，独立于 9090 控制接口；而代理专属
+		   统计依赖 /connections（9090），控制接口不可用时恒为 0，会导致“流量不动”
+		   的假象。故实时/会话/总一律用总流量。 */
 		textview_realtime.setText(statsLine(R.string.stats_realtime,
-			TProxyService.formatRate(prefs.getProxyRateTx()),
-			TProxyService.formatRate(prefs.getProxyRateRx())));
+			TProxyService.formatRate(prefs.getRateTx()),
+			TProxyService.formatRate(prefs.getRateRx())));
 		textview_session.setText(statsLine(R.string.stats_session,
-			TProxyService.formatBytes(prefs.getProxySessionTx()),
-			TProxyService.formatBytes(prefs.getProxySessionRx())));
+			TProxyService.formatBytes(prefs.getSessionTx()),
+			TProxyService.formatBytes(prefs.getSessionRx())));
 		textview_total.setText(statsLine(R.string.stats_total,
-			TProxyService.formatBytes(prefs.getProxyTotalTx()),
-			TProxyService.formatBytes(prefs.getProxyTotalRx())));
+			TProxyService.formatBytes(prefs.getTotalTx()),
+			TProxyService.formatBytes(prefs.getTotalRx())));
 		updateNode();
 
 		/* Enable and LastError are written by the :native process, which cannot

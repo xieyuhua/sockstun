@@ -140,6 +140,16 @@ public class TProxyService extends VpnService {
 	private volatile String lastControllerError = null;
 	private volatile String proxyTestStatus = "";
 	private static final String PROXY_TEST_URL = "http://www.gstatic.com/generate_204";
+	/* 延迟测试候选地址：节点只要能通任意一个，就给出干净的“可用”。Clash 自己的
+	   /delay 语义是“代理回了任何 HTTP 响应即节点管线通”，502 只说明该目标被节点
+	   出口拦截，不算代理死。 */
+	private static final String[] PROXY_TEST_URLS = {
+		PROXY_TEST_URL,
+		"http://www.google.com/generate_204",
+		"http://www.msftconnecttest.com/connecttest.txt",
+	};
+	private volatile String lastTestUrl = "";
+	private volatile String lastTestError = "";
 	private long proxyBaseTx, proxyBaseRx;
 	private long proxySessionTx, proxySessionRx;
 	private long lastProxyTx, lastProxyRx;
@@ -494,7 +504,7 @@ public class TProxyService extends VpnService {
 		/* FlClash-style real reachability: actually push a request through the
 		   selected node and measure latency, rather than only checking the API
 		   answers (which can be green while no traffic flows). */
-		testProxyConnectivity();
+		testProxyConnectivity(prefs);
 
 		prefs.clearLastError();
 		prefs.setEnable(true);
@@ -772,7 +782,7 @@ public class TProxyService extends VpnService {
 			if (!target.equals(proxy))
 			  note += " (resolved to " + target + ")";
 			appendLog("selector set: " + note);
-			testProxyConnectivity();
+			testProxyConnectivity(new Preferences(this));
 		} catch (Throwable e) {
 			appendLog("selector set skipped: " + e);
 		}
@@ -910,53 +920,96 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* FlClash-style real reachability: push a request THROUGH the core's
-	   currently-selected node and measure latency. Unlike the bare "/version"
-	   probe (which only proves the control API answers), this only succeeds
-	   when bytes actually leave via the proxy and come back - so it cannot look
-	   "available" while the tunnel is dead. Retries until the API is up, then
-	   reports the result to the log and the notification. */
-	private void testProxyConnectivity() {
+	/* FlClash-style real reachability WITHOUT the control API: drive a request
+	   through the core's own local mixed-port (127.0.0.1:<proxyPort>) so the
+	   bytes actually leave via the selected node and come back. Semantics match
+	   Clash's own /delay test - getting *any* HTTP response from the proxy means
+	   the node pipeline is alive (tunnel up); a 5xx only means the chosen test
+	   target is blocked at the node's egress, not that the proxy is dead. So a
+	   response => 可达/可用 with measured latency; only a connection-level
+	   failure (no response at all) => 不可用. */
+	private void testProxyConnectivity(Preferences prefs) {
+		final int port = prefs.getProxyPort();
 		new Thread(() -> {
 			for (int i = 0; i < 40; i++) {
 				if (startupAborted)
 				  return;
-				if (!waitForController()) {
-					try { Thread.sleep(2000); } catch (InterruptedException e) { return; }
-					continue;
-				}
-				try {
-					String url = "http://127.0.0.1:" + MihomoConfig.API_PORT
-						+ "/proxies/" + java.net.URLEncoder.encode(MihomoConfig.GROUP, "UTF-8")
-						+ "/delay?timeout=5000&url="
-						+ java.net.URLEncoder.encode(PROXY_TEST_URL, "UTF-8");
-					String body = httpGetAny(url);
-					if (body != null) {
-						long delay = jsonBytes(body, "delay");
-						if (delay >= 0) {
-							proxyTestStatus = "代理实测可用（延迟 " + delay + "ms）";
-							appendLog("proxy test: 可用（延迟 " + delay + "ms，经 "
-								+ PROXY_TEST_URL + "）");
-							updateNotification();
-							return;
-						}
-						proxyTestStatus = "代理实测不可用：节点未连通（" + body + "）";
-						appendLog("proxy test: 节点未连通（" + body + "）");
+				int[] res = proxyTestOnce(port);
+				if (res[0] > 0) { // 拿到 HTTP 响应 => 节点管线通
+					int code = res[0], rtt = res[1];
+					if (code >= 200 && code < 400) {
+						proxyTestStatus = "代理实测可用（延迟 " + rtt + "ms）";
+						appendLog("proxy test: 可用（" + rtt + "ms，经 127.0.0.1:" + port
+							+ " 实测 " + lastTestUrl + "）");
 					} else {
-						proxyTestStatus = "代理实测不可用：控制接口无响应（" + lastControllerError + "）";
-						appendLog("proxy test: 无法经代理取到响应（" + lastControllerError + "）");
+						/* 节点回了响应（如 502）即说明隧道已通，只是该测试目标被
+						   节点出口拦截/不可达；这仍算“可达”，但如实标注状态码。 */
+						proxyTestStatus = "代理可达（延迟 " + rtt + "ms，节点响应 " + code
+							+ "，测试目标可能被节点侧拦截）";
+						appendLog("proxy test: 节点可达但目标返回 " + code + "（延迟 " + rtt
+							+ "ms，经 127.0.0.1:" + port + "，" + lastTestUrl
+							+ "，隧道应已可用）");
 					}
-				} catch (Throwable e) {
-					proxyTestStatus = "代理实测异常：" + e;
-					appendLog("proxy test: 异常 " + e);
+					updateNotification();
+					return;
 				}
+				proxyTestStatus = "代理实测不可用：" + lastTestError;
+				appendLog("proxy test: 经 127.0.0.1:" + port + " 无任何 HTTP 响应（" + lastTestError + "）");
 				updateNotification();
 				try { Thread.sleep(8000); } catch (InterruptedException e) { return; }
 			}
 			proxyTestStatus = "代理实测多次失败：节点可能失效或 TUN 未真正捕获流量";
-			appendLog("proxy test: 多次尝试仍不可用，代理可能未真正连通（节点失效 / TUN 未捕获流量）");
+			appendLog("proxy test: 多次尝试仍不可用，代理可能未真正连通（节点失效 / TUN 未捕获流量 / 127.0.0.1:" + port + " 未监听）");
 			updateNotification();
 		}).start();
+	}
+
+	/* 逐个候选 URL 经本地 mixed-port 实测。返回首个拿到 2xx 的 {code, rtt}；若所有
+	   URL 都只拿到 5xx，也返回最后一个 5xx（节点已应答，证明隧道通）；仅当连接级
+	   失败（拒绝/超时，代理本身不可达）才返回 {-1,-1}。 */
+	private int[] proxyTestOnce(int port) {
+		int last5xx = -1, lastRtt = -1;
+		for (String url : PROXY_TEST_URLS) {
+			lastTestUrl = url;
+			try {
+				long t0 = System.currentTimeMillis();
+				java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.HTTP,
+					new java.net.InetSocketAddress("127.0.0.1", port));
+				HttpURLConnection conn = (HttpURLConnection)
+					new URL(url).openConnection(proxy);
+				conn.setConnectTimeout(8000);
+				conn.setReadTimeout(8000);
+				conn.setInstanceFollowRedirects(false);
+				int code = conn.getResponseCode();
+				drainConn(conn, code);
+				int rtt = (int) (System.currentTimeMillis() - t0);
+				if (code >= 200 && code < 400)
+				  return new int[] { code, rtt };
+				last5xx = code; lastRtt = rtt;
+			} catch (Throwable e) {
+				String msg = e.getMessage() == null ? "" : e.getMessage();
+				lastTestError = e.getClass().getSimpleName() + ": " + msg;
+				boolean transport = (e instanceof java.net.ConnectException)
+					|| (e instanceof java.net.SocketTimeoutException)
+					|| msg.toLowerCase().contains("refused")
+					|| msg.toLowerCase().contains("timed out")
+					|| msg.toLowerCase().contains("econnrefused");
+				/* 连接级失败 = 代理本身不可达，所有 URL 都会同样失败，直接判死。 */
+				if (transport)
+				  return new int[] { -1, -1 };
+				/* 其它错误（如 unknown host）换下一个 URL 试试。 */
+			}
+		}
+		if (last5xx > 0)
+		  return new int[] { last5xx, lastRtt };
+		return new int[] { -1, -1 };
+	}
+
+	/* 读空响应体，避免连接挂起/复用异常。 */
+	private static void drainConn(HttpURLConnection conn, int code) {
+		try { java.io.InputStream is = code < 400 ? conn.getInputStream()
+				: conn.getErrorStream();
+			if (is != null) while (is.read() != -1) ; } catch (Throwable ignore) { }
 	}
 
 	/* Like httpGet but returns the body even on a non-2xx status, so a failed
@@ -1130,14 +1183,15 @@ public class TProxyService extends VpnService {
 	}
 
 	private Notification buildNotification() {
+		/* 实时/会话/总展示隧道总流量（取自 getTotalTraffic，独立于 9090）。代理
+		   专属统计依赖 /connections，控制接口不可用时为 0，会显得“流量不动”。 */
 		String line = statsLine(R.string.stats_realtime,
-			formatRate(proxyRateTx), formatRate(proxyRateRx));
+			formatRate(txRate), formatRate(rxRate));
 		String big = line + "\n" +
 			statsLine(R.string.stats_session,
-				formatBytes(proxySessionTx), formatBytes(proxySessionRx)) + "\n" +
+				formatBytes(sessionTx), formatBytes(sessionRx)) + "\n" +
 			statsLine(R.string.stats_total,
-				formatBytes(proxyBaseTx + proxySessionTx),
-				formatBytes(proxyBaseRx + proxySessionRx));
+				formatBytes(totalTx), formatBytes(totalRx));
 
 		/* The node goes into the title, where a long name is simply ellipsized,
 		   so the live rates below can never be pushed out of the notification.
@@ -1327,7 +1381,7 @@ public class TProxyService extends VpnService {
 			if (connFailStreak == 5)
 			  appendLog("流量统计：无法读取 /connections（控制接口 127.0.0.1:"
 				+ MihomoConfig.API_PORT + " 未就绪，" + lastControllerError
-				+ "），代理流量将显示为 0");
+				+ "），仅“代理专属流量/连接数”归零；总流量取自 getTotalTraffic，不受影响");
 			return;
 		}
 		if (connFailStreak >= 5)
@@ -1586,7 +1640,7 @@ public class TProxyService extends VpnService {
 	/* Only re-post the notification when the shown text really changed. */
 	private void updateNotification() {
 		String line = statsLine(R.string.stats_realtime,
-			formatRate(proxyRateTx), formatRate(proxyRateRx));
+			formatRate(txRate), formatRate(rxRate));
 		if (line.equals(lastNotifyText))
 		  return;
 		lastNotifyText = line;
