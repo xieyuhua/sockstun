@@ -143,6 +143,28 @@ public class MihomoConfig {
 		if (!sectionExists(cfg, "secret:"))
 			cfg.append("secret: \"").append(escapeYaml(prefs.getSecret())).append("\"\n");
 
+		/* Sensible core defaults that mirror mihomo's own reference config: rule
+		   mode, unified delay measurement, concurrent TCP dialing, IPv6 off by
+		   default, process names in /connections (the home screen's "recent
+		   requests" view benefits), and a permissive CORS policy for the local
+		   clash-api. Each is guarded so a hand-edited config keeps its own
+		   value, and none of them collides with the API/auth keys above. */
+		if (!sectionExists(cfg, "mode:"))
+			cfg.append("mode: rule\n");
+		if (!sectionExists(cfg, "unified-delay:"))
+			cfg.append("unified-delay: true\n");
+		if (!sectionExists(cfg, "tcp-concurrent:"))
+			cfg.append("tcp-concurrent: true\n");
+		if (!sectionExists(cfg, "ipv6:"))
+			cfg.append("ipv6: false\n");
+		if (!sectionExists(cfg, "find-process-mode:"))
+			cfg.append("find-process-mode: always\n");
+		if (!sectionExists(cfg, "external-controller-cors:"))
+			cfg.append("external-controller-cors:\n")
+				.append("  allow-origins:\n")
+				.append("    - \"*\"\n")
+				.append("  allow-private-network: true\n");
+
 		/* The home screen asks an echo service for the public IP through the
 		   core's local HTTP port, and the "allow LAN" setting exposes it to the
 		   network, so the app owns this port outright. The config is built from
