@@ -332,7 +332,7 @@ public class ConnectionsActivity extends BaseActivity {
 		lastError = "";
 		HttpURLConnection conn = null;
 		try {
-			conn = (HttpURLConnection) new URL(url).openConnection();
+			conn = (HttpURLConnection) new URL(url).openConnection(java.net.Proxy.NO_PROXY);
 			MihomoConfig.applyAuth(conn, prefs);
 			conn.setConnectTimeout(2000);
 			conn.setReadTimeout(2000);
@@ -361,7 +361,7 @@ public class ConnectionsActivity extends BaseActivity {
 	private void httpDelete(String url) {
 		HttpURLConnection conn = null;
 		try {
-			conn = (HttpURLConnection) new URL(url).openConnection();
+			conn = (HttpURLConnection) new URL(url).openConnection(java.net.Proxy.NO_PROXY);
 			MihomoConfig.applyAuth(conn, prefs);
 			conn.setRequestMethod("DELETE");
 			conn.setConnectTimeout(2000);

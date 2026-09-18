@@ -620,6 +620,12 @@ public class TProxyService extends VpnService {
 			String secretVal = null;
 			if (existingSecret != null) {
 				String v = existingSecret.trim();
+				/* Strip the "secret:" key prefix first, then any surrounding
+				   quotes, so "secret: \"\"" yields null (empty) instead of the
+				   corrupted value "secret: \"", which would otherwise persist
+				   into Preferences and break every later auth check. */
+				if (v.startsWith("secret:")) v = v.substring("secret:".length());
+				v = v.trim();
 				if (v.startsWith("\"")) v = v.substring(1);
 				if (v.endsWith("\"")) v = v.substring(0, v.length() - 1);
 				v = v.trim();
@@ -931,7 +937,7 @@ public class TProxyService extends VpnService {
 		HttpURLConnection c = null;
 		try {
 			c = (HttpURLConnection) new URL("http://" + host + ":"
-				+ MihomoConfig.API_PORT + "/version").openConnection();
+				+ MihomoConfig.API_PORT + "/version").openConnection(java.net.Proxy.NO_PROXY);
 			MihomoConfig.applyAuth(c, prefs);
 			c.setConnectTimeout(500);
 			c.setReadTimeout(500);
@@ -1097,7 +1103,7 @@ public class TProxyService extends VpnService {
 	private String httpGetAny(String url) {
 		HttpURLConnection conn = null;
 		try {
-			conn = (HttpURLConnection) new URL(url).openConnection();
+			conn = (HttpURLConnection) new URL(url).openConnection(java.net.Proxy.NO_PROXY);
 			MihomoConfig.applyAuth(conn, prefs);
 			conn.setConnectTimeout(6000);
 			conn.setReadTimeout(6000);
@@ -1126,7 +1132,7 @@ public class TProxyService extends VpnService {
 	private String resolveMember(String group, String wanted) throws IOException {
 		String url = apiBase()
 			+ "/proxies/" + encodePath(group);
-		HttpURLConnection get = (HttpURLConnection) new URL(url).openConnection();
+		HttpURLConnection get = (HttpURLConnection) new URL(url).openConnection(java.net.Proxy.NO_PROXY);
 		MihomoConfig.applyAuth(get, prefs);
 		get.setRequestMethod("GET");
 		get.setConnectTimeout(2000);
@@ -1159,7 +1165,7 @@ public class TProxyService extends VpnService {
 	private int putSelector(String group, String proxy) throws IOException {
 		String url = apiBase()
 			+ "/proxies/" + encodePath(group);
-		HttpURLConnection put = (HttpURLConnection) new URL(url).openConnection();
+		HttpURLConnection put = (HttpURLConnection) new URL(url).openConnection(java.net.Proxy.NO_PROXY);
 		MihomoConfig.applyAuth(put, prefs);
 		put.setRequestMethod("PUT");
 		put.setConnectTimeout(2000);
@@ -1691,7 +1697,7 @@ public class TProxyService extends VpnService {
 	private String httpGet(String url) {
 		HttpURLConnection conn = null;
 		try {
-			conn = (HttpURLConnection) new URL(url).openConnection();
+			conn = (HttpURLConnection) new URL(url).openConnection(java.net.Proxy.NO_PROXY);
 			MihomoConfig.applyAuth(conn, prefs);
 			conn.setConnectTimeout(2000);
 			conn.setReadTimeout(2000);

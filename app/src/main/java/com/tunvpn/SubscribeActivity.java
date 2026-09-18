@@ -656,7 +656,7 @@ public class SubscribeActivity extends BaseActivity {
 			try {
 				String u = base + "/proxies/" + encodePath(name)
 					+ "/delay?timeout=" + timeoutMs + "&url=" + URLEncoder.encode(target, "UTF-8");
-				HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection();
+				HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection(java.net.Proxy.NO_PROXY);
 				MihomoConfig.applyAuth(c, prefs);
 				c.setConnectTimeout(5000);
 				c.setReadTimeout(timeoutMs + 3000);
@@ -693,7 +693,7 @@ public class SubscribeActivity extends BaseActivity {
 		  return false;
 		try {
 			String base = "http://" + host + ":" + MihomoConfig.API_PORT;
-			HttpURLConnection c = (HttpURLConnection) new URL(base + "/proxies").openConnection();
+			HttpURLConnection c = (HttpURLConnection) new URL(base + "/proxies").openConnection(java.net.Proxy.NO_PROXY);
 			MihomoConfig.applyAuth(c, prefs);
 			c.setConnectTimeout(1500);
 			c.setReadTimeout(3000);
@@ -755,7 +755,7 @@ public class SubscribeActivity extends BaseActivity {
 		HttpURLConnection c = null;
 		try {
 			c = (HttpURLConnection) new URL("http://" + host + ":"
-				+ MihomoConfig.API_PORT + "/version").openConnection();
+				+ MihomoConfig.API_PORT + "/version").openConnection(java.net.Proxy.NO_PROXY);
 			MihomoConfig.applyAuth(c, prefs);
 			c.setConnectTimeout(800);
 			c.setReadTimeout(800);
