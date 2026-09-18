@@ -137,13 +137,6 @@ public class MihomoConfig {
 		if (!sectionExists(cfg, "external-controller:"))
 			cfg.append("external-controller: 0.0.0.0:").append(API_PORT).append('\n');
 
-		/* Match flclash: resolve the originating app for every connection so the
-		   "connections" and "recent requests" screens can show which app made the
-		   request. Without it mihomo leaves metadata.process empty and the app
-		   column stays blank. */
-		if (!sectionExists(cfg, "find-process-mode:"))
-			cfg.append("find-process-mode: strict\n");
-
 		/* The home screen asks an echo service for the public IP through the
 		   core's local HTTP port, and the "allow LAN" setting exposes it to the
 		   network, so the app owns this port outright. The config is built from

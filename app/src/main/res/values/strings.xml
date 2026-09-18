@@ -219,6 +219,9 @@
 	<string name="sub_applied_hint">已选择：%s\n下次启动隧道时生效</string>
 	<string name="sub_switched">已选择：%s</string>
 	<string name="sub_switched_restart">已选择：%1$s\n自动选择已关闭，重新连接后固定使用该节点</string>
+	<string name="sub_add_to_server">已添加到服务器列表：%s</string>
+	<string name="sub_server_exists">该节点已在服务器列表中</string>
+	<string name="sub_add_to_server_failed">无法获取该节点原始配置，无法添加到服务器列表（可改用「服务器」页手动粘贴节点定义）</string>
 	<string name="proxy_state_probing">代理连通：检测中…</string>
 	<string name="proxy_state_ok">代理连通：正常</string>
 	<string name="proxy_state_fail_reason">代理不通（%1$s）</string>

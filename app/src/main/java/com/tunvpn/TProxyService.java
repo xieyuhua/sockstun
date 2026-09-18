@@ -922,8 +922,11 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* First non-loopback IPv4 of the device, used to reach the clash-api when the
-	   127.0.0.1 loopback is hijacked by the TUN. Falls back to 127.0.0.1. */
+	/* First non-loopback, non-TUN IPv4 of the device, used to reach the
+	   clash-api when the 127.0.0.1 loopback is hijacked by the TUN. The VPN
+	   tunnel interface (tun*) is skipped so we reach mihomo's 0.0.0.0 listener
+	   via a real interface instead of the captured tunnel. Falls back to
+	   127.0.0.1. */
 	private String deviceHost() {
 		try {
 			java.util.Enumeration<java.net.NetworkInterface> en =
@@ -931,6 +934,10 @@ public class TProxyService extends VpnService {
 			while (en.hasMoreElements()) {
 				java.net.NetworkInterface nif = en.nextElement();
 				if (nif.isLoopback() || !nif.isUp())
+				  continue;
+				String n = nif.getName();
+				if (n != null && (n.startsWith("tun")
+						|| n.startsWith("ppp") || n.contains("tun")))
 				  continue;
 				java.util.Enumeration<java.net.InetAddress> adds = nif.getInetAddresses();
 				while (adds.hasMoreElements()) {

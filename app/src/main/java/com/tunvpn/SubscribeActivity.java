@@ -50,8 +50,15 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import org.json.JSONObject;
 
 public class SubscribeActivity extends BaseActivity {
 	/* Spinner position 0 is the default, and "fastest first" is what people
@@ -89,6 +96,17 @@ public class SubscribeActivity extends BaseActivity {
 	/* Bounded pool for latency tests. "Test all" on a large subscription would
 	   otherwise fire one thread - and one socket - per node at once. */
 	private final ExecutorService testPool = Executors.newFixedThreadPool(16);
+
+	/* Resolved mihomo proxy names for the current test pass: "server|port|type"
+	   -> the real (de-dup'd) proxy name in the running config. Filled lazily
+	   from the clash-api so per-node delay tests target the correct node even
+	   when mergedConfig renamed duplicates to "name (N)". */
+	private java.util.Map<String, String> proxyNameCache = null;
+
+	/* Working clash-api host for this test pass. 127.0.0.1 is often hijacked by
+	   the TUN, so we fall back to the device's own IP (mihomo binds the
+	   external-controller to 0.0.0.0, reachable on every interface). */
+	private String apiHost = null;
 
 	/* nodes = everything we parsed (source of truth, persisted)
 	   shown = what the list displays after filtering + sorting */
@@ -154,6 +172,19 @@ public class SubscribeActivity extends BaseActivity {
 		adapter = new NodeAdapter();
 		listview.setAdapter(adapter);
 		listview.setEmptyView(textview_empty);
+
+		/* Long-press a node to copy it into the manual server list, so a
+		   specific node can be pinned/enabled independently of the subscription. */
+		listview.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
+			@Override
+			public boolean onItemLongClick(AdapterView<?> parent, View view,
+					int position, long id) {
+				ClashNode n = adapter.getItem(position);
+				if (n != null)
+				  addNodeToServers(n);
+				return true;
+			}
+		});
 
 		/* Read the persisted choices BEFORE the adapters are attached: attaching
 		   an adapter immediately fires onItemSelected(0), which would persist 0
@@ -462,6 +493,10 @@ public class SubscribeActivity extends BaseActivity {
 	private void testAll() {
 		if (nodes.isEmpty())
 		  return;
+		/* The running config may have changed (subscription edited / re-picked);
+		   rebuild the node-name map and re-probe the api host from scratch. */
+		proxyNameCache = null;
+		apiHost = null;
 		pendingTests = nodes.size();
 		testsDone = 0;
 		lastTestUiUpdate = 0;
@@ -492,6 +527,14 @@ public class SubscribeActivity extends BaseActivity {
 				} catch (Exception e) {
 					n.latency = -2;
 				}
+				/* A bare TCP connect only proves the port is open; it does not
+				   mean the proxy actually tunnels traffic. When the tunnel is
+				   running, ask mihomo to push a request through THIS node and use
+				   that real delay, so "available" reflects genuine usability.
+				   Falls back to the TCP result when the controller is down. */
+				Long real = proxyDelayMs(n);
+				if (real != null)
+				  n.latency = real;
 				/* (Re)resolve the node's country on every test pass and overwrite
 				   the cached value, so a mislabeled flag (e.g. a stale "RU" for a
 				   US IP) self-heals instead of being stuck forever. The in-memory
@@ -532,6 +575,248 @@ public class SubscribeActivity extends BaseActivity {
 				});
 			}
 		});
+	}
+
+	/* Long-press: copy a subscription node into the manual server list. SOCKS5
+	   uses the form fields; every other protocol needs the node's original clash
+	   proxy block verbatim (the only way to keep uuid / sni / ws-opts / ...),
+	   which we recover from the subscription's raw body by node name. */
+	private void addNodeToServers(final ClashNode n) {
+		List<SocksServer> list = prefs.getSocksServers();
+		for (SocksServer s : list) {
+			if (n.name.equals(s.name) && n.server.equals(s.addr) && n.port == s.port) {
+				Toast.makeText(this, R.string.sub_server_exists, Toast.LENGTH_SHORT).show();
+				return;
+			}
+		}
+		boolean socks = "socks5".equals(n.type == null ? "" : n.type);
+		String raw = socks ? "" : findRawProxy(n);
+		if (!socks && (raw == null || raw.isEmpty())) {
+			Toast.makeText(this, R.string.sub_add_to_server_failed, Toast.LENGTH_LONG).show();
+			return;
+		}
+		SocksServer s = new SocksServer(SocksServer.newId(), n.name, n.server, n.port,
+			n.username, n.password, socks ? "socks5" : n.type, raw);
+		list.add(s);
+		prefs.setSocksServers(list);
+		Toast.makeText(this, getString(R.string.sub_add_to_server, n.name),
+			Toast.LENGTH_LONG).show();
+	}
+
+	/* Recover a node's original clash proxy block from its subscription's raw
+	   body, matched by name. Returns "" when the subscription body is missing
+	   or the node could not be located (e.g. the subscription changed). */
+	private String findRawProxy(ClashNode n) {
+		if (n.subId == null || n.subId.isEmpty())
+		  return "";
+		String raw = prefs.getSubRaw(n.subId);
+		if (raw == null || raw.isEmpty())
+		  return "";
+		for (ClashParser.ProxyDef p : ClashParser.extractProxies(raw)) {
+			if (n.name != null && n.name.equals(p.name))
+			  return p.text;
+		}
+		return "";
+	}
+
+	/* Candidate targets for the real delay test. A node that answers ANY of
+	   them is alive; only when every target fails do we call it unusable. This
+	   mirrors TProxyService's multi-target reachability so a single blocked
+	   target cannot false-negative a working node. */
+	private static final String[] PROXY_TEST_URLS = {
+		"http://www.gstatic.com/generate_204",
+		"http://www.google.com/generate_204",
+		"http://www.msftconnecttest.com/connecttest.txt",
+	};
+
+	/* Ask mihomo to push a request through THIS node and report the real delay.
+	   Returns latency (>=0) when the node actually tunnels, -2 when it cannot,
+	   or null when the controller is unavailable (caller keeps the TCP result).
+	   Works for every protocol because mihomo does the handshake. */
+	private Long proxyDelayMs(ClashNode n) {
+		if (!prefs.getEnable())
+		  return null;
+		if (!ensureProxyNameCache())
+		  return null;
+		String name = realNodeName(n);
+		if (name == null)
+		  return null;
+		String host = resolveApiHost();
+		if (host == null)
+		  return null;
+		String base = "http://" + host + ":" + MihomoConfig.API_PORT;
+		/* User's configured target first, then the built-in fallbacks. */
+		List<String> targets = new ArrayList<String>();
+		String userUrl = prefs.getAutoTestUrl();
+		if (userUrl != null && !userUrl.isEmpty())
+		  targets.add(userUrl);
+		for (String u : PROXY_TEST_URLS)
+		  if (!targets.contains(u))
+			targets.add(u);
+		Long failed = null;
+		for (String target : targets) {
+			try {
+				String u = base + "/proxies/" + encodePath(name)
+					+ "/delay?timeout=3000&url=" + URLEncoder.encode(target, "UTF-8");
+				HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection();
+				c.setConnectTimeout(3000);
+				c.setReadTimeout(6000);
+				int code = c.getResponseCode();
+				if (code == 200) {
+					String body = readApiBody(c);
+					JSONObject o = new JSONObject(body);
+					if (o.has("delay"))
+					  return o.getLong("delay");
+					return 0L;
+				}
+				/* Non-200: mihomo could not route through the node for this
+				   target; remember it but try the next target before giving up. */
+				failed = -2L;
+			} catch (Exception e) {
+				/* Controller became unreachable mid-run: fall back to TCP. */
+				return null;
+			}
+		}
+		return failed;
+	}
+
+	/* Lazily fetch the running config's proxy list and index it by
+	   server|port|type -> real (de-dup'd) name, so we can target a node by its
+	   address instead of its possibly-renamed label. Returns false when the
+	   controller is unreachable. */
+	private boolean ensureProxyNameCache() {
+		if (proxyNameCache != null)
+		  return true;
+		if (!prefs.getEnable())
+		  return false;
+		String host = resolveApiHost();
+		if (host == null)
+		  return false;
+		try {
+			String base = "http://" + host + ":" + MihomoConfig.API_PORT;
+			HttpURLConnection c = (HttpURLConnection) new URL(base + "/proxies").openConnection();
+			c.setConnectTimeout(1500);
+			c.setReadTimeout(3000);
+			if (c.getResponseCode() != 200) {
+				c.disconnect();
+				return false;
+			}
+			String body = readApiBody(c);
+			JSONObject o = new JSONObject(body);
+			JSONObject proxies = o.optJSONObject("proxies");
+			if (proxies == null)
+			  return false;
+			java.util.Map<String, String> map = new java.util.HashMap<String, String>();
+			java.util.Iterator<String> it = proxies.keys();
+			while (it.hasNext()) {
+				String pname = it.next();
+				JSONObject p = proxies.optJSONObject(pname);
+				if (p == null)
+				  continue;
+				String server = p.optString("server", "");
+				int port = p.optInt("port", 0);
+				String type = p.optString("type", "");
+				if (server.isEmpty() || port == 0)
+				  continue;
+				map.put(server.toLowerCase() + "|" + port + "|" + type, pname);
+			}
+			proxyNameCache = map;
+			return true;
+		} catch (Exception e) {
+			return false;
+		}
+	}
+
+	private String realNodeName(ClashNode n) {
+		if (proxyNameCache == null)
+		  return null;
+		String server = n.server == null ? "" : n.server.toLowerCase();
+		String type = n.type == null ? "" : n.type;
+		return proxyNameCache.get(server + "|" + n.port + "|" + type);
+	}
+
+	/* Pick a reachable clash-api host for this pass. The TUN regularly hijacks
+	   the 127.0.0.1 loopback, so probe it first and fall back to the device's
+	   own IP (mihomo binds external-controller to 0.0.0.0). Returns null when
+	   neither answers, so the caller keeps the TCP-only check. */
+	private String resolveApiHost() {
+		if (apiHost != null)
+		  return apiHost;
+		for (String h : new String[] { "127.0.0.1", deviceHost() }) {
+			if (probeApi(h)) {
+				apiHost = h;
+				return h;
+			}
+		}
+		return null;
+	}
+
+	private boolean probeApi(String host) {
+		HttpURLConnection c = null;
+		try {
+			c = (HttpURLConnection) new URL("http://" + host + ":"
+				+ MihomoConfig.API_PORT + "/version").openConnection();
+			c.setConnectTimeout(800);
+			c.setReadTimeout(800);
+			return c.getResponseCode() >= 200 && c.getResponseCode() < 300;
+		} catch (Exception e) {
+			return false;
+		} finally {
+			if (c != null)
+			  try { c.disconnect(); } catch (Exception ignore) { }
+		}
+	}
+
+	/* First non-loopback, non-TUN IPv4 of the device. The VPN tunnel interface
+	   (tun*) is skipped so we reach mihomo's 0.0.0.0 listener via a real
+	   interface instead of the captured tunnel. Falls back to 127.0.0.1. */
+	private String deviceHost() {
+		try {
+			java.util.Enumeration<java.net.NetworkInterface> en =
+				java.net.NetworkInterface.getNetworkInterfaces();
+			while (en.hasMoreElements()) {
+				java.net.NetworkInterface nif = en.nextElement();
+				if (nif.isLoopback() || !nif.isUp())
+				  continue;
+				String n = nif.getName();
+				if (n != null && (n.startsWith("tun")
+						|| n.startsWith("ppp") || n.contains("tun")))
+				  continue;
+				java.util.Enumeration<java.net.InetAddress> adds = nif.getInetAddresses();
+				while (adds.hasMoreElements()) {
+					java.net.InetAddress a = adds.nextElement();
+					if (a instanceof java.net.Inet4Address && !a.isLoopbackAddress())
+					  return a.getHostAddress();
+				}
+			}
+		} catch (Throwable ignore) { }
+		return "127.0.0.1";
+	}
+
+	/* Path-safe encoding for clash-api URLs: encode, then turn "+" back into
+	   "%20" so a space in a node name is not mistaken for a literal "+". */
+	private static String encodePath(String s) {
+		try {
+			return URLEncoder.encode(s, "UTF-8").replace("+", "%20");
+		} catch (Exception e) {
+			return s;
+		}
+	}
+
+	private static String readApiBody(HttpURLConnection c) {
+		try {
+		InputStream in = (c.getResponseCode() >= 400) ? c.getErrorStream() : c.getInputStream();
+			if (in == null)
+			  return "";
+			ByteArrayOutputStream bos = new ByteArrayOutputStream();
+			byte[] buf = new byte[1024];
+			int n;
+			while ((n = in.read(buf)) > 0)
+			  bos.write(buf, 0, n);
+			return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+		} catch (Exception e) {
+			return "";
+		}
 	}
 
 	private void useNode(final ClashNode n) {
