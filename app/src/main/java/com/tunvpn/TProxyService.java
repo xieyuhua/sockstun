@@ -609,7 +609,7 @@ public class TProxyService extends VpnService {
 
 			String ec = topLevelLine(text, "external-controller:");
 			boolean needEc = (ec == null)
-				|| !ec.contains("0.0.0.0:" + MihomoConfig.API_PORT);
+				|| !ec.contains("127.0.0.1:" + MihomoConfig.API_PORT);
 			boolean needMp = !hasTopLevelKey(text, "mixed-port:")
 				&& !hasTopLevelKey(text, "port:");
 			/* Adopt a hand-set secret from the custom config so the app's control
@@ -640,7 +640,7 @@ public class TProxyService extends VpnService {
 			boolean secretWritten = false;
 			for (String line : text.split("\n", -1)) {
 				if (needEc && topLevelLine(line + "\n", "external-controller:") != null) {
-					out.append("external-controller: 0.0.0.0:")
+					out.append("external-controller: 127.0.0.1:")
 					   .append(MihomoConfig.API_PORT).append('\n');
 					ecWritten = true;
 				} else if (needSecret && topLevelLine(line + "\n", "secret:") != null) {
@@ -651,7 +651,7 @@ public class TProxyService extends VpnService {
 				}
 			}
 			if (needEc && !ecWritten)
-				out.append("external-controller: 0.0.0.0:")
+				out.append("external-controller: 127.0.0.1:")
 					.append(MihomoConfig.API_PORT).append('\n');
 			if (needSecret && !secretWritten)
 				out.append("secret: \"").append(prefs.getSecret()).append("\"\n");
@@ -661,7 +661,7 @@ public class TProxyService extends VpnService {
 			java.io.FileOutputStream fos = new java.io.FileOutputStream(configFile, false);
 			fos.write(out.toString().getBytes("UTF-8"));
 			fos.close();
-			appendLog("config: 自定义配置已对齐 App 必需项（external-controller=0.0.0.0:"
+			appendLog("config: 自定义配置已对齐 App 必需项（external-controller=127.0.0.1:"
 				+ MihomoConfig.API_PORT
 				+ (needMp ? ", mixed-port=" + prefs.getProxyPort() : "")
 				+ (needSecret ? ", secret" : "") + "）");
@@ -913,9 +913,9 @@ public class TProxyService extends VpnService {
 	/* One quick reachability probe of the control API (no retries). Used by
 	   verifyController; the selector/test loops use waitForController which
 	   retries internally. */
-	/* Probe /version on both the IPv4 loopback and the device's own IP. mihomo's
-	   TUN rules can intercept 127.0.0.1, so we fall back to the device IP (the
-	   external-controller is now bound to 0.0.0.0, reachable on every interface).
+	/* Probe /version on the IPv4 loopback first; the device's own IP is kept as a
+	   fallback (the external-controller is bound to 127.0.0.1, reachable on the
+	   loopback; the device IP only helps where the loopback is captured).
 	   Whichever answers first becomes controllerHost for all later API calls. */
 	private boolean isControllerUp() {
 		for (String h : new String[] { "127.0.0.1", deviceHost() }) {
@@ -947,11 +947,10 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* First non-loopback, non-TUN IPv4 of the device, used to reach the
-	   clash-api when the 127.0.0.1 loopback is hijacked by the TUN. The VPN
-	   tunnel interface (tun*) is skipped so we reach mihomo's 0.0.0.0 listener
-	   via a real interface instead of the captured tunnel. Falls back to
-	   127.0.0.1. */
+	/* First non-loopback, non-TUN IPv4 of the device, kept as a fallback in case
+	   the 127.0.0.1 loopback is ever captured by the TUN. The VPN tunnel
+	   interface (tun*) is skipped so we never pick the captured tunnel. Falls
+	   back to 127.0.0.1. */
 	private String deviceHost() {
 		try {
 			java.util.Enumeration<java.net.NetworkInterface> en =

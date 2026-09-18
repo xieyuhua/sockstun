@@ -101,9 +101,9 @@ public class SubscribeActivity extends BaseActivity {
 	   when mergedConfig renamed duplicates to "name (N)". */
 	private java.util.Map<String, String> proxyNameCache = null;
 
-	/* Working clash-api host for this test pass. 127.0.0.1 is often hijacked by
-	   the TUN, so we fall back to the device's own IP (mihomo binds the
-	   external-controller to 0.0.0.0, reachable on every interface). */
+	/* Working clash-api host for this test pass. We probe 127.0.0.1 (the
+	   loopback the external-controller is bound to) and keep the device IP as a
+	   fallback in case the loopback is ever captured by the TUN. */
 	private String apiHost = null;
 
 	/* nodes = everything we parsed (source of truth, persisted)
@@ -735,10 +735,10 @@ public class SubscribeActivity extends BaseActivity {
 		return proxyNameCache.get(server + "|" + n.port + "|" + type);
 	}
 
-	/* Pick a reachable clash-api host for this pass. The TUN regularly hijacks
-	   the 127.0.0.1 loopback, so probe it first and fall back to the device's
-	   own IP (mihomo binds external-controller to 0.0.0.0). Returns null when
-	   neither answers, so the caller keeps the TCP-only check. */
+	/* Pick a reachable clash-api host for this pass. We probe 127.0.0.1 first
+	   (the loopback the external-controller is bound to) and fall back to the
+	   device's own IP only if the loopback is captured by the TUN. Returns null
+	   when neither answers, so the caller keeps the TCP-only check. */
 	private String resolveApiHost() {
 		if (apiHost != null)
 		  return apiHost;
@@ -768,9 +768,10 @@ public class SubscribeActivity extends BaseActivity {
 		}
 	}
 
-	/* First non-loopback, non-TUN IPv4 of the device. The VPN tunnel interface
-	   (tun*) is skipped so we reach mihomo's 0.0.0.0 listener via a real
-	   interface instead of the captured tunnel. Falls back to 127.0.0.1. */
+	/* First non-loopback, non-TUN IPv4 of the device, kept as a fallback in case
+	   the 127.0.0.1 loopback is captured by the TUN. The VPN tunnel interface
+	   (tun*) is skipped so we never pick the captured tunnel. Falls back to
+	   127.0.0.1. */
 	private String deviceHost() {
 		try {
 			java.util.Enumeration<java.net.NetworkInterface> en =

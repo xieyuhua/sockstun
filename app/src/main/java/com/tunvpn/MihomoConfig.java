@@ -42,15 +42,16 @@ public class MihomoConfig {
 	public static String countryGroup(String cc) {
 		return GROUP + "-" + cc;
 	}
-	/* mihomo's RESTful API. Bound to 0.0.0.0 (not just 127.0.0.1) so the app
-	   can reach it through the device's own IP: on some Android builds mihomo's
-	   TUN redirect rules hijack the 127.0.0.1 loopback, leaving /connections
-	   unreachable even though the tunnel itself is up. It still ignores the
-	   allow-lan setting and we do not set a secret, so exposure is limited to
-	   the local device. Not final: at startup we scan 9090..9100 and switch to
-	   the first free port, because a port already held by another process makes
-	   mihomo silently fail to bind the control API (symptom: tunnel up but
-	   /connections is connection-refused and every counter stays 0). */
+	/* mihomo's RESTful API. Bound to 127.0.0.1 (loopback only) - which is what
+	   the project's own docs and mihomo expect, and keeps the API off the LAN
+	   (it can leak every connection's domain/process/subscription). We DO set a
+	   `secret`, so the loopback API is authenticated. A device that cannot bind
+	   0.0.0.0 (some Android VPN/network stacks reject it) would otherwise fail to
+	   bring the control API up at all. Not final: at startup we scan 9090..9100
+	   and switch to the first free loopback port, because a port already held by
+	   another process makes mihomo silently fail to bind the control API
+	   (symptom: tunnel up but /connections is connection-refused and every
+	   counter stays 0). */
 	public static int API_PORT = 9090;
 
 	/* Find a free loopback port for the clash-api and store it in API_PORT.
@@ -68,8 +69,9 @@ public class MihomoConfig {
 	}
 
 	/* True when nothing on this device is already listening on 127.0.0.1:port.
-	   We bind a throwaway socket the same way mihomo will, so a port we can
-	   bind is one mihomo can bind too. */
+	   mihomo binds external-controller to 127.0.0.1, so the probe must use the
+	   same address: a port we can bind on 127.0.0.1 is one mihomo can bind too.
+	   We bind a throwaway socket the same way mihomo will. */
 	private static boolean isPortFree(int port) {
 		java.net.ServerSocket ss = null;
 		try {
@@ -132,11 +134,10 @@ public class MihomoConfig {
 				.append("    - any:53\n");
 
 		/* API used to tell proxied traffic apart from direct traffic (the point
-		   of the home screen's counters). Bound to 0.0.0.0 rather than
-		   127.0.0.1 so the app can reach it via the device IP when the TUN
-		   hijacks the loopback (see the note on API_PORT above). */
+		   of the home screen's counters). Bound to 127.0.0.1 (loopback) and
+		   authenticated via `secret` - see the note on API_PORT above. */
 		if (!sectionExists(cfg, "external-controller:"))
-			cfg.append("external-controller: 0.0.0.0:").append(API_PORT).append('\n');
+			cfg.append("external-controller: 127.0.0.1:").append(API_PORT).append('\n');
 		/* clash-api bearer token: every control request must carry
 		   Authorization: Bearer <secret> or mihomo replies 401. */
 		if (!sectionExists(cfg, "secret:"))
