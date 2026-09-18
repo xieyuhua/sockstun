@@ -9,6 +9,8 @@
 
 package com.tunvpn;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
@@ -90,6 +92,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			getString(R.string.settings_connections_hint), R.id.settings_connections);
 		addRow(group_connection, R.drawable.ic_routing, R.string.settings_recent_requests,
 			getString(R.string.settings_recent_requests_hint), R.id.settings_recent_requests);
+		addRow(group_connection, R.drawable.ic_rules, R.string.settings_secret,
+			secretSubtitle(), R.id.settings_secret);
 
 		addSwitchRow(group_lan, R.drawable.ic_routing, R.string.settings_allow_lan,
 			R.string.settings_allow_lan_hint, prefs.getAllowLan(),
@@ -106,6 +110,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			subsSubtitle(), R.id.settings_subscription);
 		addRow(group_subscription, R.drawable.ic_routing, R.string.sub_test_url_title,
 			getString(R.string.sub_test_url, prefs.getAutoTestUrl()), R.id.settings_test_url);
+		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_test_timeout,
+			getString(R.string.sub_test_timeout, prefs.getProxyTestTimeout()), R.id.settings_test_timeout);
 		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_autosel_interval,
 			autoSelectIntervalSubtitle(), R.id.settings_autosel_interval);
 		addRow(group_general, R.drawable.ic_log, R.string.log,
@@ -458,6 +464,49 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			null);
 	}
 
+	/* Latency-test timeout for the manual "test node" pass (seconds, 1–30).
+	   It caps how long mihomo may spend forwarding the probe, so a slow but
+	   usable node is not flagged unavailable by an over-tight default. */
+	private void editTestTimeout() {
+		final int cur = prefs.getProxyTestTimeout();
+		showInputDialog(R.string.settings_test_timeout,
+			getString(R.string.settings_test_timeout),
+			getString(R.string.sub_test_timeout_hint),
+			InputType.TYPE_CLASS_NUMBER,
+			Integer.toString(cur),
+			new InputValidator() {
+				@Override public String validate(String v) {
+					if (v.isEmpty())
+					  return getString(R.string.sub_test_timeout_invalid);
+					int s;
+					try {
+						s = Integer.parseInt(v);
+					} catch (NumberFormatException e) {
+						return getString(R.string.sub_test_timeout_invalid);
+					}
+					if (s < Preferences.MIN_PROXY_TEST_TIMEOUT
+							|| s > Preferences.MAX_PROXY_TEST_TIMEOUT)
+					  return getString(R.string.sub_test_timeout_invalid);
+					return null;
+				}
+			},
+			new OnValue() {
+				@Override public void onReceiveValue(String v) {
+					int s;
+					try {
+						s = Integer.parseInt(v);
+					} catch (NumberFormatException e) {
+						s = cur;
+					}
+					int clamped = Math.max(Preferences.MIN_PROXY_TEST_TIMEOUT,
+						Math.min(Preferences.MAX_PROXY_TEST_TIMEOUT, s));
+					prefs.setProxyTestTimeout(clamped);
+					buildList();
+				}
+			},
+			null);
+	}
+
 	@Override
 	public void onClick(View view) {
 		int id = view.getId();
@@ -473,6 +522,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  startActivity(new Intent(this, SubscribeConfigActivity.class));
 		else if (id == R.id.settings_test_url)
 		  editTestUrl();
+		else if (id == R.id.settings_test_timeout)
+		  editTestTimeout();
 		else if (id == R.id.settings_proxy_port)
 		  editPort();
 		else if (id == R.id.settings_log)
@@ -485,6 +536,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  showVersionDialog();
 		else if (id == R.id.settings_autosel_interval)
 		  editAutoSelectInterval();
+		else if (id == R.id.settings_secret)
+		  showSecretDialog();
 	}
 
 	/* Live snapshot of the running tunnel: the real state (including a failed
@@ -589,6 +642,65 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			.setTitle(R.string.version_info)
 			.setMessage(getString(R.string.version_detail, name, code))
 			.setPositiveButton(android.R.string.ok, null)
+			.show();
+	}
+
+	/* Masked preview of the clash-api bearer token for the settings row: show
+	   only the first and last four chars so the value is recognisable without
+	   being fully exposed in the list. */
+	private String secretSubtitle() {
+		String s = prefs.getSecret();
+		if (s == null || s.isEmpty())
+		  return getString(R.string.settings_secret_hint);
+		int n = s.length();
+		if (n <= 8)
+		  return s;
+		return s.substring(0, 4) + "••••••••" + s.substring(n - 4);
+	}
+
+	/* clash-api bearer token viewer: read-only (selectable for manual copy),
+	   plus Copy and Reset. Resetting regenerates the token; the running core
+	   only picks it up after the tunnel (re)starts, so we warn via
+	   afterNetworkChange(). */
+	private void showSecretDialog() {
+		prefs = new Preferences(this);
+		final String secret = prefs.getSecret();
+		View v = getLayoutInflater().inflate(R.layout.dialog_input, null);
+		final TextInputLayout til = (TextInputLayout) v.findViewById(R.id.til);
+		final TextInputEditText edit = (TextInputEditText) v.findViewById(R.id.edit_text);
+		TextView helpView = (TextView) v.findViewById(R.id.help_text);
+		til.setHint(getString(R.string.settings_secret));
+		edit.setText(secret);
+		edit.setInputType(InputType.TYPE_NULL);
+		edit.setTextIsSelectable(true);
+		helpView.setText(getString(R.string.settings_secret_hint));
+		helpView.setVisibility(View.VISIBLE);
+
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.settings_secret)
+			.setView(v)
+			.setPositiveButton(R.string.settings_secret_copy,
+				new DialogInterface.OnClickListener() {
+					@Override public void onClick(DialogInterface di, int w) {
+						ClipboardManager cm = (ClipboardManager)
+							getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+						if (cm != null)
+						  cm.setPrimaryClip(ClipData.newPlainText("secret", secret));
+						Toast.makeText(SettingsActivity.this,
+							R.string.settings_secret_copied, Toast.LENGTH_SHORT).show();
+					}
+				})
+			.setNeutralButton(R.string.settings_secret_reset,
+				new DialogInterface.OnClickListener() {
+					@Override public void onClick(DialogInterface di, int w) {
+						prefs.resetSecret();
+						buildList();
+						afterNetworkChange();
+						Toast.makeText(SettingsActivity.this,
+							R.string.settings_secret_reset_done, Toast.LENGTH_LONG).show();
+					}
+				})
+			.setNegativeButton(android.R.string.cancel, null)
 			.show();
 	}
 }

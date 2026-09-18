@@ -23,6 +23,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.HttpURLConnection;
 import java.net.ServerSocket;
 import java.util.ArrayList;
 import java.util.List;
@@ -136,6 +137,10 @@ public class MihomoConfig {
 		   hijacks the loopback (see the note on API_PORT above). */
 		if (!sectionExists(cfg, "external-controller:"))
 			cfg.append("external-controller: 0.0.0.0:").append(API_PORT).append('\n');
+		/* clash-api bearer token: every control request must carry
+		   Authorization: Bearer <secret> or mihomo replies 401. */
+		if (!sectionExists(cfg, "secret:"))
+			cfg.append("secret: \"").append(escapeYaml(prefs.getSecret())).append("\"\n");
 
 		/* The home screen asks an echo service for the public IP through the
 		   core's local HTTP port, and the "allow LAN" setting exposes it to the
@@ -148,6 +153,17 @@ public class MihomoConfig {
 		if (prefs.getAllowLan()) {
 			cfg.append("allow-lan: true\n")
 				.append("bind-address: \"*\"\n");
+		}
+
+		/* GEOIP/GEOSITE rules need mihomo's geoip.dat / geosite.dat. mihomo
+		   fetches them from geo-download-url when absent, so turn auto-update
+		   on only when such a rule exists: users who never geo-route pay no
+		   startup download, and users who do get working fine routing. The
+		   jsdelivr mirror is used because the upstream GitHub release is often
+		   throttled or blocked on restricted networks. */
+		if (rulesNeedGeo(prefs) && !sectionExists(cfg, "geo-auto-update:")) {
+			cfg.append("geo-auto-update: true\n")
+				.append("geo-download-url: \"https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@latest\"\n");
 		}
 
 		/* The core loads <homeDir>/config.yaml, so the file name matters —
@@ -568,6 +584,28 @@ public class MihomoConfig {
 			default:
 				return "DOMAIN-SUFFIX," + value + "," + target;
 		}
+	}
+
+	/* True when the rule list uses a GEOIP or GEOSITE matcher, which requires
+	   mihomo's country/domain databases to be present (see build()'s
+	   geo-auto-update block). */
+	private static boolean rulesNeedGeo(Preferences prefs) {
+		for (Preferences.Rule r : prefs.getRules()) {
+			if (r.type == Preferences.Rule.TYPE_GEOIP
+					|| r.type == Preferences.Rule.TYPE_GEOSITE)
+			  return true;
+		}
+		return false;
+	}
+
+	/* Attach the clash-api bearer token so mihomo (which requires it once
+	   `secret:` is set in the config) accepts the call instead of replying 401
+	   with an empty body. Every control endpoint - /proxies, /delay, /rules,
+	   /connections, /configs, /version - needs this. */
+	public static void applyAuth(HttpURLConnection conn, Preferences prefs) {
+		String s = prefs.getSecret();
+		if (s != null && !s.isEmpty())
+		  conn.setRequestProperty("Authorization", "Bearer " + s);
 	}
 
 	private static boolean isIpv4(String s) {

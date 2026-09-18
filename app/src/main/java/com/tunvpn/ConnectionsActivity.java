@@ -25,6 +25,8 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.tunvpn.Preferences;
+
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 
@@ -63,6 +65,9 @@ public class ConnectionsActivity extends BaseActivity {
 	   generic "unavailable" so a silent empty list is actually diagnosable.
 	   Empty when the last fetch succeeded. */
 	private String lastError = "";
+	/* clash-api bearer token source; re-read here so the Authorization header
+	   on /connections matches the secret baked into the running config. */
+	private Preferences prefs;
 
 	/* One row of the connection table, reduced to what is worth showing. */
 	private static class Row {
@@ -76,6 +81,7 @@ public class ConnectionsActivity extends BaseActivity {
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
+		prefs = new Preferences(this);
 		setContentView(R.layout.activity_connections);
 
 		MaterialToolbar toolbar = (MaterialToolbar) findViewById(R.id.toolbar);
@@ -327,6 +333,7 @@ public class ConnectionsActivity extends BaseActivity {
 		HttpURLConnection conn = null;
 		try {
 			conn = (HttpURLConnection) new URL(url).openConnection();
+			MihomoConfig.applyAuth(conn, prefs);
 			conn.setConnectTimeout(2000);
 			conn.setReadTimeout(2000);
 			int code = conn.getResponseCode();
@@ -355,6 +362,7 @@ public class ConnectionsActivity extends BaseActivity {
 		HttpURLConnection conn = null;
 		try {
 			conn = (HttpURLConnection) new URL(url).openConnection();
+			MihomoConfig.applyAuth(conn, prefs);
 			conn.setRequestMethod("DELETE");
 			conn.setConnectTimeout(2000);
 			conn.setReadTimeout(2000);

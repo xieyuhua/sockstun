@@ -42,8 +42,6 @@ import com.google.android.material.switchmaterial.SwitchMaterial;
 
 import com.tunvpn.GeoIp;
 
-import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -518,23 +516,17 @@ public class SubscribeActivity extends BaseActivity {
 		testPool.execute(new Runnable() {
 			@Override
 			public void run() {
-				long t = System.currentTimeMillis();
-				/* try-with-resources: a failed connect() used to leave the
-				   socket - and its fd - behind. */
-				try (Socket s = new Socket()) {
-					s.connect(new InetSocketAddress(n.server, n.port), 3000);
-					n.latency = System.currentTimeMillis() - t;
-				} catch (Exception e) {
-					n.latency = -2;
-				}
-				/* A bare TCP connect only proves the port is open; it does not
-				   mean the proxy actually tunnels traffic. When the tunnel is
-				   running, ask mihomo to push a request through THIS node and use
-				   that real delay, so "available" reflects genuine usability.
-				   Falls back to the TCP result when the controller is down. */
+				/* The verdict comes ONLY from mihomo pushing a request through
+				   THIS node (GET /proxies/{name}/delay). That proves the proxy
+				   actually tunnels traffic - a bare TCP port-open is NOT enough,
+				   so the socket probe was removed. When the real test cannot run
+				   (tunnel down, or the node is absent from the running config) we
+				   leave the node unverified (-1) rather than claim it is usable. */
 				Long real = proxyDelayMs(n);
 				if (real != null)
-				  n.latency = real;
+				  n.latency = real;        // >=0 usable, -2 could not tunnel
+				else
+				  n.latency = -1;          // not verifiable -> unknown, not "available"
 				/* (Re)resolve the node's country on every test pass and overwrite
 				   the cached value, so a mislabeled flag (e.g. a stale "RU" for a
 				   US IP) self-heals instead of being stuck forever. The in-memory
@@ -631,7 +623,8 @@ public class SubscribeActivity extends BaseActivity {
 
 	/* Ask mihomo to push a request through THIS node and report the real delay.
 	   Returns latency (>=0) when the node actually tunnels, -2 when it cannot,
-	   or null when the controller is unavailable (caller keeps the TCP result).
+	   or null when the real test cannot run (tunnel down / node not in the
+	   running config). This is the ONLY availability verdict - no TCP fallback.
 	   Works for every protocol because mihomo does the handshake. */
 	private Long proxyDelayMs(ClashNode n) {
 		if (!prefs.getEnable())
@@ -653,14 +646,20 @@ public class SubscribeActivity extends BaseActivity {
 		for (String u : PROXY_TEST_URLS)
 		  if (!targets.contains(u))
 			targets.add(u);
+		/* Honour the user's latency-test timeout (seconds -> ms). The core
+		   measures a real forwarded request, so give it the full budget plus a
+		   margin on the HTTP read so the response lands after mihomo's own
+		   timer fires. */
+		int timeoutMs = prefs.getProxyTestTimeout() * 1000;
 		Long failed = null;
 		for (String target : targets) {
 			try {
 				String u = base + "/proxies/" + encodePath(name)
-					+ "/delay?timeout=3000&url=" + URLEncoder.encode(target, "UTF-8");
+					+ "/delay?timeout=" + timeoutMs + "&url=" + URLEncoder.encode(target, "UTF-8");
 				HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection();
-				c.setConnectTimeout(3000);
-				c.setReadTimeout(6000);
+				MihomoConfig.applyAuth(c, prefs);
+				c.setConnectTimeout(5000);
+				c.setReadTimeout(timeoutMs + 3000);
 				int code = c.getResponseCode();
 				if (code == 200) {
 					String body = readApiBody(c);
@@ -673,7 +672,7 @@ public class SubscribeActivity extends BaseActivity {
 				   target; remember it but try the next target before giving up. */
 				failed = -2L;
 			} catch (Exception e) {
-				/* Controller became unreachable mid-run: fall back to TCP. */
+				/* Controller became unreachable mid-run: cannot verify. */
 				return null;
 			}
 		}
@@ -695,6 +694,7 @@ public class SubscribeActivity extends BaseActivity {
 		try {
 			String base = "http://" + host + ":" + MihomoConfig.API_PORT;
 			HttpURLConnection c = (HttpURLConnection) new URL(base + "/proxies").openConnection();
+			MihomoConfig.applyAuth(c, prefs);
 			c.setConnectTimeout(1500);
 			c.setReadTimeout(3000);
 			if (c.getResponseCode() != 200) {
@@ -756,6 +756,7 @@ public class SubscribeActivity extends BaseActivity {
 		try {
 			c = (HttpURLConnection) new URL("http://" + host + ":"
 				+ MihomoConfig.API_PORT + "/version").openConnection();
+			MihomoConfig.applyAuth(c, prefs);
 			c.setConnectTimeout(800);
 			c.setReadTimeout(800);
 			return c.getResponseCode() >= 200 && c.getResponseCode() < 300;

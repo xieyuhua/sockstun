@@ -87,6 +87,7 @@ public class TProxyService extends VpnService {
 	   traffic counters stuck at 0 forever - exactly the "stats always 0" report. */
 	private HandlerThread statsThread = null;
 	private Preferences statsPrefs = null;
+	private Preferences prefs = null;
 	private long lastTx, lastRx, lastTime;
 	private long sessionTx, sessionRx;
 	private long baseTx, baseRx, totalTx, totalRx;
@@ -269,7 +270,7 @@ public class TProxyService extends VpnService {
 		if (tunFd != null)
 		  return;
 
-		Preferences prefs = new Preferences(this);
+		prefs = new Preferences(this);
 
 		/* Logging */
 		File tproxy_log = new File(getCacheDir(), "tproxy.log");
@@ -611,20 +612,40 @@ public class TProxyService extends VpnService {
 				|| !ec.contains("0.0.0.0:" + MihomoConfig.API_PORT);
 			boolean needMp = !hasTopLevelKey(text, "mixed-port:")
 				&& !hasTopLevelKey(text, "port:");
-			if (!needEc && !needMp)
+			/* Adopt a hand-set secret from the custom config so the app's control
+			   requests authenticate against it; otherwise inject the app's own
+			   generated token. Either way the config and the client agree on the
+			   same bearer token. */
+			String existingSecret = topLevelLine(text, "secret:");
+			String secretVal = null;
+			if (existingSecret != null) {
+				String v = existingSecret.trim();
+				if (v.startsWith("\"")) v = v.substring(1);
+				if (v.endsWith("\"")) v = v.substring(0, v.length() - 1);
+				v = v.trim();
+				if (!v.isEmpty()) secretVal = v;
+			}
+			boolean needSecret = (secretVal == null);
+			if (secretVal != null)
+			  prefs.setSecret(secretVal);
+			if (!needEc && !needMp && !needSecret)
 				return;
 
 			/* Rebuild the file once: rewrite the external-controller line to the
-			   chosen loopback port (or append it), then append mixed-port if
-			   missing. Appending a second external-controller key would be
+			   chosen loopback port (or append it), align the secret (or append it),
+			   then append mixed-port if missing. A duplicate top-level key would be
 			   invalid YAML, so we replace in place (see docs/内核接口说明.md 6.7). */
 			StringBuilder out = new StringBuilder();
 			boolean ecWritten = false;
+			boolean secretWritten = false;
 			for (String line : text.split("\n", -1)) {
 				if (needEc && topLevelLine(line + "\n", "external-controller:") != null) {
 					out.append("external-controller: 0.0.0.0:")
 					   .append(MihomoConfig.API_PORT).append('\n');
 					ecWritten = true;
+				} else if (needSecret && topLevelLine(line + "\n", "secret:") != null) {
+					out.append("secret: \"").append(prefs.getSecret()).append("\"\n");
+					secretWritten = true;
 				} else {
 					out.append(line).append('\n');
 				}
@@ -632,6 +653,8 @@ public class TProxyService extends VpnService {
 			if (needEc && !ecWritten)
 				out.append("external-controller: 0.0.0.0:")
 					.append(MihomoConfig.API_PORT).append('\n');
+			if (needSecret && !secretWritten)
+				out.append("secret: \"").append(prefs.getSecret()).append("\"\n");
 			if (needMp)
 				out.append("mixed-port: ").append(prefs.getProxyPort()).append('\n');
 
@@ -640,7 +663,8 @@ public class TProxyService extends VpnService {
 			fos.close();
 			appendLog("config: 自定义配置已对齐 App 必需项（external-controller=0.0.0.0:"
 				+ MihomoConfig.API_PORT
-				+ (needMp ? ", mixed-port=" + prefs.getProxyPort() : "") + "）");
+				+ (needMp ? ", mixed-port=" + prefs.getProxyPort() : "")
+				+ (needSecret ? ", secret" : "") + "）");
 		} catch (Exception e) {
 			appendLog("config: 检查自定义配置失败：" + e);
 		}
@@ -908,6 +932,7 @@ public class TProxyService extends VpnService {
 		try {
 			c = (HttpURLConnection) new URL("http://" + host + ":"
 				+ MihomoConfig.API_PORT + "/version").openConnection();
+			MihomoConfig.applyAuth(c, prefs);
 			c.setConnectTimeout(500);
 			c.setReadTimeout(500);
 			int code = c.getResponseCode();
@@ -1074,6 +1099,7 @@ public class TProxyService extends VpnService {
 		HttpURLConnection conn = null;
 		try {
 			conn = (HttpURLConnection) new URL(url).openConnection();
+			MihomoConfig.applyAuth(conn, prefs);
 			conn.setConnectTimeout(6000);
 			conn.setReadTimeout(6000);
 			java.io.InputStream is = conn.getResponseCode() < 400
@@ -1102,6 +1128,7 @@ public class TProxyService extends VpnService {
 		String url = apiBase()
 			+ "/proxies/" + encodePath(group);
 		HttpURLConnection get = (HttpURLConnection) new URL(url).openConnection();
+		MihomoConfig.applyAuth(get, prefs);
 		get.setRequestMethod("GET");
 		get.setConnectTimeout(2000);
 		get.setReadTimeout(2000);
@@ -1134,6 +1161,7 @@ public class TProxyService extends VpnService {
 		String url = apiBase()
 			+ "/proxies/" + encodePath(group);
 		HttpURLConnection put = (HttpURLConnection) new URL(url).openConnection();
+		MihomoConfig.applyAuth(put, prefs);
 		put.setRequestMethod("PUT");
 		put.setConnectTimeout(2000);
 		put.setReadTimeout(2000);
@@ -1665,6 +1693,7 @@ public class TProxyService extends VpnService {
 		HttpURLConnection conn = null;
 		try {
 			conn = (HttpURLConnection) new URL(url).openConnection();
+			MihomoConfig.applyAuth(conn, prefs);
 			conn.setConnectTimeout(2000);
 			conn.setReadTimeout(2000);
 			if (conn.getResponseCode() != HttpURLConnection.HTTP_OK)

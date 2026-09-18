@@ -93,6 +93,17 @@ public class Preferences
 	public static final String AUTO_SELECT = "AutoSelect";
 	public static final String AUTO_SELECT_INTERVAL = "AutoSelectInterval";
 	public static final String AUTO_TEST_URL = "AutoTestUrl";
+	/* Latency-test timeout (seconds) for the manual "test node" pass through
+	   the clash-api /delay endpoint. The core measures a real forwarded
+	   request, so a longer timeout tolerates slow-but-usable nodes. */
+	public static final String PROXY_TEST_TIMEOUT = "ProxyTestTimeout";
+	public static final int DEFAULT_PROXY_TEST_TIMEOUT = 5;
+	public static final int MIN_PROXY_TEST_TIMEOUT = 1;
+	public static final int MAX_PROXY_TEST_TIMEOUT = 30;
+	/* clash-api bearer token. Generated once and persisted so the secret baked
+	   into the generated config and every client request stay in sync across
+	   restarts. */
+	public static final String SECRET = "ApiSecret";
 	/* Auto mode only: which country group the top group should default to.
 	   Empty / "GLOBAL" means "fastest anywhere". The value is an ISO-3166
 	   alpha-2 code, matching the per-country url-test group names built in
@@ -580,6 +591,61 @@ public class Preferences
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(AUTO_TEST_URL), url == null ? "" : url.trim());
 		editor.commit();
+	}
+
+	/* Latency-test timeout for the manual node pass (seconds). Clamped 1..30. */
+	public int getProxyTestTimeout() {
+		int t = prefs.getInt(key(PROXY_TEST_TIMEOUT), DEFAULT_PROXY_TEST_TIMEOUT);
+		return Math.max(MIN_PROXY_TEST_TIMEOUT, Math.min(MAX_PROXY_TEST_TIMEOUT, t));
+	}
+
+	public void setProxyTestTimeout(int seconds) {
+		int t = Math.max(MIN_PROXY_TEST_TIMEOUT, Math.min(MAX_PROXY_TEST_TIMEOUT, seconds));
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putInt(key(PROXY_TEST_TIMEOUT), t);
+		editor.commit();
+	}
+
+	/* clash-api bearer token. Generated once and persisted, then injected into
+	   the core config and carried by every control request (Authorization:
+	   Bearer). mihomo rejects unauthenticated calls with 401 once `secret:` is
+	   set, so the client and the config must agree - this single source keeps
+	   them aligned across restarts. */
+	public String getSecret() {
+		String s = prefs.getString(key(SECRET), null);
+		if (s == null || s.isEmpty()) {
+			s = randomSecret();
+			SharedPreferences.Editor editor = prefs.edit();
+			editor.putString(key(SECRET), s);
+			editor.commit();
+		}
+		return s;
+	}
+
+	/* Persist a specific secret (used to adopt one the user set in a custom
+	   config) so the client authenticates with the same token the core uses. */
+	public void setSecret(String s) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SECRET), s == null ? "" : s.trim());
+		editor.commit();
+	}
+
+	/* Regenerate the clash-api bearer token. The running core only learns the
+	   new secret after the tunnel (re)starts, so callers must re-apply. */
+	public void resetSecret() {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SECRET), randomSecret());
+		editor.commit();
+	}
+
+	/* 32 chars of [A-Za-z0-9]: safe in YAML without escaping and unguessable. */
+	private static String randomSecret() {
+		final String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+		java.security.SecureRandom rnd = new java.security.SecureRandom();
+		StringBuilder sb = new StringBuilder(32);
+		for (int i = 0; i < 32; i++)
+		  sb.append(chars.charAt(rnd.nextInt(chars.length())));
+		return sb.toString();
 	}
 
 	/* Auto mode: the country whose url-test group the top group defaults to.

@@ -210,6 +210,10 @@
 	<string name="sub_test_url_title">测速测试地址</string>
 	<string name="sub_test_url_hint">自动选择时用它判断节点快慢，需为可正常访问的 http 或 https 地址；清空则恢复默认。</string>
 	<string name="sub_test_url_invalid">请输入 http 或 https 开头的地址</string>
+	<string name="settings_test_timeout">延迟测试超时</string>
+	<string name="sub_test_timeout">超时：%1$d 秒</string>
+	<string name="sub_test_timeout_hint">手动测速（验证节点真实转发）的超时秒数，范围 1 – 30；超时即判为不可用。</string>
+	<string name="sub_test_timeout_invalid">请输入 1 – 30 之间的秒数</string>
 	<string name="sub_status_ok">可用</string>
 	<string name="sub_status_fail">不可用</string>
 	<string name="sub_status_untested">未测速</string>
@@ -247,6 +251,12 @@
 	<string name="sub_update">更新订阅</string>
 	<string name="server_list_hint_sub">可保存多个订阅地址。拉取时会更新全部订阅，节点合并成一个池。删除订阅会同时清掉它已拉取的节点。</string>
 	<string name="settings_connection">连接信息</string>
+	<string name="settings_secret">控制接口密钥</string>
+	<string name="settings_secret_hint">clash-api 鉴权令牌。App 与内核据此互相验证，重置后需重启隧道生效。</string>
+	<string name="settings_secret_copy">复制</string>
+	<string name="settings_secret_reset">重置</string>
+	<string name="settings_secret_reset_done">已生成新密钥，重启隧道后生效</string>
+	<string name="settings_secret_copied">已复制到剪贴板</string>
 	<string name="settings_group_connection">连接</string>
 	<string name="settings_group_subscription">订阅</string>
 	<string name="settings_group_general">通用</string>

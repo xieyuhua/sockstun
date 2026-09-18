@@ -13,5 +13,7 @@
 	<item name="settings_theme" type="id"/>
 	<item name="settings_version" type="id"/>
 	<item name="settings_test_url" type="id"/>
+	<item name="settings_test_timeout" type="id"/>
 	<item name="settings_autosel_interval" type="id"/>
+	<item name="settings_secret" type="id"/>
 </resources>
