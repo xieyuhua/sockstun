@@ -138,6 +138,7 @@ public class TProxyService extends VpnService {
 	/* Last exception seen while probing the control API, so a failed probe says
 	   whether nothing is listening (refused) or it is up but not answering. */
 	private volatile String lastControllerError = null;
+	private volatile String controllerHost = "127.0.0.1";
 	private volatile String proxyTestStatus = "";
 	private static final String PROXY_TEST_URL = "http://www.gstatic.com/generate_204";
 	/* 延迟测试候选地址：节点只要能通任意一个，就给出干净的“可用”。Clash 自己的
@@ -607,7 +608,7 @@ public class TProxyService extends VpnService {
 
 			String ec = topLevelLine(text, "external-controller:");
 			boolean needEc = (ec == null)
-				|| !ec.contains("127.0.0.1:" + MihomoConfig.API_PORT);
+				|| !ec.contains("0.0.0.0:" + MihomoConfig.API_PORT);
 			boolean needMp = !hasTopLevelKey(text, "mixed-port:")
 				&& !hasTopLevelKey(text, "port:");
 			if (!needEc && !needMp)
@@ -621,7 +622,7 @@ public class TProxyService extends VpnService {
 			boolean ecWritten = false;
 			for (String line : text.split("\n", -1)) {
 				if (needEc && topLevelLine(line + "\n", "external-controller:") != null) {
-					out.append("external-controller: 127.0.0.1:")
+					out.append("external-controller: 0.0.0.0:")
 					   .append(MihomoConfig.API_PORT).append('\n');
 					ecWritten = true;
 				} else {
@@ -629,15 +630,15 @@ public class TProxyService extends VpnService {
 				}
 			}
 			if (needEc && !ecWritten)
-				out.append("external-controller: 127.0.0.1:")
-				   .append(MihomoConfig.API_PORT).append('\n');
+				out.append("external-controller: 0.0.0.0:")
+					.append(MihomoConfig.API_PORT).append('\n');
 			if (needMp)
 				out.append("mixed-port: ").append(prefs.getProxyPort()).append('\n');
 
 			java.io.FileOutputStream fos = new java.io.FileOutputStream(configFile, false);
 			fos.write(out.toString().getBytes("UTF-8"));
 			fos.close();
-			appendLog("config: 自定义配置已对齐 App 必需项（external-controller=127.0.0.1:"
+			appendLog("config: 自定义配置已对齐 App 必需项（external-controller=0.0.0.0:"
 				+ MihomoConfig.API_PORT
 				+ (needMp ? ", mixed-port=" + prefs.getProxyPort() : "") + "）");
 		} catch (Exception e) {
@@ -747,11 +748,11 @@ public class TProxyService extends VpnService {
 					return;
 				}
 				if (attempt == 1)
-				  appendLog("selector: 控制接口 127.0.0.1:" + MihomoConfig.API_PORT
-					+ " 未就绪，后台持续重试中");
+				  appendLog("selector: 控制接口 " + controllerHost + ":" + MihomoConfig.API_PORT
+						+ " 未就绪，后台持续重试中");
 				if (attempt % 20 == 0)
-				  appendLog("selector: 仍等待 127.0.0.1:" + MihomoConfig.API_PORT
-					+ "（" + lastControllerError + "）");
+				  appendLog("selector: 仍等待 " + controllerHost + ":" + MihomoConfig.API_PORT
+						+ "（" + lastControllerError + "）");
 				try {
 					Thread.sleep(3000);
 				} catch (InterruptedException e) {
@@ -760,7 +761,7 @@ public class TProxyService extends VpnService {
 			}
 			if (startupAborted)
 			  return;
-			appendLog("selector set failed: 控制接口 127.0.0.1:"
+			appendLog("selector set failed: 控制接口 " + controllerHost + ":"
 				+ MihomoConfig.API_PORT + " 未就绪（内核可能未监听）：" + lastControllerError);
 		}).start();
 	}
@@ -794,22 +795,8 @@ public class TProxyService extends VpnService {
 	   of the failure being invisible). */
 	private boolean waitForController() {
 		for (int i = 0; i < 24; i++) {
-			HttpURLConnection c = null;
-			try {
-				c = (HttpURLConnection) new URL("http://127.0.0.1:"
-					+ MihomoConfig.API_PORT + "/version").openConnection();
-				c.setConnectTimeout(500);
-				c.setReadTimeout(500);
-				int code = c.getResponseCode();
-				if (code >= 200 && code < 300)
-				  return true;
-			} catch (Throwable e) {
-				lastControllerError = e.getClass().getSimpleName()
-					+ (e.getMessage() == null ? "" : (": " + e.getMessage()));
-			} finally {
-				if (c != null)
-				  c.disconnect();
-			}
+			if (isControllerUp())
+			  return true;
 			try {
 				Thread.sleep(250);
 			} catch (InterruptedException e) {
@@ -833,10 +820,10 @@ public class TProxyService extends VpnService {
 				try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
 			}
 			if (ok) {
-				appendLog("controller: 127.0.0.1:" + MihomoConfig.API_PORT + " ready");
+				appendLog("controller: " + controllerHost + ":" + MihomoConfig.API_PORT + " ready");
 				return;
 			}
-			appendLog("controller: 127.0.0.1:" + MihomoConfig.API_PORT
+			appendLog("controller: " + controllerHost + ":" + MihomoConfig.API_PORT
 				+ " NOT ready（90s 内未监听，核心未启动 clash-api）");
 			if (lastControllerError != null)
 			  appendLog("controller: 最后一次探测：" + lastControllerError);
@@ -848,8 +835,9 @@ public class TProxyService extends VpnService {
 			if (probeHost("::1"))
 			  appendLog("controller: 但 [::1]:" + MihomoConfig.API_PORT
 				  + " 通了 —— 核心绑在 IPv6 回环，App 走 IPv4 才失败");
+			dumpControllerLog();
 			dumpConfigTail();
-		}).start();
+			}).start();
 	}
 
 	/* Quick TCP connect probe to host:API_PORT, used to tell an IPv4-only
@@ -901,10 +889,24 @@ public class TProxyService extends VpnService {
 	/* One quick reachability probe of the control API (no retries). Used by
 	   verifyController; the selector/test loops use waitForController which
 	   retries internally. */
+	/* Probe /version on both the IPv4 loopback and the device's own IP. mihomo's
+	   TUN rules can intercept 127.0.0.1, so we fall back to the device IP (the
+	   external-controller is now bound to 0.0.0.0, reachable on every interface).
+	   Whichever answers first becomes controllerHost for all later API calls. */
 	private boolean isControllerUp() {
+		for (String h : new String[] { "127.0.0.1", deviceHost() }) {
+			if (probeVersion(h)) {
+				controllerHost = h;
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean probeVersion(String host) {
 		HttpURLConnection c = null;
 		try {
-			c = (HttpURLConnection) new URL("http://127.0.0.1:"
+			c = (HttpURLConnection) new URL("http://" + host + ":"
 				+ MihomoConfig.API_PORT + "/version").openConnection();
 			c.setConnectTimeout(500);
 			c.setReadTimeout(500);
@@ -918,6 +920,52 @@ public class TProxyService extends VpnService {
 			if (c != null)
 			  c.disconnect();
 		}
+	}
+
+	/* First non-loopback IPv4 of the device, used to reach the clash-api when the
+	   127.0.0.1 loopback is hijacked by the TUN. Falls back to 127.0.0.1. */
+	private String deviceHost() {
+		try {
+			java.util.Enumeration<java.net.NetworkInterface> en =
+				java.net.NetworkInterface.getNetworkInterfaces();
+			while (en.hasMoreElements()) {
+				java.net.NetworkInterface nif = en.nextElement();
+				if (nif.isLoopback() || !nif.isUp())
+				  continue;
+				java.util.Enumeration<java.net.InetAddress> adds = nif.getInetAddresses();
+				while (adds.hasMoreElements()) {
+					java.net.InetAddress a = adds.nextElement();
+					if (a instanceof java.net.Inet4Address && !a.isLoopbackAddress())
+					  return a.getHostAddress();
+				}
+			}
+		} catch (Throwable ignore) { }
+		return "127.0.0.1";
+	}
+
+	private String apiBase() {
+		return "http://" + controllerHost + ":" + MihomoConfig.API_PORT;
+	}
+
+	/* Surface mihomo's own words about the clash-api when it never comes up:
+	   its bind failure is logged to stderr (captured in tproxy.log). */
+	private void dumpControllerLog() {
+		try {
+			File f = new File(getCacheDir(), "tproxy.log");
+			if (!f.exists()) return;
+			java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f));
+			String line;
+			int shown = 0;
+			while ((line = r.readLine()) != null && shown < 30) {
+				String l = line.toLowerCase();
+				if (l.contains("controller") || l.contains("bind") || l.contains("listen")
+						|| l.contains("external") || l.contains("fail")) {
+					appendLog("corelog: " + line.trim());
+					shown++;
+				}
+			}
+			r.close();
+		} catch (Throwable ignore) { }
 	}
 
 	/* FlClash-style real reachability WITHOUT the control API: drive a request
@@ -974,7 +1022,7 @@ public class TProxyService extends VpnService {
 			try {
 				long t0 = System.currentTimeMillis();
 				java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.HTTP,
-					new java.net.InetSocketAddress("127.0.0.1", port));
+					new java.net.InetSocketAddress(deviceHost(), port));
 				HttpURLConnection conn = (HttpURLConnection)
 					new URL(url).openConnection(proxy);
 				conn.setConnectTimeout(8000);
@@ -1044,7 +1092,7 @@ public class TProxyService extends VpnService {
 	   subscriptions shipped the same node label. Returns null when the group
 	   cannot be read. */
 	private String resolveMember(String group, String wanted) throws IOException {
-		String url = "http://127.0.0.1:" + MihomoConfig.API_PORT
+		String url = apiBase()
 			+ "/proxies/" + encodePath(group);
 		HttpURLConnection get = (HttpURLConnection) new URL(url).openConnection();
 		get.setRequestMethod("GET");
@@ -1076,7 +1124,7 @@ public class TProxyService extends VpnService {
 
 	/* PUT /proxies/{group} {"name": proxy} to move the selector. */
 	private int putSelector(String group, String proxy) throws IOException {
-		String url = "http://127.0.0.1:" + MihomoConfig.API_PORT
+		String url = apiBase()
 			+ "/proxies/" + encodePath(group);
 		HttpURLConnection put = (HttpURLConnection) new URL(url).openConnection();
 		put.setRequestMethod("PUT");
@@ -1373,7 +1421,7 @@ public class TProxyService extends VpnService {
 	   node. Only the deltas are counted, so a connection that stays open keeps
 	   contributing as it transfers. */
 	private void accumulateProxy() {
-		String body = httpGet("http://127.0.0.1:" + MihomoConfig.API_PORT + "/connections");
+		String body = httpGet(apiBase() + "/connections");
 		if (body == null) {
 			/* A silent zero is impossible to diagnose, so say once that the
 			   control API is unreachable (and again when it recovers). */

@@ -225,7 +225,7 @@
 	<string name="proxy_fail_timeout">超时</string>
 	<string name="proxy_fail_closed">端口未监听</string>
 	<string name="sub_invalid_url">请输入有效的订阅地址</string>
-	<string name="server_manual_hint">未配置订阅时，这里填写的 SOCKS5 会作为手动上游生效；已配置订阅时以订阅为准。</string>
+	<string name="server_manual_hint">未配置订阅时，这里填写的节点会作为手动上游生效（支持 SOCKS5 / Hysteria2 / VMess / VLESS / Trojan / SS 等）；已配置订阅时以订阅为准。</string>
 	<string name="server_use_as_upstream">使用此 SOCKS5 作为上游（忽略订阅）</string>
 	<string name="settings">设置</string>
 	<string name="subs_config">订阅配置</string>
@@ -319,6 +319,9 @@
 	<string name="server_enabled_msg">已启用：%s（将忽略订阅，重启隧道生效）</string>
 	<string name="server_saved">已保存</string>
 	<string name="server_addr_required">请填写服务器地址</string>
+	<string name="server_type_label">协议</string>
+	<string name="server_raw_label">节点配置（clash 格式，粘贴完整节点定义）</string>
+	<string name="server_raw_required">请填写节点配置</string>
 	<string name="node_current">节点：%s</string>
 	<string name="node_default">订阅默认节点</string>
 	<string name="node_none">未配置节点</string>

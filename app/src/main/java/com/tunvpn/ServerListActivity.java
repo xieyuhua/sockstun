@@ -151,7 +151,7 @@ public class ServerListActivity extends BaseActivity {
 			Button delete = (Button) convertView.findViewById(R.id.item_delete);
 
 			name.setText(s.label());
-			detail.setText(s.addr + ":" + s.port);
+			detail.setText(s.summary());
 
 			boolean active = s.id.equals(prefs.getActiveSocksId());
 			badge.setVisibility(active ? View.VISIBLE : View.GONE);

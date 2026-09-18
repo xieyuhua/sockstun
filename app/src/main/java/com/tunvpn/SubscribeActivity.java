@@ -83,6 +83,9 @@ public class SubscribeActivity extends BaseActivity {
 	private final List<String> filterProtoTypes = new ArrayList<String>();
 	private final List<String> filterProtoLabels = new ArrayList<String>();
 	private String filterProto = "";
+	/* subId -> subscription name, so each row can show where it came from. */
+	private final java.util.Map<String, String> subNames =
+		new java.util.HashMap<String, String>();
 	/* Bounded pool for latency tests. "Test all" on a large subscription would
 	   otherwise fire one thread - and one socket - per node at once. */
 	private final ExecutorService testPool = Executors.newFixedThreadPool(16);
@@ -213,6 +216,7 @@ public class SubscribeActivity extends BaseActivity {
 
 	/* Rebuild the visible list from nodes according to filter + sort. */
 	private void applyView() {
+		refreshSubNames();
 		shown.clear();
 		/* Default view: only reachable (available) proxies, sorted fastest-first
 		   by latency. The country chips and protocol spinner still narrow the
@@ -293,6 +297,29 @@ public class SubscribeActivity extends BaseActivity {
 		  sb.append("  ·  ").append(getString(R.string.sub_testing, testsDone,
 			testsDone + pendingTests));
 		textview_stats.setText(sb.toString());
+	}
+
+	private void refreshSubNames() {
+		subNames.clear();
+		for (Subscription s : prefs.getSubscriptions())
+			subNames.put(s.id, s.name);
+	}
+
+	/* A stable colour per proxy type so the list reads at a glance. */
+	private static int protoColor(String type) {
+		if (type == null)
+		  return 0xFF757575;
+		switch (type.toLowerCase()) {
+			case "socks5":     return 0xFF607D8B;
+			case "ss": case "shadowsocks": return 0xFF009688;
+			case "vmess":      return 0xFFFF9800;
+			case "vless":      return 0xFF4CAF50;
+			case "trojan":     return 0xFFF44336;
+			case "hysteria": case "hysteria2": return 0xFF9C27B0;
+			case "tuic":       return 0xFF00BCD4;
+			case "wireguard":  return 0xFF3F51B5;
+			default:           return 0xFF757575;
+		}
 	}
 
 
@@ -601,6 +628,7 @@ public class SubscribeActivity extends BaseActivity {
 			TextView name = (TextView) convertView.findViewById(R.id.item_name);
 			TextView detail = (TextView) convertView.findViewById(R.id.item_detail);
 			TextView proto = (TextView) convertView.findViewById(R.id.item_proto);
+			TextView source = (TextView) convertView.findViewById(R.id.item_sub);
 			TextView status = (TextView) convertView.findViewById(R.id.item_status);
 			TextView badge = (TextView) convertView.findViewById(R.id.item_badge);
 			Button use = (Button) convertView.findViewById(R.id.item_use);
@@ -621,7 +649,18 @@ public class SubscribeActivity extends BaseActivity {
 				proto.setVisibility(View.GONE);
 			} else {
 				proto.setText(n.type);
+				proto.setBackgroundColor(protoColor(n.type));
+				proto.setTextColor(Color.WHITE);
 				proto.setVisibility(View.VISIBLE);
+			}
+			/* Subscription source tag: tells which pool a node came from. */
+			if (n.subId != null && subNames.containsKey(n.subId)
+					&& subNames.get(n.subId) != null
+					&& !subNames.get(n.subId).isEmpty()) {
+				source.setText(subNames.get(n.subId));
+				source.setVisibility(View.VISIBLE);
+			} else {
+				source.setVisibility(View.GONE);
 			}
 
 			if (n.latency >= 0) {

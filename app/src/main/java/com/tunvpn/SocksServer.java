@@ -23,21 +23,48 @@ public class SocksServer {
 	public int port;
 	public String user;
 	public String pass;
+	/* Proxy protocol. "socks5" keeps the original behaviour (the app's own
+	   upstream is a SOCKS5 server). Any other value means the user supplied a
+	   raw clash proxy definition in `raw` (hysteria2 / vmess / vless / trojan
+	   / ss / ...), which MihomoConfig emits verbatim as the upstream node. */
+	public String type = "socks5";
+	public String raw = "";
 
 	public SocksServer(String id, String name, String addr, int port,
 			String user, String pass) {
+		this(id, name, addr, port, user, pass, "socks5", "");
+	}
+
+	public SocksServer(String id, String name, String addr, int port,
+			String user, String pass, String type, String raw) {
 		this.id = id;
 		this.name = name;
 		this.addr = addr;
 		this.port = port;
 		this.user = user;
 		this.pass = pass;
+		this.type = (type == null || type.isEmpty()) ? "socks5" : type;
+		this.raw = raw == null ? "" : raw;
+	}
+
+	public boolean isSocks() {
+		return type == null || type.isEmpty() || "socks5".equals(type);
 	}
 
 	public String label() {
 		if (name != null && !name.trim().isEmpty())
 		  return name.trim();
+		if (!isSocks())
+		  return type;
 		return addr + ":" + port;
+	}
+
+	/* One-line summary for the server list: the socket for SOCKS5, otherwise
+	   just the protocol so a raw-pasted node still shows something useful. */
+	public String summary() {
+		if (isSocks())
+		  return (addr == null ? "" : addr) + ":" + port;
+		return type;
 	}
 
 	public static String newId() {
@@ -55,6 +82,8 @@ public class SocksServer {
 				o.put("port", s.port);
 				o.put("user", s.user);
 				o.put("pass", s.pass);
+				o.put("type", s.type);
+				o.put("raw", s.raw);
 				arr.put(o);
 			}
 		} catch (JSONException e) {
@@ -76,7 +105,9 @@ public class SocksServer {
 					o.optString("addr"),
 					o.optInt("port", 1080),
 					o.optString("user"),
-					o.optString("pass")));
+					o.optString("pass"),
+					o.optString("type", "socks5"),
+					o.optString("raw", "")));
 			}
 		} catch (JSONException e) {
 		}

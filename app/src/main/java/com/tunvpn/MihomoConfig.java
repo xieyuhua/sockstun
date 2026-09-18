@@ -41,13 +41,15 @@ public class MihomoConfig {
 	public static String countryGroup(String cc) {
 		return GROUP + "-" + cc;
 	}
-	/* mihomo's RESTful API. Bound to loopback only: it exposes every
-	   connection's target and must never be reachable from the LAN, which is
-	   also why it ignores the allow-lan setting. Not final: at startup we scan
-	   9090..9100 and switch to the first free loopback port, because a port
-	   already held by another process makes mihomo silently fail to bind the
-	   control API (symptom: tunnel up but /connections is connection-refused
-	   and every counter stays 0). */
+	/* mihomo's RESTful API. Bound to 0.0.0.0 (not just 127.0.0.1) so the app
+	   can reach it through the device's own IP: on some Android builds mihomo's
+	   TUN redirect rules hijack the 127.0.0.1 loopback, leaving /connections
+	   unreachable even though the tunnel itself is up. It still ignores the
+	   allow-lan setting and we do not set a secret, so exposure is limited to
+	   the local device. Not final: at startup we scan 9090..9100 and switch to
+	   the first free port, because a port already held by another process makes
+	   mihomo silently fail to bind the control API (symptom: tunnel up but
+	   /connections is connection-refused and every counter stays 0). */
 	public static int API_PORT = 9090;
 
 	/* Find a free loopback port for the clash-api and store it in API_PORT.
@@ -128,10 +130,12 @@ public class MihomoConfig {
 				.append("  dns-hijack:\n")
 				.append("    - any:53\n");
 
-		/* Loopback-only API used to tell proxied traffic apart from direct
-		   traffic (the point of the home screen's counters). */
+		/* API used to tell proxied traffic apart from direct traffic (the point
+		   of the home screen's counters). Bound to 0.0.0.0 rather than
+		   127.0.0.1 so the app can reach it via the device IP when the TUN
+		   hijacks the loopback (see the note on API_PORT above). */
 		if (!sectionExists(cfg, "external-controller:"))
-			cfg.append("external-controller: 127.0.0.1:").append(API_PORT).append('\n');
+			cfg.append("external-controller: 0.0.0.0:").append(API_PORT).append('\n');
 
 		/* Match flclash: resolve the originating app for every connection so the
 		   "connections" and "recent requests" screens can show which app made the
@@ -415,27 +419,87 @@ public class MihomoConfig {
 		  sb.append("      - \"").append(escapeYaml(m)).append("\"\n");
 	}
 
-	/* Minimal upstream for a manually configured SOCKS5 server. The rules page
-	   still applies, so manual mode routes the same way as subscriptions do. */
+	/* Minimal upstream for a manually configured proxy server. SOCKS5 keeps the
+	   original form-based emission; any other protocol means the user supplied a
+	   raw clash proxy block, which we emit verbatim and point the select group
+	   at. The embedded mihomo core does the real protocol handling. */
 	private static String manualSocksConfig(Preferences prefs, SocksServer s) throws IOException {
-		String addr = s.addr == null ? "" : s.addr.trim();
-		if (addr.isEmpty())
-		  throw new IOException("SOCKS5 server address is empty");
+		String type = (s.type == null || s.type.isEmpty()) ? "socks5" : s.type;
+		if ("socks5".equals(type)) {
+			String addr = s.addr == null ? "" : s.addr.trim();
+			if (addr.isEmpty())
+			  throw new IOException("SOCKS5 server address is empty");
+
+			StringBuilder sb = new StringBuilder();
+			sb.append("proxies:\n");
+			sb.append("  - {name: \"socks5\", type: socks5, server: ").append(addr)
+				.append(", port: ").append(s.port)
+				.append(", udp: true");
+			if (s.user != null && !s.user.isEmpty())
+			  sb.append(", username: \"").append(s.user).append("\"");
+			if (s.pass != null && !s.pass.isEmpty())
+				sb.append(", password: \"").append(s.pass).append("\"");
+			sb.append("}\n");
+			sb.append("proxy-groups:\n");
+			sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [\"socks5\"]}\n");
+			sb.append("rules:\n");
+			appendRules(sb, prefs);
+			return sb.toString();
+		}
+
+		String raw = s.raw == null ? "" : s.raw.trim();
+		if (raw.isEmpty())
+		  throw new IOException("节点配置为空，请填写 clash 格式的节点定义");
+		String nodeName = nodeNameFromRaw(raw);
 
 		StringBuilder sb = new StringBuilder();
-		sb.append("proxies:\n");
-		sb.append("  - {name: \"socks5\", type: socks5, server: ").append(addr)
-			.append(", port: ").append(s.port)
-			.append(", udp: true");
-		if (s.user != null && !s.user.isEmpty())
-			sb.append(", username: \"").append(s.user).append("\"");
-		if (s.pass != null && !s.pass.isEmpty())
-			sb.append(", password: \"").append(s.pass).append("\"");
-		sb.append("}\n");
+		sb.append(emitRawProxy(raw));
 		sb.append("proxy-groups:\n");
-		sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [\"socks5\"]}\n");
+		sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [\"")
+			.append(escapeYaml(nodeName)).append("\"]}\n");
 		sb.append("rules:\n");
 		appendRules(sb, prefs);
+		return sb.toString();
+	}
+
+	/* Pull the "name:" out of a raw clash proxy block so the select group can
+	   reference it. Falls back to "node" when none is present. */
+	private static String nodeNameFromRaw(String raw) {
+		java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+			"name\\s*:\\s*[\"']?([^\"',\\n]+)");
+		java.util.regex.Matcher m = p.matcher(raw);
+		if (m.find()) {
+			String n = m.group(1).trim().replace("\"", "").replace("'", "");
+			if (!n.isEmpty())
+			  return n;
+		}
+		return "node";
+	}
+
+	/* Wrap a pasted clash proxy block as a valid "proxies:" section. If the user
+	   pasted the whole "proxies:" list we keep it; otherwise we wrap a single
+	   proxy block. A block that already starts with "- " is kept as a list item
+	   (we must not prepend another dash, or mihomo sees "  - - {...}"). */
+	private static String emitRawProxy(String raw) {
+		if (raw.startsWith("proxies:"))
+		  return raw + "\n";
+		String[] lines = raw.split("\\r?\\n");
+		StringBuilder sb = new StringBuilder("proxies:\n");
+		boolean first = true;
+		for (String ln : lines) {
+			String t = ln.trim();
+			if (t.isEmpty())
+			  continue;
+			if (first) {
+				if (t.startsWith("-"))
+				  sb.append("  ").append(t).append('\n');
+				else
+				  sb.append("  - ").append(t).append('\n');
+				first = false;
+			} else {
+				sb.append("    ").append(t).append('\n');
+			}
+		}
 		return sb.toString();
 	}
 
