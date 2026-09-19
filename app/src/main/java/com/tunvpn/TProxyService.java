@@ -87,6 +87,9 @@ public class TProxyService extends VpnService {
 	   traffic counters stuck at 0 forever - exactly the "stats always 0" report. */
 	private HandlerThread statsThread = null;
 	private Preferences statsPrefs = null;
+	/* Loopback HTTP control API hosted by the app (libmihomo never binds its
+	   own external-controller). Lives for the lifetime of the tunnel. */
+	private ClashApiServer clashApiServer = null;
 	private Preferences prefs = null;
 	private long lastTx, lastRx, lastTime;
 	private long sessionTx, sessionRx;
@@ -266,6 +269,7 @@ public class TProxyService extends VpnService {
 		   so make sure the stats poller does not outlive it. stopStats() is
 		   idempotent, so this is harmless after a normal stop. */
 		stopStats();
+		stopEmbeddedApi();
 		sInstance = null;
 		super.onDestroy();
 	}
@@ -554,6 +558,8 @@ public class TProxyService extends VpnService {
 		initNotificationChannel(NOTIFY_CHANNEL);
 		createNotification();
 		startStats(prefs);
+		/* Expose the control API on loopback (the core does not bind it). */
+		startEmbeddedApi();
 	}
 
 	/* Every startup failure funnels through here. Two things matter beyond
@@ -1728,6 +1734,7 @@ public class TProxyService extends VpnService {
 
 		/* Flush the traffic counters before the tunnel goes away. */
 		stopStats();
+		stopEmbeddedApi();
 
 		new Preferences(this).setEnable(false);
 		QSTileService.requestUpdate(this);
@@ -1822,6 +1829,37 @@ public class TProxyService extends VpnService {
 
 	private String statsLine(int labelId, String up, String down) {
 		return getString(R.string.stats_line, getString(labelId), up, down);
+	}
+
+	/* Host our own loopback HTTP control API (the "clash-api"). libmihomo is a
+	   JNI-first library and never binds external-controller itself, so nothing
+	   would listen on the API port otherwise: a browser could not reach
+	   127.0.0.1:<API_PORT>, and the app's REST paths (the latency test)
+	   would fail. ClashApiServer translates REST -> in-process bridge. */
+	private void startEmbeddedApi() {
+		try {
+			if (clashApiServer != null)
+			  return;
+			clashApiServer = new ClashApiServer(MihomoConfig.API_PORT, prefs);
+			if (clashApiServer.start())
+			  appendLog("clash-api: 内嵌控制接口已监听 127.0.0.1:" + MihomoConfig.API_PORT
+				+ "（浏览器打开 http://127.0.0.1:" + MihomoConfig.API_PORT + "/ 可见）");
+			else {
+				clashApiServer = null;
+				appendLog("clash-api: 端口 " + MihomoConfig.API_PORT
+					+ " 已被占用（内核已自行监听），沿用内核的监听");
+			}
+		} catch (Throwable e) {
+			clashApiServer = null;
+			appendLog("clash-api: 内嵌服务启动失败：" + e);
+		}
+	}
+
+	private void stopEmbeddedApi() {
+		if (clashApiServer != null) {
+			clashApiServer.stop();
+			clashApiServer = null;
+		}
 	}
 
 	/* Poll mihomo's traffic counters once a second. */
