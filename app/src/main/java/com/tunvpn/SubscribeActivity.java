@@ -735,18 +735,18 @@ public class SubscribeActivity extends BaseActivity {
 		return proxyNameCache.get(server + "|" + n.port + "|" + type);
 	}
 
-	/* Pick a reachable clash-api host for this pass. We probe 127.0.0.1 first
-	   (the loopback the external-controller is bound to) and fall back to the
-	   device's own IP only if the loopback is captured by the TUN. Returns null
-	   when neither answers, so the caller keeps the TCP-only check. */
+	/* The clash-api is ALWAYS bound to the loopback (external-controller:
+	   127.0.0.1), and with allow-lan off mihomo only serves loopback clients -
+	   so the device's own IP can never reach it. Falling back to the device IP
+	   used to latch onto a host with no listener, which made every /proxies and
+	   /delay call fail (i.e. "all speed tests not passing"). Use 127.0.0.1
+	   exclusively. */
 	private String resolveApiHost() {
 		if (apiHost != null)
 		  return apiHost;
-		for (String h : new String[] { "127.0.0.1", deviceHost() }) {
-			if (probeApi(h)) {
-				apiHost = h;
-				return h;
-			}
+		if (probeApi("127.0.0.1")) {
+			apiHost = "127.0.0.1";
+			return apiHost;
 		}
 		return null;
 	}
@@ -759,7 +759,11 @@ public class SubscribeActivity extends BaseActivity {
 			MihomoConfig.applyAuth(c, prefs);
 			c.setConnectTimeout(800);
 			c.setReadTimeout(800);
-			return c.getResponseCode() >= 200 && c.getResponseCode() < 300;
+			int code = c.getResponseCode();
+			/* 2xx = healthy. 401 = the listener is up but auth is wrong: still
+			   "reachable", so latch onto this host and let the real call surface
+			   the 401 instead of falling back to a dead address. */
+			return (code >= 200 && code < 300) || code == 401;
 		} catch (Exception e) {
 			return false;
 		} finally {

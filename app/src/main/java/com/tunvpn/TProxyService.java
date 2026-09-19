@@ -919,16 +919,14 @@ public class TProxyService extends VpnService {
 	/* One quick reachability probe of the control API (no retries). Used by
 	   verifyController; the selector/test loops use waitForController which
 	   retries internally. */
-	/* Probe /version on the IPv4 loopback first; the device's own IP is kept as a
-	   fallback (the external-controller is bound to 127.0.0.1, reachable on the
-	   loopback; the device IP only helps where the loopback is captured).
-	   Whichever answers first becomes controllerHost for all later API calls. */
+	/* The clash-api binds the loopback (external-controller: 127.0.0.1) and, with
+	   allow-lan off, only serves loopback clients - so the device IP is never a
+	   valid controller address. Probing it as a fallback used to latch onto a
+	   host with no listener and report every test as failed; keep it 127.0.0.1. */
 	private boolean isControllerUp() {
-		for (String h : new String[] { "127.0.0.1", deviceHost() }) {
-			if (probeVersion(h)) {
-				controllerHost = h;
-				return true;
-			}
+		if (probeVersion("127.0.0.1")) {
+			controllerHost = "127.0.0.1";
+			return true;
 		}
 		return false;
 	}
@@ -942,7 +940,8 @@ public class TProxyService extends VpnService {
 			c.setConnectTimeout(500);
 			c.setReadTimeout(500);
 			int code = c.getResponseCode();
-			return code >= 200 && code < 300;
+			/* 2xx = healthy; 401 = listener up but auth wrong, still reachable. */
+			return (code >= 200 && code < 300) || code == 401;
 		} catch (Throwable e) {
 			lastControllerError = e.getClass().getSimpleName()
 				+ (e.getMessage() == null ? "" : (": " + e.getMessage()));

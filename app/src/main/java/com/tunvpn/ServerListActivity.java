@@ -28,8 +28,12 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.color.MaterialColors;
 
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class ServerListActivity extends BaseActivity {
 	private Preferences prefs;
@@ -37,6 +41,8 @@ public class ServerListActivity extends BaseActivity {
 	private TextView textview_empty;
 	private List<SocksServer> servers = new ArrayList<SocksServer>();
 	private ServerAdapter adapter;
+	/* Bounded pool for latency tests (one socket per server at once). */
+	private final ExecutorService testPool = Executors.newFixedThreadPool(8);
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -72,6 +78,12 @@ public class ServerListActivity extends BaseActivity {
 	protected void onResume() {
 		super.onResume();
 		loadServers();
+	}
+
+	@Override
+	protected void onDestroy() {
+		testPool.shutdownNow();
+		super.onDestroy();
 	}
 
 	private void loadServers() {
@@ -128,11 +140,20 @@ public class ServerListActivity extends BaseActivity {
 
 	private class ServerAdapter extends ArrayAdapter<SocksServer> {
 		private final android.view.LayoutInflater inflater;
+		private final int colorOk;
+		private final int colorBad;
+		private final int colorIdle;
 		private final int colorSelected;
 
 		ServerAdapter() {
 			super(ServerListActivity.this, R.layout.serverlistitem, servers);
 			inflater = getLayoutInflater();
+			colorOk = MaterialColors.getColor(ServerListActivity.this,
+				com.google.android.material.R.attr.colorPrimary, 0);
+			colorBad = MaterialColors.getColor(ServerListActivity.this,
+				com.google.android.material.R.attr.colorError, 0);
+			colorIdle = MaterialColors.getColor(ServerListActivity.this,
+				com.google.android.material.R.attr.colorOutline, 0);
 			colorSelected = MaterialColors.getColor(ServerListActivity.this,
 				com.google.android.material.R.attr.colorPrimaryContainer, 0);
 		}
@@ -146,9 +167,9 @@ public class ServerListActivity extends BaseActivity {
 			TextView name = (TextView) convertView.findViewById(R.id.item_name);
 			TextView detail = (TextView) convertView.findViewById(R.id.item_detail);
 			TextView badge = (TextView) convertView.findViewById(R.id.item_badge);
+			TextView status = (TextView) convertView.findViewById(R.id.item_status);
+			Button test = (Button) convertView.findViewById(R.id.item_test);
 			Button enable = (Button) convertView.findViewById(R.id.item_enable);
-			Button edit = (Button) convertView.findViewById(R.id.item_edit);
-			Button delete = (Button) convertView.findViewById(R.id.item_delete);
 
 			name.setText(s.label());
 			detail.setText(s.summary());
@@ -156,27 +177,100 @@ public class ServerListActivity extends BaseActivity {
 			boolean active = s.id.equals(prefs.getActiveSocksId());
 			badge.setVisibility(active ? View.VISIBLE : View.GONE);
 			card.setCardBackgroundColor(active ? colorSelected : Color.TRANSPARENT);
-			enable.setEnabled(!active);
 
+			/* Latency pill: mirror the subscription list's colour semantics
+			   (-1 untested, -2 unreachable, >=0 latency in ms). */
+			if (s.latency >= 0) {
+				status.setText(s.latency + " ms");
+				status.setTextColor(colorOk);
+			} else if (s.latency == -2) {
+				status.setText(getString(R.string.sub_status_fail));
+				status.setTextColor(colorBad);
+			} else {
+				status.setText(getString(R.string.sub_status_untested));
+				status.setTextColor(colorIdle);
+			}
+
+			enable.setText(active ? R.string.server_enabled : R.string.server_enable);
+			enable.setEnabled(!active);
 			enable.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
 					enable(s);
 				}
 			});
-			edit.setOnClickListener(new View.OnClickListener() {
+			test.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
-					openEditor(s);
+					testServer(s);
 				}
 			});
-			delete.setOnClickListener(new View.OnClickListener() {
+
+			/* Edit / delete move to a long-press menu, matching the
+			   subscription list's uncluttered per-row layout. */
+			card.setOnLongClickListener(new View.OnLongClickListener() {
 				@Override
-				public void onClick(View v) {
-					confirmDelete(s);
+				public boolean onLongClick(View v) {
+					showServerMenu(s);
+					return true;
 				}
 			});
 			return convertView;
 		}
+	}
+
+	/* Long-press menu for a server row: edit or delete (the two actions that
+	   used to be inline buttons). */
+	private void showServerMenu(final SocksServer s) {
+		new AlertDialog.Builder(this)
+			.setTitle(s.label())
+			.setItems(new CharSequence[] {
+				getString(R.string.server_edit),
+				getString(R.string.server_delete)
+			}, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface d, int which) {
+					if (which == 0) openEditor(s);
+					else confirmDelete(s);
+				}
+			})
+			.show();
+	}
+
+	/* Speed-test a SOCKS5 (or raw) upstream the same way the subscription list
+	   tests a node: probe reachability and measure connect latency. These
+	   servers are NOT part of mihomo's proxy pool (they ARE the upstream), so a
+	   clash-api /delay is unavailable; instead we open a direct TCP connection
+	   to host:port - the app's own traffic bypasses the VPN tunnel, so this is
+	   a true end-to-end probe of the server's socket. Success => latency (ms),
+	   failure (incl. an empty host) => -2 (unreachable). This is the only
+	   availability verdict, matching ClashNode's latency semantics. */
+	private void testServer(final SocksServer s) {
+		testPool.execute(new Runnable() {
+			@Override
+			public void run() {
+				long result = -2;
+				if (s.addr != null && !s.addr.trim().isEmpty()) {
+					int timeout = prefs.getProxyTestTimeout() * 1000;
+					long start = System.currentTimeMillis();
+					try {
+						Socket sock = new Socket();
+						sock.connect(new InetSocketAddress(s.addr.trim(), s.port), timeout);
+						result = System.currentTimeMillis() - start;
+						sock.close();
+					} catch (Exception e) {
+						result = -2;
+					}
+				}
+				final long latency = result;
+				runOnUiThread(new Runnable() {
+					@Override
+					public void run() {
+						s.latency = latency;
+						adapter.notifyDataSetChanged();
+					}
+				});
+			}
+		});
 	}
 }

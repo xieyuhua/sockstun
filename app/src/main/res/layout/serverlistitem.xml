@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One SOCKS5 server row: a circular icon, the name (with an "enabled" chip)
-     and the address, then its three actions. -->
+<!-- One SOCKS5 server row: server avatar, name + "enabled" chip, a latency
+     pill (right) and two actions: 测速 (speed test) and 启用 (use as upstream).
+     Edit / delete live in the long-press menu, matching the subscription list. -->
 <com.google.android.material.card.MaterialCardView
 	xmlns:android="http://schemas.android.com/apk/res/android"
 	xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -76,6 +77,23 @@
 					android:textAppearance="?attr/textAppearanceBodySmall"
 					android:textColor="?attr/colorOnSurfaceVariant"/>
 			</LinearLayout>
+			<!-- Latency (or 未测速 / 不可用) in a pill; text colour is set in code. -->
+			<TextView
+				android:id="@+id/item_status"
+				android:layout_width="wrap_content"
+				android:layout_height="wrap_content"
+				android:layout_marginStart="10dp"
+				android:background="@drawable/bg_pill"
+				android:gravity="center"
+				android:maxLines="1"
+				android:minWidth="58dp"
+				android:paddingLeft="8dp"
+				android:paddingRight="8dp"
+				android:paddingTop="4dp"
+				android:paddingBottom="4dp"
+				android:text="@string/sub_status_untested"
+				android:textAppearance="?attr/textAppearanceLabelMedium"
+				android:textStyle="bold"/>
 		</LinearLayout>
 		<LinearLayout
 			android:orientation="horizontal"
@@ -83,35 +101,28 @@
 			android:layout_height="wrap_content"
 			android:layout_marginTop="8dp">
 			<com.google.android.material.button.MaterialButton
+				android:id="@+id/item_test"
+				style="?attr/materialButtonOutlinedStyle"
+				android:layout_width="0dp"
+				android:layout_height="wrap_content"
+				android:layout_weight="1"
+				android:minHeight="38dp"
+				android:text="@string/sub_test"
+				android:textSize="12sp"
+				app:cornerRadius="19dp"
+				app:icon="@drawable/ic_speed"
+				app:iconGravity="textStart"
+				app:iconPadding="4dp"
+				app:iconSize="16dp"/>
+			<com.google.android.material.button.MaterialButton
 				android:id="@+id/item_enable"
 				style="?attr/materialButtonOutlinedStyle"
 				android:layout_width="0dp"
 				android:layout_height="wrap_content"
 				android:layout_weight="1"
+				android:layout_marginStart="10dp"
 				android:minHeight="38dp"
 				android:text="@string/server_enable"
-				android:textSize="12sp"
-				app:cornerRadius="19dp"/>
-			<com.google.android.material.button.MaterialButton
-				android:id="@+id/item_edit"
-				style="?attr/materialButtonOutlinedStyle"
-				android:layout_width="0dp"
-				android:layout_height="wrap_content"
-				android:layout_weight="1"
-				android:layout_marginStart="10dp"
-				android:minHeight="38dp"
-				android:text="@string/server_edit"
-				android:textSize="12sp"
-				app:cornerRadius="19dp"/>
-			<com.google.android.material.button.MaterialButton
-				android:id="@+id/item_delete"
-				style="?attr/materialButtonOutlinedStyle"
-				android:layout_width="0dp"
-				android:layout_height="wrap_content"
-				android:layout_weight="1"
-				android:layout_marginStart="10dp"
-				android:minHeight="38dp"
-				android:text="@string/server_delete"
 				android:textSize="12sp"
 				app:cornerRadius="19dp"/>
 		</LinearLayout>

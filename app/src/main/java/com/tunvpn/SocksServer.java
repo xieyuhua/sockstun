@@ -29,6 +29,11 @@ public class SocksServer {
 	   / ss / ...), which MihomoConfig emits verbatim as the upstream node. */
 	public String type = "socks5";
 	public String raw = "";
+	/* Runtime latency probe result, mirroring ClashNode.latency semantics:
+	   -1 = never tested, -2 = unreachable, >=0 = latency in ms. Deliberately
+	   omitted from encode()/decode() below, so it is recomputed each session
+	   and never persisted. */
+	public long latency = -1;
 
 	public SocksServer(String id, String name, String addr, int port,
 			String user, String pass) {
