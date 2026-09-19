@@ -235,8 +235,6 @@
 	<string name="server_manual_hint">未配置订阅时，这里填写的节点会作为手动上游生效（支持 SOCKS5 / Hysteria2 / VMess / VLESS / Trojan / SS 等）；已配置订阅时以订阅为准。</string>
 	<string name="server_use_as_upstream">使用此 SOCKS5 作为上游（忽略订阅）</string>
 	<string name="settings">设置</string>
-	<string name="console">控制台</string>
-	<string name="console_open_failed">无法打开控制台：请先开启隧道（内嵌 clash-api 仅运行时可用）</string>
 	<string name="subs_config">订阅配置</string>
 	<string name="subs_add">新增订阅</string>
 	<string name="subs_edit">编辑订阅</string>

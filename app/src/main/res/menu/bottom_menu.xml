@@ -20,8 +20,4 @@
 		android:id="@+id/nav_settings"
 		android:icon="@drawable/ic_more_vert"
 		android:title="@string/settings"/>
-	<item
-		android:id="@+id/nav_console"
-		android:icon="@drawable/ic_console"
-		android:title="@string/console"/>
 </menu>

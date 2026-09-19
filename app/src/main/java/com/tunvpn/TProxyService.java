@@ -266,7 +266,6 @@ public class TProxyService extends VpnService {
 		   so make sure the stats poller does not outlive it. stopStats() is
 		   idempotent, so this is harmless after a normal stop. */
 		stopStats();
-		stopEmbeddedApi();
 		sInstance = null;
 		super.onDestroy();
 	}
@@ -534,14 +533,6 @@ public class TProxyService extends VpnService {
 		   config error only exists in its own log stream, which is easy to
 		   miss - the tunnel looks connected while 9090 is dead. */
 		verifyController();
-		/* This libmihomo build never binds the external-controller HTTP listener
-		   on 9090 (verified: 90s of polling + startListener nudges still leave
-		   the port un-listened), so the browser / an external dashboard can
-		   never reach the control API even though in-app features work through
-		   the in-process bridge. Bring up our own clash-api-compatible HTTP
-		   server on the same port, translating REST calls to that bridge and
-		   hosting the dashboard at /ui. */
-		startEmbeddedApi();
 		/* Proactively nudge the clash-api. quickSetup brings the mixed-port up
 		   but on some builds skips the external-controller listener, so the
 		   RESTful API (selectors, /connections, node switching) stays dead
@@ -992,31 +983,7 @@ public class TProxyService extends VpnService {
 				}
 			}
 
-			/* Bring up the in-app clash-api HTTP server so a browser or external
-		   dashboard (yacd) can reach the control API on 0.0.0.0:API_PORT. This
-		   build of libmihomo never binds its own external-controller listener,
-		   so we serve the REST surface ourselves, translating each call to the
-		   in-process bridge the app already uses. The dashboard is hosted at
-		   /ui (token baked in). */
-		private void startEmbeddedApi() {
-			if (clashApiServer != null)
-			  return;
-			clashApiServer = new ClashApiServer(this, MihomoConfig.API_PORT, prefs.getSecret());
-			if (clashApiServer.start())
-			  appendLog("clash-api: 内嵌 HTTP 服务已监听 0.0.0.0:" + MihomoConfig.API_PORT
-				+ "（浏览器访问 http://127.0.0.1:" + MihomoConfig.API_PORT + "/ui）");
-			else
-			  appendLog("clash-api: 内嵌 HTTP 服务启动失败（端口可能被占用）");
-		}
-
-		private void stopEmbeddedApi() {
-			if (clashApiServer != null) {
-				clashApiServer.stop();
-				clashApiServer = null;
-			}
-		}
-
-		/* Definitive: read /proc/net/tcp[6] and report which of our ports (API 9090,
+			/* Definitive: read /proc/net/tcp[6] and report which of our ports (API 9090,
 			mixed 7890) are actually LISTEN-ing and on which address. Settles whether
 			mihomo bound the clash-api at all (the "9090 never listens" symptom) vs a
 			pure reachability problem, and shows the exact bound address. */
@@ -1130,11 +1097,6 @@ public class TProxyService extends VpnService {
 	   symptom). protect() pulls each socket out of the VPN routing so the app
 	   can talk to its own core. Activities reuse localApi() via the static hook. */
 	private static TProxyService sInstance;
-	/* In-app clash-api HTTP server. This libmihomo build never binds the
-	   external-controller listener on 9090, so we serve the REST surface
-	   ourselves (translating to the in-process bridge) and host the dashboard
-	   at /ui. Lives for the lifetime of the tunnel. */
-	private ClashApiServer clashApiServer;
 	/* Host mihomo's clash-api actually bound to (127.0.0.1 / LAN IP / [::1]),
 	   resolved at startup by isControllerUp so every localApi call reaches it
 	   wherever the core decided to listen. */
@@ -1744,9 +1706,6 @@ public class TProxyService extends VpnService {
 		QSTileService.requestUpdate(this);
 
 		stopForeground(true);
-
-		/* Drop the in-app clash-api HTTP server before the core goes away. */
-		stopEmbeddedApi();
 
 		/* Tear the tunnel down before releasing the fd. */
 		try {

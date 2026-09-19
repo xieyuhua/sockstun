@@ -671,18 +671,11 @@ public class SubscribeActivity extends BaseActivity {
 				String path = "/proxies/" + encodePath(name)
 					+ "/delay?timeout=" + timeoutMs + "&url=" + URLEncoder.encode(target, "UTF-8");
 				/* Reach the loopback control API through a VPN-bypassing socket;
-				   the app's own sockets would otherwise be captured by the tunnel.
-				   NOTE: on this build mihomo never binds the external-controller
-				   HTTP listener (9090), so the /delay HTTP call returns -1
-				   (unreachable). We must NOT bail out here - we mark the target
-				   failed and fall through to the proxied (mixed-port) fallback
-				   below, which does not need 9090 at all. */
+				   the app's own sockets would otherwise be captured by the tunnel. */
 				TProxyService.ApiResult r = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
 					MihomoConfig.API_PORT, path, null, prefs.getSecret());
-				if (r.code == -1) {
-					failed = -2L;          /* 9090 unreachable; try next / fallback */
-					continue;
-				}
+				if (r.code == -1)
+				  return null;            /* controller unreachable */
 				if (r.code == 200) {
 					JSONObject o = new JSONObject(r.body);
 					if (o.has("delay"))
@@ -693,17 +686,16 @@ public class SubscribeActivity extends BaseActivity {
 				   target; remember it but try the next target before giving up. */
 				failed = -2L;
 			} catch (Exception e) {
-				/* /delay could not be run for this target; let the proxied
-				   fallback have a chance instead of bailing to "unknown". */
-				failed = -2L;
+				/* Controller became unreachable mid-run: cannot verify. */
+				return null;
 			}
 		}
-		/* /delay could not verify the node (9090 not bound, or the node failed
-		   every target). Fall back to actually selecting the node and driving a
-		   real HTTP request THROUGH the proxy (mihomo's mixed-port 7890), which
-		   proves the node can tunnel traffic. The previous selection is restored
+		/* /delay reported the node unusable for every target. As a fallback,
+		   actually select the node and push a real HTTP request THROUGH the
+		   proxy (mihomo's mixed-port), which proves the node can tunnel traffic
+		   rather than trusting /delay alone. The previous selection is restored
 		   so the user's active route is left untouched. */
-		if (failed != null) {
+		if (failed != null && failed == -2L) {
 			Long proxied = proxiedDelayMs(n, targets);
 			if (proxied != null)
 			  return proxied;
