@@ -118,8 +118,13 @@ public class MihomoConfig {
 				.append("    - 223.5.5.5\n")
 				.append("    - 119.29.29.29\n");
 
+		/* Point mihomo's own log at a file. The clash-api start/bind lines and
+		   any panic live here, not in the app's stdio - without this the reason
+		   "9090 never listens" stays invisible (we only saw a silent no-listen). */
 		if (!sectionExists(cfg, "log:"))
-			cfg.append("log:\n  level: info\n  report: false\n");
+			cfg.append("log:\n  level: info\n  report: false\n  file: \"")
+				.append(new File(context.getCacheDir(), "mihomo.log").getAbsolutePath())
+				.append("\"\n");
 
 		/* TUN is driven by Clash.startTUN (it supplies the fd + protect
 		   callback). We only enable it and let mihomo auto-route traffic. */

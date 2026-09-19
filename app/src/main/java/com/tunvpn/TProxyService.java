@@ -896,6 +896,7 @@ public class TProxyService extends VpnService {
 			  appendLog("controller: 127.0.0.1:" + MihomoConfig.API_PORT
 					+ " 当前空闲但仍未监听 —— 不是端口占用，而是 mihomo 绑定/配置问题（见上方 mihomo: 日志）");
 			dumpControllerLog();
+			dumpMihomoLog();
 			dumpConfigTail();
 			}).start();
 	}
@@ -1032,6 +1033,37 @@ public class TProxyService extends VpnService {
 			}
 			r.close();
 		} catch (Throwable ignore) { }
+	}
+
+	/* mihomo writes its own log (incl. clash-api start/bind lines and any panic)
+	   to <cacheDir>/mihomo.log once the config sets log.file. Surface the lines
+	   that explain why the control API never came up. */
+	private void dumpMihomoLog() {
+		File f = new File(getCacheDir(), "mihomo.log");
+		if (!f.exists()) {
+			appendLog("mihomolog: 未生成（config 未设置 log.file 或核心未写日志）");
+			return;
+		}
+		try {
+			java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f));
+			String line;
+			int shown = 0;
+			while ((line = r.readLine()) != null) {
+				String l = line.toLowerCase();
+				if (l.contains("controller") || l.contains("clash-api") || l.contains("bind")
+						|| l.contains("listen") || l.contains("external") || l.contains("api")
+						|| l.contains("fail") || l.contains("error") || l.contains("panic")
+						|| l.contains("secret")) {
+					appendLog("mihomolog: " + line.trim());
+					shown++;
+				}
+			}
+			r.close();
+			if (shown == 0)
+			  appendLog("mihomolog: 无 controller/api/bind 相关条目（核心可能未打印原因）");
+		} catch (Throwable e) {
+			appendLog("mihomolog: 读取失败：" + e);
+		}
 	}
 
 	/* FlClash-style real reachability WITHOUT the control API: drive a request
