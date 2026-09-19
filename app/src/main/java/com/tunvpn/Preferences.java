@@ -1043,6 +1043,20 @@ public class Preferences
 		return prefs.getString(RECENT_REQUESTS, "");
 	}
 
+	/* Live /connections snapshot, published by TProxyService (the :native
+	   process) so the connections screen - which runs in the MAIN process and
+	   cannot reach the in-process action bridge or the service instance - can
+	   read it. A JSON array of compact objects {t,r,p,u,d,s}. commit() (not
+	   apply()) because MODE_MULTI_PROCESS only re-reads cross-process on a
+	   committed write. */
+	private static final String CONN_SNAPSHOT = "connSnapshot";
+	public void setConnSnapshot(String json) {
+		prefs.edit().putString(CONN_SNAPSHOT, json).commit();
+	}
+	public String getConnSnapshot() {
+		return prefs.getString(CONN_SNAPSHOT, "");
+	}
+
 	/* Per-app snapshots: "pkg:tx:rx;pkg:tx:rx;...". */
 	public String getAppBase() {
 		return prefs.getString(STATS_APP_BASE, "");

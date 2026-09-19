@@ -218,49 +218,39 @@ public class ConnectionsActivity extends BaseActivity {
 		return s != null && s.toLowerCase().contains(q);
 	}
 
-	/* null when the core could not be asked at all (most likely it is not
-	   running), as opposed to an empty list. */
+	/* null when the tunnel is not running (as opposed to an empty list). */
 	private List<Row> fetch() {
 		lastError = "";
-		/* Read the snapshot the background traffic poll already captured. The
-		   native action bridge supports only ONE in-flight call, and that poll
-		   runs every 1s; issuing our own overlapping call made the earlier
-		   result get dropped, so this screen stayed empty while the stats saw
-		   connections. Reusing the poll's snapshot avoids the contention and
-		   always shows exactly what the working poll produced. */
-		String body = TProxyService.lastConnectionsSnapshot();
-		boolean fromBridge = false;
-		if (body == null) {
-			/* Tunnel just started (no poll yet) or not running: fall back to a
-			   one-off bridge call. This can race the poll, so only when empty. */
-			body = TProxyService.apiAction("getConnections", null);
-			fromBridge = true;
+		/* This screen runs in the MAIN process, but the core / action bridge /
+		   service instance only exist in the :native process - so neither the
+		   bridge call nor lastConnectionsSnapshot() can work here. The only
+		   channel is the compact snapshot the stats poll publishes to
+		   SharedPreferences; a fresh Preferences instance re-reads it
+		   cross-process. */
+		Preferences p = new Preferences(this);
+		if (!p.getEnable()) {
+			lastError = "隧道未运行";
+			return null;
 		}
-		android.util.Log.d("ConnectionsActivity", "fetch body="
-			+ (body == null ? "null" : ("len=" + body.length()))
-			+ (fromBridge ? " (bridge)" : " (snapshot)"));
-		if (body == null) {
-			if (lastError.isEmpty())
-			  lastError = "in-process 桥未返回（核心可能未就绪 / 未运行）";
+		String raw = p.getConnSnapshot();
+		if (raw == null || raw.isEmpty()) {
+			lastError = "尚未收到连接快照（服务可能刚启动）";
 			return null;
 		}
 		List<Row> out = new ArrayList<Row>();
 		try {
-			JSONArray arr = new JSONObject(body).optJSONArray("connections");
-			if (arr == null)
-			  return out;
+			JSONArray arr = new JSONArray(raw);
 			for (int i = 0; i < arr.length(); i++) {
 				JSONObject c = arr.optJSONObject(i);
 				if (c == null)
 				  continue;
 				Row r = new Row();
-				JSONObject meta = c.optJSONObject("metadata");
-				r.target = target(meta);
-				r.route = route(c);
-				r.process = process(meta);
-				r.time = formatConnStart(c.optString("start", ""));
-				r.up = c.optLong("upload");
-				r.down = c.optLong("download");
+				r.target = c.optString("t", "");
+				r.route = c.optString("r", "");
+				r.process = c.optString("p", "");
+				r.time = formatConnStart(c.optString("s", ""));
+				r.up = c.optLong("u", 0);
+				r.down = c.optLong("d", 0);
 				out.add(r);
 			}
 		} catch (Exception e) {
@@ -279,51 +269,6 @@ public class ConnectionsActivity extends BaseActivity {
 			}
 		});
 		return out;
-	}
-
-	private static String target(JSONObject meta) {
-		if (meta == null)
-		  return "";
-		String host = meta.optString("host");
-		if (host.isEmpty())
-		  host = meta.optString("destinationIP");
-		String port = meta.optString("destinationPort");
-		if (host.isEmpty())
-		  return port;
-		return port.isEmpty() ? host : host + ":" + port;
-	}
-
-	/* The app that opened the socket, when the core could resolve it. Empty on
-	   platforms where process tracking is unavailable, in which case the row
-	   simply hides this line. */
-	private static String process(JSONObject meta) {
-		if (meta == null)
-		  return "";
-		return meta.optString("process");
-	}
-
-	/* "<rule> · <node chain>", so one line says both why the request went the
-	   way it did and where it ended up. */
-	private static String route(JSONObject c) {
-		StringBuilder sb = new StringBuilder();
-		String rule = c.optString("rule");
-		if (!rule.isEmpty()) {
-			String payload = c.optString("rulePayload");
-			sb.append(rule);
-			if (!payload.isEmpty())
-			  sb.append('(').append(payload).append(')');
-		}
-		JSONArray chains = c.optJSONArray("chains");
-		if (chains != null && chains.length() > 0) {
-			if (sb.length() > 0)
-			  sb.append(" · ");
-			for (int i = 0; i < chains.length(); i++) {
-				if (i > 0)
-				  sb.append(" → ");
-				sb.append(chains.optString(i));
-			}
-		}
-		return sb.toString();
 	}
 
 	/* The core stamps each connection with "start" as an RFC3339 string, e.g.

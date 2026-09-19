@@ -652,43 +652,69 @@ public class SubscribeActivity extends BaseActivity {
 		for (String u : PROXY_TEST_URLS)
 		  if (!targets.contains(u))
 			targets.add(u);
-		/* Honour the user's latency-test timeout (seconds -> ms). The core
-		   measures a real forwarded request, so give it the full budget plus a
-		   margin on the HTTP read so the response lands after mihomo's own
-		   timer fires. */
 		int timeoutMs = prefs.getProxyTestTimeout() * 1000;
-		Long failed = null;
+		/* First pass at the configured timeout. A success on ANY target means
+		   available. A genuine failure (504/408: the core really could not
+		   complete the probe) is remembered; a malfunction (401/404/...) is not
+		   a verdict, so it only ever leaves the node untested. */
+		boolean failed = false;
 		for (String target : targets) {
-			try {
-				String path = "/proxies/" + encodePath(name)
-					+ "/delay?timeout=" + timeoutMs + "&url=" + URLEncoder.encode(target, "UTF-8");
-				/* Reach the loopback control API through a VPN-bypassing socket;
-				   the app's own sockets would otherwise be captured by the tunnel. */
-				TProxyService.ApiResult r = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
-					MihomoConfig.API_PORT, path, null, prefs.getSecret());
-				if (r.code == -1)
-				  return null;            /* controller unreachable */
-				if (r.code == 200) {
-					JSONObject o = new JSONObject(r.body);
-					if (o.has("delay"))
-					  return o.getLong("delay");
-					return 0L;
-				}
-				/* Non-200: mihomo could not route through the node for this
-				   target; remember it but try the next target before giving up. */
-				failed = -2L;
-			} catch (Exception e) {
-				/* Controller became unreachable mid-run: cannot verify. */
-				return null;
-			}
+			Long d = delayProbe(name, target, timeoutMs);
+			if (d != null && d >= 0)
+			  return d;
+			if (d != null)
+			  failed = true;
 		}
-		/* Every target returned non-200: mihomo could not tunnel a request
-		   through this node for any of them, so it is genuinely unreachable
-		   from the node's exit - report it unavailable (-2). No further
-		   fallback: a "select + real request" test used to flip the global
-		   selector and false-negative working nodes, which is exactly the
-		   "代理本来正常却显示不可用" symptom we removed. */
-		return failed;
+		if (!failed)
+		  return null;              /* only inconclusive -> untested, NOT 不可用 */
+		/* Rescue pass: one longer-timeout probe on the most reliable targets,
+		   for slow-but-working nodes that a tight timeout just failed. This is
+		   what the old "real request" fallback used to rescue, without touching
+		   the global selector; it only runs for nodes about to be flagged. */
+		int retryMs = Math.max(timeoutMs, 12000);
+		for (String target : RETRY_TEST_URLS) {
+			Long d = delayProbe(name, target, retryMs);
+			if (d != null && d >= 0)
+			  return d;
+			if (d == null)
+			  return null;           /* malfunction on retry -> untested */
+		}
+		return -2L;                   /* genuinely unreachable */
+	}
+
+	/* Most reliable targets, used only by the rescue pass. */
+	private static final String[] RETRY_TEST_URLS = {
+		"http://cp.cloudflare.com",
+		"http://www.gstatic.com/generate_204",
+	};
+
+	/* One /delay probe. Returns the latency (>=0) on success, -2 when the core
+	   reports a genuine probe failure (504/408), or null when the test could not
+	   run at all (transport down / auth / route / other status) - which must NOT
+	   be reported as "unavailable". */
+	private Long delayProbe(String name, String target, int timeoutMs) {
+		try {
+			String path = "/proxies/" + encodePath(name)
+				+ "/delay?timeout=" + timeoutMs + "&url=" + URLEncoder.encode(target, "UTF-8");
+			/* Reach the loopback control API through a VPN-bypassing socket; the
+			   app's own sockets would otherwise be captured by the tunnel. */
+			TProxyService.ApiResult r = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
+				MihomoConfig.API_PORT, path, null, prefs.getSecret());
+			if (r.code == 200) {
+				JSONObject o = new JSONObject(r.body == null ? "{}" : r.body);
+				return o.has("delay") ? o.getLong("delay") : 0L;
+			}
+			if (r.code == 504 || r.code == 408)
+			  return -2L;               /* genuine: node could not complete it */
+			if (r.code == -1)
+			  return null;              /* controller unreachable -> cannot test */
+			android.util.Log.d("SubscribeActivity", "delay " + name
+				+ " -> HTTP " + r.code + (r.error == null ? "" : (" " + r.error))
+				+ " url=" + target);
+			return null;                /* auth/route/other: not a node verdict */
+		} catch (Exception e) {
+			return null;
+		}
 	}
 
 	/* Lazily fetch the running config's proxy list and index it by
@@ -726,7 +752,15 @@ public class SubscribeActivity extends BaseActivity {
 				String type = p.optString("type", "");
 				if (server.isEmpty() || port == 0)
 				  continue;
-				map.put(server.toLowerCase() + "|" + port + "|" + type, pname);
+				String base = server.toLowerCase() + "|" + port;
+				/* Key by ADDRESS first: mihomo reports "Shadowsocks" / "Vmess"
+				   while the subscription says "ss" / "vmess", so a
+				   type-qualified key never matched and the delay test could not
+				   even find the node. A lower-cased type key is kept as a
+				   secondary so two protocols on one address still resolve. */
+				if (!map.containsKey(base))
+				  map.put(base, pname);
+				map.put(base + "|" + type.toLowerCase(), pname);
 			}
 			proxyNameCache = map;
 			return true;
@@ -739,8 +773,12 @@ public class SubscribeActivity extends BaseActivity {
 		if (proxyNameCache == null)
 		  return null;
 		String server = n.server == null ? "" : n.server.toLowerCase();
-		String type = n.type == null ? "" : n.type;
-		return proxyNameCache.get(server + "|" + n.port + "|" + type);
+		String base = server + "|" + n.port;
+		String name = proxyNameCache.get(base);
+		if (name != null)
+		  return name;
+		String type = n.type == null ? "" : n.type.toLowerCase();
+		return proxyNameCache.get(base + "|" + type);
 	}
 
 	/* The clash-api is ALWAYS bound to the loopback (external-controller:

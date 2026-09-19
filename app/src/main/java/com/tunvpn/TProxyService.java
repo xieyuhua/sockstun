@@ -647,8 +647,12 @@ public class TProxyService extends VpnService {
 			String text = new String(buf, 0, n, "UTF-8");
 
 			String ec = topLevelLine(text, "external-controller:");
+			/* The listener must be loopback: on this build mihomo silently
+			   fails to bind 0.0.0.0 ("9090 never listens" - the browser cannot
+			   reach it either), while 127.0.0.1 binds fine. Align any
+			   non-loopback / wrong-port line to 127.0.0.1:<port>. */
 			boolean needEc = (ec == null)
-				|| !ec.contains(":" + MihomoConfig.API_PORT);
+				|| !ec.contains("127.0.0.1:" + MihomoConfig.API_PORT);
 			boolean needMp = !hasTopLevelKey(text, "mixed-port:")
 				&& !hasTopLevelKey(text, "port:");
 			/* Adopt a hand-set secret from the custom config so the app's control
@@ -685,7 +689,7 @@ public class TProxyService extends VpnService {
 			boolean secretWritten = false;
 			for (String line : text.split("\n", -1)) {
 				if (needEc && topLevelLine(line + "\n", "external-controller:") != null) {
-					out.append("external-controller: 0.0.0.0:")
+					out.append("external-controller: 127.0.0.1:")
 					   .append(MihomoConfig.API_PORT).append('\n');
 					ecWritten = true;
 				} else if (needSecret && topLevelLine(line + "\n", "secret:") != null) {
@@ -696,7 +700,7 @@ public class TProxyService extends VpnService {
 				}
 			}
 			if (needEc && !ecWritten)
-				out.append("external-controller: 0.0.0.0:")
+				out.append("external-controller: 127.0.0.1:")
 					.append(MihomoConfig.API_PORT).append('\n');
 			if (needSecret && !secretWritten)
 				out.append("secret: \"").append(prefs.getSecret()).append("\"\n");
@@ -706,7 +710,7 @@ public class TProxyService extends VpnService {
 			java.io.FileOutputStream fos = new java.io.FileOutputStream(configFile, false);
 			fos.write(out.toString().getBytes("UTF-8"));
 			fos.close();
-			appendLog("config: 自定义配置已对齐 App 必需项（external-controller=0.0.0.0:"
+			appendLog("config: 自定义配置已对齐 App 必需项（external-controller=127.0.0.1:"
 				+ MihomoConfig.API_PORT
 				+ (needMp ? ", mixed-port=" + prefs.getProxyPort() : "")
 				+ (needSecret ? ", secret" : "") + "）");
@@ -1220,11 +1224,15 @@ public class TProxyService extends VpnService {
 	   apiAction). Static because callers are spread across the service, the
 	   Activities and the embedded clash-api server. */
 	private static final Object API_LOCK = new Object();
-	/* Latest /connections snapshot fetched by accumulateProxy() on statsThread.
-	   The connections screen reads this instead of issuing its own bridge call,
-	   so it always shows exactly the data the working poll produced (and never
-	   competes with that poll for the single callback slot). */
+	/* Latest /connections snapshot fetched by accumulateProxy() on statsThread
+	   (kept for in-process callers). */
 	private volatile String connSnapshot = null;
+	/* Compact form of that snapshot, published to SharedPreferences so the
+	   connections screen - which runs in the MAIN process and cannot reach the
+	   bridge or sInstance - can read it cross-process. Capped and only
+	   rewritten when it actually changed. */
+	private static final int MAX_CONN_SNAPSHOT = 200;
+	private volatile String lastConnSnapshotJson = "";
 
 	/* === In-process control bridge ============================================
 	   libmihomo-android v0.3.3's quickSetup brings the mixed-port (7890) up but
@@ -1292,39 +1300,34 @@ public class TProxyService extends VpnService {
 		ApiResult r = new ApiResult();
 		r.code = -1;
 		try {
+			/* Each action-mapped path FALLS THROUGH to the HTTP listener when
+			   the in-process bridge returns nothing - which is always the case
+			   in the MAIN process, where the core is not loaded. That is what
+			   makes these calls work from Activities (e.g. the manual latency
+			   test), while the :native process keeps using the bridge. */
 			if ("GET".equals(method) && "/connections".equals(path)) {
 				String d = apiAction("getConnections", null);
-				if (d != null) { r.code = 200; r.body = d; }
-				return r;
-			}
-			if ("DELETE".equals(method) && "/connections".equals(path)) {
+				if (d != null) { r.code = 200; r.body = d; return r; }
+			} else if ("DELETE".equals(method) && "/connections".equals(path)) {
 				String d = apiAction("closeAllConnections", null);
-				r.code = (d != null) ? 204 : -1;
-				if (d != null) r.body = d;
-				return r;
-			}
-			if ("GET".equals(method) && "/proxies".equals(path)) {
+				if (d != null) { r.code = 204; r.body = d; return r; }
+			} else if ("GET".equals(method) && "/proxies".equals(path)) {
 				String d = apiAction("getProxies", null);
-				if (d != null) { r.code = 200; r.body = d; }
-				return r;
-			}
-			/* /proxies/{group}/delay is async in the core; keep the HTTP path
-			   (its caller already falls back to a real proxied request via the
-			   mixed-port when 9090 is down). */
-			if ("GET".equals(method) && path.startsWith("/proxies/")
-					&& path.indexOf("/delay") > 0)
-			  return localApi(method, host, port, path, body, secret);
-			if ("GET".equals(method) && path.startsWith("/proxies/")) {
+				if (d != null) { r.code = 200; r.body = d; return r; }
+			} else if ("GET".equals(method) && path.startsWith("/proxies/")
+					&& path.indexOf("/delay") > 0) {
+				/* /delay is async in the core and has no bridge action: always
+				   use the HTTP listener. */
+				return localApi(method, host, port, path, body, secret);
+			} else if ("GET".equals(method) && path.startsWith("/proxies/")) {
 				String group = path.substring("/proxies/".length());
 				String d = apiAction("getProxies", null);
 				if (d != null) {
 					JSONObject all = new JSONObject(d).optJSONObject("proxies");
 					JSONObject g = all == null ? null : all.optJSONObject(group);
-					if (g != null) { r.code = 200; r.body = g.toString(); }
+					if (g != null) { r.code = 200; r.body = g.toString(); return r; }
 				}
-				return r;
-			}
-			if ("PUT".equals(method) && path.startsWith("/proxies/")) {
+			} else if ("PUT".equals(method) && path.startsWith("/proxies/")) {
 				String group = path.substring("/proxies/".length());
 				String proxy = "";
 				if (body != null) {
@@ -1333,9 +1336,7 @@ public class TProxyService extends VpnService {
 				String d = apiAction("changeProxy",
 					"{\"group-name\":\"" + group.replace("\\", "\\\\").replace("\"", "\\\"")
 					+ "\",\"proxy-name\":\"" + proxy.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}");
-				r.code = (d != null) ? 204 : -1;
-				if (d != null) r.body = d;
-				return r;
+				if (d != null) { r.code = 204; r.body = d; return r; }
 			}
 		} catch (Throwable e) {
 			r.code = -1;
@@ -2013,6 +2014,11 @@ public class TProxyService extends VpnService {
 			if (arr == null)
 			  return;
 
+			/* Hand the live list to the main-process connections screen. It
+			   cannot read the bridge / sInstance (different process), so this
+			   is the only channel; it is written only when the list changed. */
+			publishConnSnapshot(arr);
+
 			Set<String> alive = new HashSet<String>();
 			int proxyConnCount = 0;
 			for (int i = 0; i < arr.length(); i++) {
@@ -2151,6 +2157,53 @@ public class TProxyService extends VpnService {
 	private static String connProcess(JSONObject c) {
 		JSONObject meta = c.optJSONObject("metadata");
 		return meta != null ? meta.optString("process", "") : "";
+	}
+	/* Build a compact, capped snapshot of the live connections and publish it
+	   to SharedPreferences for the main-process connections screen. Only
+	   rewritten when the content changed, so an idle list costs nothing. */
+	private void publishConnSnapshot(JSONArray arr) {
+		try {
+			JSONArray out = new JSONArray();
+			int n = Math.min(arr.length(), MAX_CONN_SNAPSHOT);
+			for (int i = 0; i < n; i++) {
+				JSONObject c = arr.optJSONObject(i);
+				if (c == null)
+				  continue;
+				JSONObject o = new JSONObject();
+				o.put("t", connTarget(c));
+				o.put("r", connRoute(c));
+				o.put("p", connProcess(c));
+				o.put("u", c.optLong("upload"));
+				o.put("d", c.optLong("download"));
+				o.put("s", c.optString("start", ""));
+				out.put(o);
+			}
+			String json = out.toString();
+			if (json.equals(lastConnSnapshotJson))
+			  return;
+			lastConnSnapshotJson = json;
+			if (statsPrefs != null)
+			  statsPrefs.setConnSnapshot(json);
+		} catch (Throwable ignore) {
+		}
+	}
+	/* "<rule>(<payload>) · <chain>": the one-line "why + where" of a row. */
+	private static String connRoute(JSONObject c) {
+		StringBuilder sb = new StringBuilder();
+		String rule = c.optString("rule", "");
+		if (!rule.isEmpty()) {
+			String payload = c.optString("rulePayload", "");
+			sb.append(rule);
+			if (!payload.isEmpty())
+			  sb.append('(').append(payload).append(')');
+		}
+		String chain = connChain(c);
+		if (!chain.isEmpty()) {
+			if (sb.length() > 0)
+			  sb.append(" · ");
+			sb.append(chain);
+		}
+		return sb.toString();
 	}
 
 	/* Serialize the recent-requests history to Preferences, throttled so we are
