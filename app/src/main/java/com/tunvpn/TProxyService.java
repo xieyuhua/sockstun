@@ -90,8 +90,10 @@ public class TProxyService extends VpnService {
 	private Preferences prefs = null;
 	private long lastTx, lastRx, lastTime;
 	private long sessionTx, sessionRx;
+	private long sessionBaseTx, sessionBaseRx; /* core cumulative at session start */
 	private long baseTx, baseRx, totalTx, totalRx;
 	private long txRate, rxRate;
+	private boolean trafficPrimed = false; /* first valid sample primes baselines; avoids a 9G/s spike */
 	private String lastNotifyText = null;
 	private int trafficSamples = 0;
 
@@ -139,6 +141,11 @@ public class TProxyService extends VpnService {
 	/* Last exception seen while probing the control API, so a failed probe says
 	   whether nothing is listening (refused) or it is up but not answering. */
 	private volatile String lastControllerError = null;
+	/* Set true once isControllerUp() actually reaches the clash-api. Until then
+	   the /connections poll is skipped silently so the warmup window (core
+	   brings TUN up before binding the API) does not spam "未就绪" - the
+	   verifyController thread still reports a genuine "never ready" after 90s. */
+	private volatile boolean controllerReady = false;
 	private volatile String controllerHost = "127.0.0.1";
 	private volatile String proxyTestStatus = "";
 	private static final String PROXY_TEST_URL = "http://www.gstatic.com/generate_204";
@@ -157,6 +164,7 @@ public class TProxyService extends VpnService {
 	private long lastProxyTx, lastProxyRx;
 	private long proxyRateTx, proxyRateRx;
 	private long lastProxyTime;
+	private boolean proxyPrimed = false; /* first valid proxied sample primes baselines */
 
 	/* Append a line to the log file directly (bypassing the fd-1/2
 	   redirection), so startup diagnostics are always captured even if the
@@ -228,6 +236,7 @@ public class TProxyService extends VpnService {
 
 	@Override
 	public int onStartCommand(Intent intent, int flags, int startId) {
+		sInstance = this;
 		if (intent != null && ACTION_DISCONNECT.equals(intent.getAction())) {
 			stopService();
 			return START_NOT_STICKY;
@@ -257,11 +266,14 @@ public class TProxyService extends VpnService {
 		   so make sure the stats poller does not outlive it. stopStats() is
 		   idempotent, so this is harmless after a normal stop. */
 		stopStats();
+		stopEmbeddedApi();
+		sInstance = null;
 		super.onDestroy();
 	}
 
 	@Override
 	public void onRevoke() {
+		sInstance = null;
 		stopService();
 		super.onRevoke();
 	}
@@ -401,8 +413,21 @@ public class TProxyService extends VpnService {
 		   InitParams uses "home-dir"; keep "homeDir" too so an older core
 		   still understands it (unknown fields are ignored). */
 		String homeDir = getFilesDir().getAbsolutePath();
+		/* Where the clash-api comes from: on this SDK build (libmihomo-android
+		   v0.3.3) the InitParams struct only carries HomeDir/Version - any
+		   external-controller/secret we put in initParams is IGNORED, so the
+		   API MUST be supplied by the profile (config.yaml), which we already
+		   write at MihomoConfig.build(). Empirically the mixed-port (also from
+		   the profile) comes up, but some builds skip the external-controller
+		   listener on quickSetup; when that happens kickClashApi() re-applies
+		   external-controller via the UpdateConfig action to start it. Keep
+		   home-dir/homeDir (and the ignored external-controller/secret) for
+		   core compat with builds that do read them. */
+		String secret = prefs.getSecret();
 		String initParams = "{\"home-dir\":\"" + homeDir + "\"," +
-			"\"homeDir\":\"" + homeDir + "\"}";
+			"\"homeDir\":\"" + homeDir + "\"," +
+			"\"external-controller\":\"127.0.0.1:" + apiPort + "\"," +
+			"\"secret\":\"" + secret + "\"}";
 		/* selected-map 故意留空：它会把选中的节点名经 JNI 桥传进内核，而桥把
 		   Java 字符串按 "modified UTF-8" 交给内核，会破坏补充平面字符（节点名里
 		   的国旗 emoji），内核随即报 "proxy ... not found"，甚至整份配置加载失败
@@ -509,6 +534,23 @@ public class TProxyService extends VpnService {
 		   config error only exists in its own log stream, which is easy to
 		   miss - the tunnel looks connected while 9090 is dead. */
 		verifyController();
+		/* This libmihomo build never binds the external-controller HTTP listener
+		   on 9090 (verified: 90s of polling + startListener nudges still leave
+		   the port un-listened), so the browser / an external dashboard can
+		   never reach the control API even though in-app features work through
+		   the in-process bridge. Bring up our own clash-api-compatible HTTP
+		   server on the same port, translating REST calls to that bridge and
+		   hosting the dashboard at /ui. */
+		startEmbeddedApi();
+		/* Proactively nudge the clash-api. quickSetup brings the mixed-port up
+		   but on some builds skips the external-controller listener, so the
+		   RESTful API (selectors, /connections, node switching) stays dead
+		   even though the tunnel proxies fine. kickClashApi() re-applies
+		   external-controller via the UpdateConfig action to (re)start it. */
+		new Thread(() -> {
+			try { Thread.sleep(3000); } catch (InterruptedException e) { return; }
+			kickClashApi();
+		}).start();
 		/* FlClash-style real reachability: actually push a request through the
 		   selected node and measure latency, rather than only checking the API
 		   answers (which can be green while no traffic flows). */
@@ -615,7 +657,7 @@ public class TProxyService extends VpnService {
 
 			String ec = topLevelLine(text, "external-controller:");
 			boolean needEc = (ec == null)
-				|| !ec.contains("127.0.0.1:" + MihomoConfig.API_PORT);
+				|| !ec.contains(":" + MihomoConfig.API_PORT);
 			boolean needMp = !hasTopLevelKey(text, "mixed-port:")
 				&& !hasTopLevelKey(text, "port:");
 			/* Adopt a hand-set secret from the custom config so the app's control
@@ -652,7 +694,7 @@ public class TProxyService extends VpnService {
 			boolean secretWritten = false;
 			for (String line : text.split("\n", -1)) {
 				if (needEc && topLevelLine(line + "\n", "external-controller:") != null) {
-					out.append("external-controller: 127.0.0.1:")
+					out.append("external-controller: 0.0.0.0:")
 					   .append(MihomoConfig.API_PORT).append('\n');
 					ecWritten = true;
 				} else if (needSecret && topLevelLine(line + "\n", "secret:") != null) {
@@ -663,7 +705,7 @@ public class TProxyService extends VpnService {
 				}
 			}
 			if (needEc && !ecWritten)
-				out.append("external-controller: 127.0.0.1:")
+				out.append("external-controller: 0.0.0.0:")
 					.append(MihomoConfig.API_PORT).append('\n');
 			if (needSecret && !secretWritten)
 				out.append("secret: \"").append(prefs.getSecret()).append("\"\n");
@@ -673,7 +715,7 @@ public class TProxyService extends VpnService {
 			java.io.FileOutputStream fos = new java.io.FileOutputStream(configFile, false);
 			fos.write(out.toString().getBytes("UTF-8"));
 			fos.close();
-			appendLog("config: 自定义配置已对齐 App 必需项（external-controller=127.0.0.1:"
+			appendLog("config: 自定义配置已对齐 App 必需项（external-controller=0.0.0.0:"
 				+ MihomoConfig.API_PORT
 				+ (needMp ? ", mixed-port=" + prefs.getProxyPort() : "")
 				+ (needSecret ? ", secret" : "") + "）");
@@ -859,6 +901,20 @@ public class TProxyService extends VpnService {
 				appendLog("controller: " + controllerHost + ":" + MihomoConfig.API_PORT + " ready");
 				return;
 			}
+			/* The core brought mixed-port up but skipped the external-controller
+			   listener. Try to force it via the UpdateConfig action, then re-poll;
+			   if that brings it up we skip the alarming "never ready" dump. */
+			kickClashApi();
+			boolean recovered = false;
+			for (int i = 0; i < 30; i++) {
+				if (isControllerUp()) { recovered = true; break; }
+				try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
+			}
+			if (recovered) {
+				appendLog("controller: " + controllerHost + ":" + MihomoConfig.API_PORT
+					+ " ready（经 UpdateConfig 兜底启动）");
+				return;
+			}
 			appendLog("controller: " + controllerHost + ":" + MihomoConfig.API_PORT
 				+ " NOT ready（90s 内未监听，核心未启动 clash-api）");
 			if (lastControllerError != null)
@@ -894,19 +950,108 @@ public class TProxyService extends VpnService {
 			}
 			if (portFree)
 			  appendLog("controller: 127.0.0.1:" + MihomoConfig.API_PORT
-					+ " 当前空闲但仍未监听 —— 不是端口占用，而是 mihomo 绑定/配置问题（见上方 mihomo: 日志）");
+				+ " 当前空闲但仍未监听 —— 不是端口占用，而是 mihomo 绑定/配置问题（见上方 mihomo: 日志）");
+			if (probeHost(deviceHost()))
+			  appendLog("controller: 但 " + deviceHost() + ":" + MihomoConfig.API_PORT
+				+ " 通了 —— 核心绑在网卡/LAN 地址，App 应改连该地址（见下 listen: 行）");
+			dumpListeningPorts();
 			dumpControllerLog();
+			dumpRawLog();
 			dumpMihomoLog();
 			dumpConfigTail();
 			}).start();
-	}
+			}
 
-	/* Quick TCP connect probe to host:API_PORT, used to tell an IPv4-only
+			/* Force the clash-api (external-controller) listener to start. On some
+			   libmihomo-android builds quickSetup brings mixed-port up but never
+			   starts the external-controller listener, even though the profile
+			   carries external-controller + secret - so the RESTful API (selectors,
+			   /connections, node switching) stays dead while the tunnel proxies
+			   fine. mihomo's UpdateConfig action re-applies the general config and
+			   (re)starts that listener. Called both proactively after startup and
+			   as a fallback from verifyController; harmless if it was already up. */
+			private void kickClashApi() {
+				/* Best-effort: (re)start the core's listeners via the in-process
+				   startListener action. On libmihomo-android v0.3.3 quickSetup brings
+				   the mixed-port up but leaves the clash-api (9090) unbound; startListener
+				   recreates every listener, including external-controller, so the REST API
+				   (selectors, /connections, node switching) comes up for external clients
+				   too. In-app stats already work through the apiAction bridge regardless. */
+				try {
+					String json = "{\"id\":\"\",\"method\":\"startListener\",\"data\":null}";
+					appendLog("clash-api: 尝试用 startListener 拉起监听（含 external-controller 9090）");
+					Clash.INSTANCE.invokeAction(json, new InvokeInterface() {
+						@Override
+						public void onResult(String result) {
+							appendLog("clash-api: startListener 结果: "
+								+ (result == null || result.isEmpty() ? "ok" : result));
+						}
+					});
+				} catch (Throwable e) {
+					appendLog("clash-api: invokeAction 失败: " + e);
+				}
+			}
+
+			/* Bring up the in-app clash-api HTTP server so a browser or external
+		   dashboard (yacd) can reach the control API on 0.0.0.0:API_PORT. This
+		   build of libmihomo never binds its own external-controller listener,
+		   so we serve the REST surface ourselves, translating each call to the
+		   in-process bridge the app already uses. The dashboard is hosted at
+		   /ui (token baked in). */
+		private void startEmbeddedApi() {
+			if (clashApiServer != null)
+			  return;
+			clashApiServer = new ClashApiServer(this, MihomoConfig.API_PORT, prefs.getSecret());
+			if (clashApiServer.start())
+			  appendLog("clash-api: 内嵌 HTTP 服务已监听 0.0.0.0:" + MihomoConfig.API_PORT
+				+ "（浏览器访问 http://127.0.0.1:" + MihomoConfig.API_PORT + "/ui）");
+			else
+			  appendLog("clash-api: 内嵌 HTTP 服务启动失败（端口可能被占用）");
+		}
+
+		private void stopEmbeddedApi() {
+			if (clashApiServer != null) {
+				clashApiServer.stop();
+				clashApiServer = null;
+			}
+		}
+
+		/* Definitive: read /proc/net/tcp[6] and report which of our ports (API 9090,
+			mixed 7890) are actually LISTEN-ing and on which address. Settles whether
+			mihomo bound the clash-api at all (the "9090 never listens" symptom) vs a
+			pure reachability problem, and shows the exact bound address. */
+			private void dumpListeningPorts() {
+			for (String file : new String[] { "/proc/net/tcp", "/proc/net/tcp6" }) {
+				java.io.File f = new java.io.File(file);
+				if (!f.exists()) continue;
+				try (BufferedReader r = new BufferedReader(new java.io.FileReader(f))) {
+					String l; boolean header = true;
+					while ((l = r.readLine()) != null) {
+						if (header) { header = false; continue; }
+						String[] c = l.trim().split("\\s+");
+						if (c.length < 4) continue;
+						if (!"0A".equalsIgnoreCase(c[3])) continue; /* 0A = LISTEN */
+						String local = c[1];
+						int colon = local.indexOf(':');
+						if (colon < 0) continue;
+						int port;
+						try { port = Integer.parseInt(local.substring(colon + 1), 16); }
+						catch (Throwable e) { continue; }
+						if (port == MihomoConfig.API_PORT || port == 7890)
+						  appendLog("listen: " + file + " " + local + " (port " + port + ")");
+					}
+				} catch (Throwable ignore) { }
+			}
+			appendLog("listen: 以上为 9090/7890 的实际 LISTEN 状态（无条目=该端口未监听）");
+			}
+
+			/* Quick TCP connect probe to host:API_PORT, used to tell an IPv4-only
 	   failure apart from "the API is up but on a different loopback". */
 	private boolean probeHost(String host) {
 		java.net.Socket s = null;
 		try {
 			s = new java.net.Socket();
+			protectLocalSocket(s);
 			s.connect(new java.net.InetSocketAddress(host, MihomoConfig.API_PORT), 800);
 			return true;
 		} catch (Throwable e) {
@@ -955,32 +1100,306 @@ public class TProxyService extends VpnService {
 	   valid controller address. Probing it as a fallback used to latch onto a
 	   host with no listener and report every test as failed; keep it 127.0.0.1. */
 	private boolean isControllerUp() {
-		if (probeVersion("127.0.0.1")) {
-			controllerHost = "127.0.0.1";
+		/* Primary signal: the in-process action bridge reaches the core without
+		   any HTTP listener, so the controller is "ready" the moment
+		   getConnections answers - regardless of whether mihomo ever bound
+		   external-controller on 9090 (on this build it does not). The HTTP probe
+		   below is only a best-effort fallback that resolves the exact bound host
+		   for external clients; if it never connects we no longer treat that as a
+		   failure, which removes the misleading "9090 NOT ready" dump. */
+		if (isCoreReachable()) {
+			controllerReady = true;
 			return true;
+		}
+		for (String h : new String[] { "127.0.0.1", deviceHost(), "::1" }) {
+			if (h == null) continue;
+			if (probeVersion(h)) {
+				controllerHost = h;
+				apiHost = h;
+				controllerReady = true;
+				appendLog("controller: " + h + ":" + MihomoConfig.API_PORT + " ready");
+				return true;
+			}
 		}
 		return false;
 	}
 
-	private boolean probeVersion(String host) {
-		HttpURLConnection c = null;
-		try {
-			c = (HttpURLConnection) new URL("http://" + host + ":"
-				+ MihomoConfig.API_PORT + "/version").openConnection(java.net.Proxy.NO_PROXY);
-			MihomoConfig.applyAuth(c, prefs);
-			c.setConnectTimeout(500);
-			c.setReadTimeout(500);
-			int code = c.getResponseCode();
-			/* 2xx = healthy; 401 = listener up but auth wrong, still reachable. */
-			return (code >= 200 && code < 300) || code == 401;
-		} catch (Throwable e) {
-			lastControllerError = e.getClass().getSimpleName()
-				+ (e.getMessage() == null ? "" : (": " + e.getMessage()));
-			return false;
-		} finally {
-			if (c != null)
-			  c.disconnect();
+	/* === Local control API over a VPN-bypassing socket =========================
+	   The VPN this service creates would capture the app's own sockets and they
+	   would never reach mihomo's loopback listeners (the "9090 never listens"
+	   symptom). protect() pulls each socket out of the VPN routing so the app
+	   can talk to its own core. Activities reuse localApi() via the static hook. */
+	private static TProxyService sInstance;
+	/* In-app clash-api HTTP server. This libmihomo build never binds the
+	   external-controller listener on 9090, so we serve the REST surface
+	   ourselves (translating to the in-process bridge) and host the dashboard
+	   at /ui. Lives for the lifetime of the tunnel. */
+	private ClashApiServer clashApiServer;
+	/* Host mihomo's clash-api actually bound to (127.0.0.1 / LAN IP / [::1]),
+	   resolved at startup by isControllerUp so every localApi call reaches it
+	   wherever the core decided to listen. */
+	private String apiHost = "127.0.0.1";
+	static String apiBaseHost() {
+		return sInstance != null ? sInstance.apiHost : "127.0.0.1";
+	}
+	static boolean protectLocalSocket(java.net.Socket s) {
+		return sInstance != null && sInstance.protect(s);
+	}
+	/* Clear all recorded recent requests from both the in-memory list and the
+	   persisted store. Called by the Recent Requests screen's "清空" action;
+	   without clearing memory the background flush would rewrite the list on
+	   its next tick. lastRecentFlush is reset so the subsequent flush is not
+	   skipped by the 2s throttle. */
+	public static void clearRecentRequests() {
+		if (sInstance == null)
+		  return;
+		synchronized (sInstance.recentRequests) {
+			sInstance.recentRequests.clear();
 		}
+		sInstance.lastRecentFlush = 0;
+		sInstance.flushRecentRequests(android.os.SystemClock.elapsedRealtime());
+	}
+	static final class ApiResult {
+		int code = -1;   /* -1 = transport failure (API unreachable) */
+		String body;
+		long rtt;
+		/* Exception detail when code == -1: distinguishes "nothing listening
+		   yet" (Connection refused during warmup) from "socket captured by the
+		   VPN / protect failed" (timeout). Used to word the error accurately. */
+		String error;
+	}
+	/* GET/PUT on host:port over a socket that BYPASSES the VPN. protect() is the
+	   documented way to keep the app's own socket out of the tunnel it created.
+	   Body reading is byte-based so multi-byte (Chinese) JSON isn't truncated by
+	   Content-Length. */
+	static ApiResult localApi(String method, String host, int port, String path,
+			String body, String secret) {
+		ApiResult r = new ApiResult();
+		long t0 = System.currentTimeMillis();
+		java.net.Socket s = null;
+		boolean prot = false;
+		try {
+			s = new java.net.Socket();
+			prot = protectLocalSocket(s);
+			s.connect(new java.net.InetSocketAddress(host, port), 6000);
+			s.setSoTimeout(6000);
+			java.io.InputStream is = s.getInputStream();
+			java.io.OutputStream os = s.getOutputStream();
+			byte[] bodyBytes = body == null ? new byte[0]
+				: body.getBytes(StandardCharsets.UTF_8);
+			StringBuilder head = new StringBuilder();
+			head.append(method).append(' ').append(path).append(" HTTP/1.1\r\n")
+				.append("Host: ").append(host).append(':').append(port).append("\r\n");
+			if (secret != null && !secret.isEmpty())
+			  head.append("Authorization: Bearer ").append(secret).append("\r\n");
+			head.append("Accept: */*\r\n").append("Connection: close\r\n");
+			if (body != null) {
+				head.append("Content-Type: application/json\r\n")
+					.append("Content-Length: ").append(bodyBytes.length).append("\r\n");
+			}
+			head.append("\r\n");
+			os.write(head.toString().getBytes(StandardCharsets.UTF_8));
+			if (body != null) os.write(bodyBytes);
+			os.flush();
+			String status = readLineBytes(is);
+			if (status == null) { r.rtt = System.currentTimeMillis() - t0; return r; }
+			try { r.code = Integer.parseInt(status.split(" ")[1]); } catch (Throwable ignore) {}
+			int contentLength = -1; boolean chunked = false; String line;
+			while ((line = readLineBytes(is)) != null && !line.isEmpty()) {
+				String ll = line.toLowerCase();
+				if (ll.startsWith("content-length:")) {
+					try { contentLength = Integer.parseInt(line.substring(15).trim()); } catch (Throwable ignore) {}
+				} else if (ll.startsWith("transfer-encoding:") && ll.contains("chunked"))
+				  chunked = true;
+			}
+			java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+			if (chunked) {
+				while (true) {
+					String sz = readLineBytes(is); if (sz == null) break;
+					int i = sz.indexOf(';'); if (i >= 0) sz = sz.substring(0, i);
+					int len; try { len = Integer.parseInt(sz.trim(), 16); } catch (Throwable e) { len = 0; }
+					if (len <= 0) break;
+					byte[] buf = new byte[len]; int got = 0;
+					while (got < len) { int n = is.read(buf, got, len - got); if (n < 0) break; got += n; }
+					bos.write(buf, 0, got);
+					readLineBytes(is); /* trailing CRLF after chunk */
+				}
+			} else if (contentLength >= 0) {
+				byte[] buf = new byte[2048]; int total = 0;
+				while (total < contentLength) {
+					int n = is.read(buf, 0, Math.min(buf.length, contentLength - total));
+					if (n < 0) break; bos.write(buf, 0, n); total += n;
+				}
+			} else {
+				byte[] buf = new byte[2048]; int n;
+				while ((n = is.read(buf)) != -1) bos.write(buf, 0, n);
+			}
+			r.body = new String(bos.toByteArray(), StandardCharsets.UTF_8);
+		} catch (Throwable e) {
+			r.code = -1;
+			r.error = (prot ? "" : "[protect未生效] ")
+				+ e.getClass().getSimpleName()
+				+ (e.getMessage() != null ? (": " + e.getMessage()) : "");
+		} finally {
+			if (s != null) try { s.close(); } catch (Throwable ignore) {}
+		}
+		r.rtt = System.currentTimeMillis() - t0;
+		return r;
+	}
+
+	/* === In-process control bridge ============================================
+	   libmihomo-android v0.3.3's quickSetup brings the mixed-port (7890) up but
+	   often never binds the external-controller (clash-api) HTTP listener on 9090
+	   ("9090 never listens") - even though the profile carries external-controller
+	   + secret. Every REST endpoint (/connections, /proxies, selector switching)
+	   then dies while the tunnel proxies fine. The SDK also exposes the SAME
+	   actions the REST endpoints use through Clash.INSTANCE.invokeAction (the
+	   "action" mechanism): {"id","method","data"} in, ActionResult
+	   {"id","method","data","code"} back. Those run IN-PROCESS and need no HTTP
+	   listener at all, so connections/proxies/traffic are reachable regardless of
+	   9090. We block on the async callback (it fires on a JNI thread, no deadlock). */
+	static String apiAction(String method, String data) {
+		if (!Clash.INSTANCE.isLoaded())
+		  return null;
+		final String[] out = { null };
+		final boolean[] done = { false };
+		try {
+			JSONObject j = new JSONObject();
+			j.put("id", "");
+			j.put("method", method);
+			try { j.put("data", data == null ? JSONObject.NULL : new JSONObject(data)); }
+			catch (Throwable e) { j.put("data", data == null ? JSONObject.NULL : data); }
+			Clash.INSTANCE.invokeAction(j.toString(), new InvokeInterface() {
+				@Override
+				public void onResult(String result) {
+					if (result != null) {
+						try {
+							JSONObject r = new JSONObject(result);
+							if (r.optInt("code", -1) == 0) {
+								Object d = r.opt("data");
+								out[0] = (d == null || d == JSONObject.NULL) ? "" : d.toString();
+							}
+						} catch (Throwable ignore) { }
+					}
+					synchronized (done) { done[0] = true; done.notifyAll(); }
+				}
+			});
+			synchronized (done) {
+				long end = System.currentTimeMillis() + 6000;
+				while (!done[0] && System.currentTimeMillis() < end)
+				  done.wait(end - System.currentTimeMillis());
+			}
+		} catch (Throwable e) {
+			return null;
+		}
+		return out[0];
+	}
+
+	/* Mirrors localApi()'s signature but routes through the in-process bridge.
+	   The action's `data` is byte-identical to the REST response body, so callers
+	   parse it exactly as before. Paths we cannot express as an action fall back
+	   to the HTTP listener, leaving behaviour unchanged when 9090 IS up. */
+	static ApiResult bridgeApi(String method, String host, int port, String path,
+			String body, String secret) {
+		ApiResult r = new ApiResult();
+		r.code = -1;
+		try {
+			if ("GET".equals(method) && "/connections".equals(path)) {
+				String d = apiAction("getConnections", null);
+				if (d != null) { r.code = 200; r.body = d; }
+				return r;
+			}
+			if ("DELETE".equals(method) && "/connections".equals(path)) {
+				String d = apiAction("closeAllConnections", null);
+				r.code = (d != null) ? 204 : -1;
+				if (d != null) r.body = d;
+				return r;
+			}
+			if ("GET".equals(method) && "/proxies".equals(path)) {
+				String d = apiAction("getProxies", null);
+				if (d != null) { r.code = 200; r.body = d; }
+				return r;
+			}
+			/* /proxies/{group}/delay is async in the core; keep the HTTP path
+			   (its caller already falls back to a real proxied request via the
+			   mixed-port when 9090 is down). */
+			if ("GET".equals(method) && path.startsWith("/proxies/")
+					&& path.indexOf("/delay") > 0)
+			  return localApi(method, host, port, path, body, secret);
+			if ("GET".equals(method) && path.startsWith("/proxies/")) {
+				String group = path.substring("/proxies/".length());
+				String d = apiAction("getProxies", null);
+				if (d != null) {
+					JSONObject all = new JSONObject(d).optJSONObject("proxies");
+					JSONObject g = all == null ? null : all.optJSONObject(group);
+					if (g != null) { r.code = 200; r.body = g.toString(); }
+				}
+				return r;
+			}
+			if ("PUT".equals(method) && path.startsWith("/proxies/")) {
+				String group = path.substring("/proxies/".length());
+				String proxy = "";
+				if (body != null) {
+					try { proxy = new JSONObject(body).optString("name", ""); } catch (Throwable ignore) {}
+				}
+				String d = apiAction("changeProxy",
+					"{\"group-name\":\"" + group.replace("\\", "\\\\").replace("\"", "\\\"")
+					+ "\",\"proxy-name\":\"" + proxy.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}");
+				r.code = (d != null) ? 204 : -1;
+				if (d != null) r.body = d;
+				return r;
+			}
+		} catch (Throwable e) {
+			r.code = -1;
+		}
+		return localApi(method, host, port, path, body, secret);
+	}
+
+	/* Core reachable via the in-process bridge (no 9090 needed). Used as the
+	   reachability gate so selector/speed-test logic proceeds even when the HTTP
+	   listener never bound. */
+	static boolean isCoreReachable() {
+		return apiAction("getConnections", null) != null;
+	}
+
+	private static String readLineBytes(java.io.InputStream is) throws java.io.IOException {
+		java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+		int b;
+		while ((b = is.read()) != -1) {
+			if (b == '\r') {
+				int c = is.read();
+				if (c == '\n') break;
+				bos.write('\r');
+				if (c != -1) bos.write(c);
+			} else if (b == '\n') {
+				break;
+			} else {
+				bos.write(b);
+			}
+		}
+		return new String(bos.toByteArray(), StandardCharsets.UTF_8);
+	}
+
+	private boolean probeVersion(String host) {
+		ApiResult r = localApi("GET", host, MihomoConfig.API_PORT,
+			"/version", null, prefs.getSecret());
+		if (r.code == -1) {
+			/* Word the error by its real cause instead of always blaming the
+			   VPN: a refused connect means the API simply has not bound yet
+			   (warmup), a timeout means the socket was likely captured (or
+			   protect failed), anything else is surfaced verbatim. */
+			String d = r.error == null ? "" : r.error;
+			if (d.contains("refused") || d.contains("ECONNREFUSED"))
+			  lastControllerError = "控制接口尚未监听（核心预热中，clash-api 还没 bind）";
+			else if (d.contains("timed out") || d.contains("SocketTimeout")
+					|| d.contains("timeout") || d.contains("保护"))
+			  lastControllerError = "连接控制接口超时（疑似 VPN 捕获回环 / protect 未生效）";
+			else
+			  lastControllerError = "transport error（" + d + "）";
+			return false;
+		}
+		/* 2xx = healthy; 401 = listener up but auth wrong, still reachable. */
+		return (r.code >= 200 && r.code < 300) || r.code == 401;
 	}
 
 	/* First non-loopback, non-TUN IPv4 of the device, kept as a fallback in case
@@ -1014,25 +1433,74 @@ public class TProxyService extends VpnService {
 		return "http://" + controllerHost + ":" + MihomoConfig.API_PORT;
 	}
 
-	/* Surface mihomo's own words about the clash-api when it never comes up:
-	   its bind failure is logged to stderr (captured in tproxy.log). */
-	private void dumpControllerLog() {
+	/* mihomo's startup/bind lines go to STDOUT (captured in tproxy.log by the
+	   dup2 redirect at startup), NOT to cache/mihomo.log (this build never
+	   creates it) and NOT through setEventListener (which stays silent about
+	   the API). So the clash-api bind failure - e.g. "Failed to start API:
+	   listen tcp 127.0.0.1:9090: bind: ..." - lives in tproxy.log as a raw
+	   line, not as a "mihomo:" event and not as a "corelog:"/"mihomolog:" line.
+	   Dump the tail verbatim AND surface every api/controller/bind line on its
+	   own "rawlog-api:" prefix so the reason is unmissable. */
+	private void dumpRawLog() {
+		File f = new File(getCacheDir(), "tproxy.log");
+		if (!f.exists()) return;
 		try {
-			File f = new File(getCacheDir(), "tproxy.log");
-			if (!f.exists()) return;
+			java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f));
+			java.util.List<String> all = new java.util.ArrayList<String>();
+			String line;
+			while ((line = r.readLine()) != null) all.add(line);
+			r.close();
+			int start = Math.max(0, all.size() - 60);
+			for (int i = start; i < all.size(); i++)
+			  appendLog("rawlog: " + all.get(i));
+			/* Re-scan the WHOLE file for the core's API/controller/bind chatter
+			   and print it under a distinct prefix, so a single decisive line
+			   ("Failed to start API", "listen tcp ... bind: ...", "RESTful API
+			   listening at ...") is not lost among 60 unrelated raw lines. */
+			java.util.Set<String> seen = new java.util.LinkedHashSet<String>();
+			for (String l : all) {
+				String low = l.toLowerCase();
+				if (low.contains("api") || low.contains("controller") || low.contains("bind")
+						|| low.contains("listen") || low.contains("external") || low.contains("clash")
+						|| low.contains("fail") || low.contains("error") || low.contains("panic")
+						|| low.contains("secret") || low.contains("9090")) {
+					String t = l.trim();
+					if (seen.add(t))
+					  appendLog("rawlog-api: " + t);
+				}
+			}
+			if (seen.isEmpty())
+			  appendLog("rawlog-api: 无 api/controller/bind 相关行（核心未打印原因，或日志已被截断）");
+		} catch (Throwable ignore) { }
+	}
+
+	private void dumpControllerLog() {
+		/* mihomo writes its startup/bind lines to the file named by log.file
+		   (cache/mihomo.log), not to tproxy.log - read that first so a silent
+		   controller bind failure actually shows up. */
+		boolean found = dumpLog(new File(getCacheDir(), "mihomo.log"));
+		if (!found)
+		  dumpLog(new File(getCacheDir(), "tproxy.log"));
+	}
+
+	private boolean dumpLog(File f) {
+		if (f == null || !f.exists()) return false;
+		int shown = 0;
+		try {
 			java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f));
 			String line;
-			int shown = 0;
-			while ((line = r.readLine()) != null && shown < 30) {
+			while ((line = r.readLine()) != null && shown < 40) {
 				String l = line.toLowerCase();
 				if (l.contains("controller") || l.contains("bind") || l.contains("listen")
-						|| l.contains("external") || l.contains("fail")) {
+						|| l.contains("external") || l.contains("fail") || l.contains("error")
+						|| l.contains("panic") || l.contains("api")) {
 					appendLog("corelog: " + line.trim());
 					shown++;
 				}
 			}
 			r.close();
 		} catch (Throwable ignore) { }
+		return shown > 0;
 	}
 
 	/* mihomo writes its own log (incl. clash-api start/bind lines and any panic)
@@ -1046,9 +1514,11 @@ public class TProxyService extends VpnService {
 		}
 		try {
 			java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f));
+			java.util.List<String> all = new java.util.ArrayList<String>();
 			String line;
 			int shown = 0;
 			while ((line = r.readLine()) != null) {
+				all.add(line);
 				String l = line.toLowerCase();
 				if (l.contains("controller") || l.contains("clash-api") || l.contains("bind")
 						|| l.contains("listen") || l.contains("external") || l.contains("api")
@@ -1059,8 +1529,16 @@ public class TProxyService extends VpnService {
 				}
 			}
 			r.close();
-			if (shown == 0)
-			  appendLog("mihomolog: 无 controller/api/bind 相关条目（核心可能未打印原因）");
+			/* Always surface the tail verbatim: the filtered view above can be
+			   empty even when the core logged a plain "Started API server" or a
+			   startup line, and that line is the missing clue for why 9090 did
+			   or didn't come up. */
+			int from = Math.max(0, all.size() - 30);
+			appendLog("mihomolog-tail: 末尾 " + (all.size() - from) + " 行（共 " + all.size() + " 行）");
+			for (int i = from; i < all.size(); i++)
+			  appendLog("mihomolog-tail: " + all.get(i).trim());
+			if (shown == 0 && all.isEmpty())
+			  appendLog("mihomolog: 文件为空（核心未写日志）");
 		} catch (Throwable e) {
 			appendLog("mihomolog: 读取失败：" + e);
 		}
@@ -1117,38 +1595,54 @@ public class TProxyService extends VpnService {
 		int last5xx = -1, lastRtt = -1;
 		for (String url : PROXY_TEST_URLS) {
 			lastTestUrl = url;
-			try {
-				long t0 = System.currentTimeMillis();
-				java.net.Proxy proxy = new java.net.Proxy(java.net.Proxy.Type.HTTP,
-					new java.net.InetSocketAddress(deviceHost(), port));
-				HttpURLConnection conn = (HttpURLConnection)
-					new URL(url).openConnection(proxy);
-				conn.setConnectTimeout(8000);
-				conn.setReadTimeout(8000);
-				conn.setInstanceFollowRedirects(false);
-				int code = conn.getResponseCode();
-				drainConn(conn, code);
-				int rtt = (int) (System.currentTimeMillis() - t0);
-				if (code >= 200 && code < 400)
-				  return new int[] { code, rtt };
-				last5xx = code; lastRtt = rtt;
-			} catch (Throwable e) {
-				String msg = e.getMessage() == null ? "" : e.getMessage();
-				lastTestError = e.getClass().getSimpleName() + ": " + msg;
-				boolean transport = (e instanceof java.net.ConnectException)
-					|| (e instanceof java.net.SocketTimeoutException)
-					|| msg.toLowerCase().contains("refused")
-					|| msg.toLowerCase().contains("timed out")
-					|| msg.toLowerCase().contains("econnrefused");
-				/* 连接级失败 = 代理本身不可达，所有 URL 都会同样失败，直接判死。 */
-				if (transport)
-				  return new int[] { -1, -1 };
-				/* 其它错误（如 unknown host）换下一个 URL 试试。 */
+			ApiResult r = proxyFetch(port, url);
+			if (r.code == -1) {
+				lastTestError = "transport（代理不可达）";
+				return new int[] { -1, -1 };
 			}
+			if (r.code >= 200 && r.code < 400)
+			  return new int[] { r.code, (int) r.rtt };
+			last5xx = r.code; lastRtt = (int) r.rtt;
 		}
 		if (last5xx > 0)
 		  return new int[] { last5xx, lastRtt };
 		return new int[] { -1, -1 };
+	}
+
+	/* Send an absolute-form GET to the local mixed-port acting as an HTTP proxy,
+	   over a socket that bypasses the VPN (otherwise the app's own socket is
+	   captured by the tunnel). Returns the proxy's response code and rtt. */
+	static ApiResult proxyFetch(int port, String url) {
+		ApiResult r = new ApiResult();
+		long t0 = System.currentTimeMillis();
+		java.net.Socket s = null;
+		try {
+			java.net.URL u = new java.net.URL(url);
+			s = new java.net.Socket();
+			protectLocalSocket(s);
+			s.connect(new java.net.InetSocketAddress("127.0.0.1", port), 8000);
+			s.setSoTimeout(8000);
+			java.io.OutputStream os = s.getOutputStream();
+			StringBuilder req = new StringBuilder();
+			req.append("GET ").append(url).append(" HTTP/1.1\r\n")
+				.append("Host: ").append(u.getHost()).append("\r\n")
+				.append("Connection: close\r\n\r\n");
+			os.write(req.toString().getBytes(StandardCharsets.UTF_8));
+			os.flush();
+			java.io.InputStream is = s.getInputStream();
+			String status = readLineBytes(is);
+			if (status != null) {
+				try { r.code = Integer.parseInt(status.split(" ")[1]); } catch (Throwable ignore) {}
+			}
+			byte[] buf = new byte[2048];
+			while (is.read(buf) != -1) ; /* drain body */
+		} catch (Throwable e) {
+			r.code = -1;
+		} finally {
+			if (s != null) try { s.close(); } catch (Throwable ignore) {}
+		}
+		r.rtt = System.currentTimeMillis() - t0;
+		return r;
 	}
 
 	/* 读空响应体，避免连接挂起/复用异常。 */
@@ -1161,29 +1655,9 @@ public class TProxyService extends VpnService {
 	/* Like httpGet but returns the body even on a non-2xx status, so a failed
 	   proxy-delay test still surfaces the reason (e.g. the node's connect error)
 	   instead of being swallowed as "no response". */
-	private String httpGetAny(String url) {
-		HttpURLConnection conn = null;
-		try {
-			conn = (HttpURLConnection) new URL(url).openConnection(java.net.Proxy.NO_PROXY);
-			MihomoConfig.applyAuth(conn, prefs);
-			conn.setConnectTimeout(6000);
-			conn.setReadTimeout(6000);
-			java.io.InputStream is = conn.getResponseCode() < 400
-				? conn.getInputStream() : conn.getErrorStream();
-			StringBuilder sb = new StringBuilder();
-			try (BufferedReader r = new BufferedReader(
-					new InputStreamReader(is, StandardCharsets.UTF_8))) {
-				String line;
-				while ((line = r.readLine()) != null)
-				  sb.append(line);
-			}
-			return sb.toString();
-		} catch (Exception e) {
-			return null;
-		} finally {
-			if (conn != null)
-			  conn.disconnect();
-		}
+	private String httpGetAny(String path) {
+		ApiResult r = bridgeApi("GET", apiHost, MihomoConfig.API_PORT, path, null, prefs.getSecret());
+		return (r.code == -1) ? null : r.body;
 	}
 
 	/* Resolve `wanted` to a real member name of `group`, tolerating the
@@ -1191,21 +1665,13 @@ public class TProxyService extends VpnService {
 	   subscriptions shipped the same node label. Returns null when the group
 	   cannot be read. */
 	private String resolveMember(String group, String wanted) throws IOException {
-		String url = apiBase()
-			+ "/proxies/" + encodePath(group);
-		HttpURLConnection get = (HttpURLConnection) new URL(url).openConnection(java.net.Proxy.NO_PROXY);
-		MihomoConfig.applyAuth(get, prefs);
-		get.setRequestMethod("GET");
-		get.setConnectTimeout(2000);
-		get.setReadTimeout(2000);
-		String body = readBody(get);
-		get.disconnect();
-		if (body == null)
-		  return null;
+		ApiResult r = bridgeApi("GET", apiHost, MihomoConfig.API_PORT,
+			"/proxies/" + encodePath(group), null, prefs.getSecret());
+		if (r.code == -1 || r.body == null) return null;
 		String base = wanted.replaceAll(" \\(\\d+\\)$", "");
 		String fallback = null;
 		try {
-			JSONObject o = new JSONObject(body);
+			JSONObject o = new JSONObject(r.body);
 			JSONArray all = o.optJSONArray("all");
 			if (all != null) {
 				for (int i = 0; i < all.length(); i++) {
@@ -1224,20 +1690,10 @@ public class TProxyService extends VpnService {
 
 	/* PUT /proxies/{group} {"name": proxy} to move the selector. */
 	private int putSelector(String group, String proxy) throws IOException {
-		String url = apiBase()
-			+ "/proxies/" + encodePath(group);
-		HttpURLConnection put = (HttpURLConnection) new URL(url).openConnection(java.net.Proxy.NO_PROXY);
-		MihomoConfig.applyAuth(put, prefs);
-		put.setRequestMethod("PUT");
-		put.setConnectTimeout(2000);
-		put.setReadTimeout(2000);
-		put.setDoOutput(true);
-		put.setRequestProperty("Content-Type", "application/json");
-		String payload = "{\"name\":\"" + escapeJson(proxy) + "\"}";
-		put.getOutputStream().write(payload.getBytes(StandardCharsets.UTF_8));
-		int code = put.getResponseCode();
-		put.disconnect();
-		return code;
+		ApiResult r = bridgeApi("PUT", apiHost, MihomoConfig.API_PORT,
+			"/proxies/" + encodePath(group),
+			"{\"name\":\"" + escapeJson(proxy) + "\"}", prefs.getSecret());
+		return (r.code == -1) ? -1 : r.code;
 	}
 
 	private static String encodePath(String s) {
@@ -1288,6 +1744,9 @@ public class TProxyService extends VpnService {
 		QSTileService.requestUpdate(this);
 
 		stopForeground(true);
+
+		/* Drop the in-app clash-api HTTP server before the core goes away. */
+		stopEmbeddedApi();
 
 		/* Tear the tunnel down before releasing the fd. */
 		try {
@@ -1385,8 +1844,10 @@ public class TProxyService extends VpnService {
 		baseTx = prefs.getTotalTx();
 		baseRx = prefs.getTotalRx();
 		sessionTx = sessionRx = 0;
+		sessionBaseTx = sessionBaseRx = 0;
 		lastTx = lastRx = 0;
 		txRate = rxRate = 0;
+		trafficPrimed = false;
 		totalTx = baseTx;
 		totalRx = baseRx;
 		lastTime = SystemClock.elapsedRealtime();
@@ -1398,6 +1859,7 @@ public class TProxyService extends VpnService {
 		proxySessionTx = proxySessionRx = 0;
 		lastProxyTx = lastProxyRx = 0;
 		proxyRateTx = proxyRateRx = 0;
+		proxyPrimed = false;
 		lastProxyTime = SystemClock.elapsedRealtime();
 		connSeen.clear();
 		loadRecentRequests();
@@ -1466,17 +1928,33 @@ public class TProxyService extends VpnService {
 		logTraffic(raw, tx, rx, error);
 
 		if (tx >= 0 && rx >= 0) {
-			if (dt > 0) {
-				txRate = Math.max((tx - lastTx) * 1000 / dt, 0);
-				rxRate = Math.max((rx - lastRx) * 1000 / dt, 0);
+			if (!trafficPrimed) {
+				/* First valid sample: establish baselines so the very first
+				   rate is not "the whole core cumulative in one tick" (which
+				   shows a bogus 9G/s spike) and the session total is not the
+				   whole core cumulative. */
+				lastTx = tx; lastRx = rx;
+				sessionBaseTx = tx; sessionBaseRx = rx;
+				trafficPrimed = true;
+				sessionTx = 0; sessionRx = 0;
+			} else if (rx < lastRx || tx < lastTx) {
+				/* Core counter reset (config reload / core restart): re-baseline
+				   instead of emitting a negative-delta spike. */
+				lastTx = tx; lastRx = rx;
+				sessionBaseTx = tx; sessionBaseRx = rx;
+				sessionTx = 0; sessionRx = 0;
+			} else {
+				if (dt > 0) {
+					txRate = Math.max((tx - lastTx) * 1000 / dt, 0);
+					rxRate = Math.max((rx - lastRx) * 1000 / dt, 0);
+				}
+				lastTx = tx; lastRx = rx;
+				sessionTx = Math.max(tx - sessionBaseTx, 0);
+				sessionRx = Math.max(rx - sessionBaseRx, 0);
 			}
-			sessionTx = tx;
-			sessionRx = rx;
-			lastTx = tx;
-			lastRx = rx;
+			totalTx = baseTx + sessionTx;
+			totalRx = baseRx + sessionRx;
 		}
-		totalTx = baseTx + sessionTx;
-		totalRx = baseRx + sessionRx;
 
 		if (updateNotify)
 		  updateNotification();
@@ -1522,17 +2000,22 @@ public class TProxyService extends VpnService {
 	   node. Only the deltas are counted, so a connection that stays open keeps
 	   contributing as it transfers. */
 	private void accumulateProxy() {
-		String body = httpGet(apiBase() + "/connections");
+		/* Read the connection snapshot through the in-process bridge (apiAction
+		   "getConnections" == statistic.DefaultManager.Snapshot()) - it needs no
+		   HTTP listener, so proxy-only traffic/conns stay accurate even when the
+		   clash-api (9090) never binds. The snapshot JSON is the same shape as the
+		   REST /connections body, so everything below parses unchanged. */
+		String body = apiAction("getConnections", null);
 		if (body == null) {
-			/* A silent zero is impossible to diagnose, so say once that the
-			   control API is unreachable (and again when it recovers). */
+			/* Core still warming up, or bridge error. Count quietly and say once;
+			   total traffic (getTotalTraffic) is unaffected. */
 			connFailStreak++;
 			if (connFailStreak == 5)
-			  appendLog("流量统计：无法读取 /connections（控制接口 127.0.0.1:"
-				+ MihomoConfig.API_PORT + " 未就绪，" + lastControllerError
-				+ "），仅“代理专属流量/连接数”归零；总流量取自 getTotalTraffic，不受影响");
+			  appendLog("流量统计：无法读取连接快照（in-process 桥 getConnections 不可用，"
+				+ lastControllerError + "），仅“代理专属流量/连接数”归零；总流量取自 getTotalTraffic，不受影响");
 			return;
 		}
+		controllerReady = true;
 		if (connFailStreak >= 5)
 		  appendLog("流量统计：/connections 已恢复");
 		connFailStreak = 0;
@@ -1617,12 +2100,17 @@ public class TProxyService extends VpnService {
 			long now = SystemClock.elapsedRealtime();
 			long dt = now - lastProxyTime;
 			lastProxyTime = now;
-			if (dt > 0) {
+			if (!proxyPrimed) {
+				/* First valid sample primes baselines; no bogus rate spike. */
+				proxyPrimed = true;
+				lastProxyTx = proxySessionTx;
+				lastProxyRx = proxySessionRx;
+			} else if (dt > 0) {
 				proxyRateTx = Math.max((proxySessionTx - lastProxyTx) * 1000 / dt, 0);
 				proxyRateRx = Math.max((proxySessionRx - lastProxyRx) * 1000 / dt, 0);
+				lastProxyTx = proxySessionTx;
+				lastProxyRx = proxySessionRx;
 			}
-			lastProxyTx = proxySessionTx;
-			lastProxyRx = proxySessionRx;
 		} catch (Exception e) {
 		}
 	}
@@ -1755,29 +2243,9 @@ public class TProxyService extends VpnService {
 		return false;
 	}
 
-	private String httpGet(String url) {
-		HttpURLConnection conn = null;
-		try {
-			conn = (HttpURLConnection) new URL(url).openConnection(java.net.Proxy.NO_PROXY);
-			MihomoConfig.applyAuth(conn, prefs);
-			conn.setConnectTimeout(2000);
-			conn.setReadTimeout(2000);
-			if (conn.getResponseCode() != HttpURLConnection.HTTP_OK)
-			  return null;
-			StringBuilder sb = new StringBuilder();
-			try (BufferedReader reader = new BufferedReader(
-					new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-				String line;
-				while ((line = reader.readLine()) != null)
-				  sb.append(line);
-			}
-			return sb.toString();
-		} catch (Exception e) {
-			return null;
-		} finally {
-			if (conn != null)
-			  conn.disconnect();
-		}
+	private String httpGet(String path) {
+		ApiResult r = bridgeApi("GET", apiHost, MihomoConfig.API_PORT, path, null, prefs.getSecret());
+		return (r.code >= 200 && r.code < 300) ? r.body : null;
 	}
 
 	private void saveProxyStats() {

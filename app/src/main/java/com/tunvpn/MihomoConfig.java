@@ -42,16 +42,16 @@ public class MihomoConfig {
 	public static String countryGroup(String cc) {
 		return GROUP + "-" + cc;
 	}
-	/* mihomo's RESTful API. Bound to 127.0.0.1 (loopback only) - which is what
-	   the project's own docs and mihomo expect, and keeps the API off the LAN
-	   (it can leak every connection's domain/process/subscription). We DO set a
-	   `secret`, so the loopback API is authenticated. A device that cannot bind
-	   0.0.0.0 (some Android VPN/network stacks reject it) would otherwise fail to
-	   bring the control API up at all. Not final: at startup we scan 9090..9100
-	   and switch to the first free loopback port, because a port already held by
-	   another process makes mihomo silently fail to bind the control API
-	   (symptom: tunnel up but /connections is connection-refused and every
-	   counter stays 0). */
+	/* mihomo's RESTful API. Bound to 0.0.0.0 (all interfaces) rather than
+	   127.0.0.1: on several Android builds the VPN app's own loopback traffic
+	   is captured by its own gvisor TUN and re-emerges on the device's LAN IP,
+	   so a 127.0.0.1-only listener is unreachable from the app (the symptom
+	   was "9090 never listens" while mixed-port, bound to "*", worked). We DO
+	   set a `secret`, so the now-LAN-exposed API is authenticated. At startup
+	   we scan 9090..9100 and switch to the first free port, because a port
+	   already held by another process makes mihomo silently fail to bind the
+	   control API (symptom: tunnel up but /connections is connection-refused
+	   and every counter stays 0). */
 	public static int API_PORT = 9090;
 
 	/* Find a free loopback port for the clash-api and store it in API_PORT.
@@ -141,6 +141,13 @@ public class MihomoConfig {
 		/* API used to tell proxied traffic apart from direct traffic (the point
 		   of the home screen's counters). Bound to 127.0.0.1 (loopback) and
 		   authenticated via `secret` - see the note on API_PORT above. */
+		/* Bind the clash-api to the loopback (127.0.0.1). The app reaches it via
+		   a protect()'d socket (localApi), and a 127.0.0.1:7890 probe already
+		   proved loopback is reachable from the app - so the controller is too.
+		   This also matches isPortFree(), which probes 127.0.0.1 to decide the
+		   port. A 0.0.0.0 controller bind silently failed to listen on this
+		   device (mixed-port, also 0.0.0.0, came up fine), which is exactly the
+		   "9090 never listens" symptom. Authentication stays on via `secret`. */
 		if (!sectionExists(cfg, "external-controller:"))
 			cfg.append("external-controller: 127.0.0.1:").append(API_PORT).append('\n');
 		/* clash-api bearer token: every control request must carry

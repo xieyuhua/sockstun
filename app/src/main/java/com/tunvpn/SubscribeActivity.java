@@ -668,16 +668,23 @@ public class SubscribeActivity extends BaseActivity {
 		Long failed = null;
 		for (String target : targets) {
 			try {
-				String u = base + "/proxies/" + encodePath(name)
+				String path = "/proxies/" + encodePath(name)
 					+ "/delay?timeout=" + timeoutMs + "&url=" + URLEncoder.encode(target, "UTF-8");
-				HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection(java.net.Proxy.NO_PROXY);
-				MihomoConfig.applyAuth(c, prefs);
-				c.setConnectTimeout(5000);
-				c.setReadTimeout(timeoutMs + 3000);
-				int code = c.getResponseCode();
-				if (code == 200) {
-					String body = readApiBody(c);
-					JSONObject o = new JSONObject(body);
+				/* Reach the loopback control API through a VPN-bypassing socket;
+				   the app's own sockets would otherwise be captured by the tunnel.
+				   NOTE: on this build mihomo never binds the external-controller
+				   HTTP listener (9090), so the /delay HTTP call returns -1
+				   (unreachable). We must NOT bail out here - we mark the target
+				   failed and fall through to the proxied (mixed-port) fallback
+				   below, which does not need 9090 at all. */
+				TProxyService.ApiResult r = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
+					MihomoConfig.API_PORT, path, null, prefs.getSecret());
+				if (r.code == -1) {
+					failed = -2L;          /* 9090 unreachable; try next / fallback */
+					continue;
+				}
+				if (r.code == 200) {
+					JSONObject o = new JSONObject(r.body);
 					if (o.has("delay"))
 					  return o.getLong("delay");
 					return 0L;
@@ -686,16 +693,17 @@ public class SubscribeActivity extends BaseActivity {
 				   target; remember it but try the next target before giving up. */
 				failed = -2L;
 			} catch (Exception e) {
-				/* Controller became unreachable mid-run: cannot verify. */
-				return null;
+				/* /delay could not be run for this target; let the proxied
+				   fallback have a chance instead of bailing to "unknown". */
+				failed = -2L;
 			}
 		}
-		/* /delay reported the node unusable for every target. As a fallback,
-		   actually select the node and push a real HTTP request THROUGH the
-		   proxy (mihomo's mixed-port), which proves the node can tunnel traffic
-		   rather than trusting /delay alone. The previous selection is restored
+		/* /delay could not verify the node (9090 not bound, or the node failed
+		   every target). Fall back to actually selecting the node and driving a
+		   real HTTP request THROUGH the proxy (mihomo's mixed-port 7890), which
+		   proves the node can tunnel traffic. The previous selection is restored
 		   so the user's active route is left untouched. */
-		if (failed != null && failed == -2L) {
+		if (failed != null) {
 			Long proxied = proxiedDelayMs(n, targets);
 			if (proxied != null)
 			  return proxied;
@@ -735,16 +743,12 @@ public class SubscribeActivity extends BaseActivity {
 			/* Capture the currently-selected node so we can restore it later. */
 			String prev = null;
 			try {
-				HttpURLConnection g = (HttpURLConnection) new URL(base + "/proxies/" + group)
-					.openConnection(java.net.Proxy.NO_PROXY);
-				MihomoConfig.applyAuth(g, prefs);
-				g.setConnectTimeout(1500);
-				g.setReadTimeout(3000);
-				if (g.getResponseCode() == 200) {
-					JSONObject o = new JSONObject(readApiBody(g));
+				TProxyService.ApiResult gr = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
+					MihomoConfig.API_PORT, "/proxies/" + group, null, prefs.getSecret());
+				if (gr.code == 200 && gr.body != null) {
+					JSONObject o = new JSONObject(gr.body);
 					prev = o.optString("now", null);
 				}
-				g.disconnect();
 			} catch (Exception ignore) {
 			}
 
@@ -757,17 +761,10 @@ public class SubscribeActivity extends BaseActivity {
 			   node before we measure, instead of a blind fixed sleep. */
 			for (int i = 0; i < 20; i++) {
 				try {
-					HttpURLConnection g = (HttpURLConnection) new URL(base + "/proxies/" + group)
-						.openConnection(java.net.Proxy.NO_PROXY);
-					MihomoConfig.applyAuth(g, prefs);
-					g.setConnectTimeout(500);
-					g.setReadTimeout(500);
-					boolean ok = false;
-					if (g.getResponseCode() == 200) {
-						JSONObject o = new JSONObject(readApiBody(g));
-						ok = name.equals(o.optString("now", null));
-					}
-					g.disconnect();
+					TProxyService.ApiResult gr = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
+						MihomoConfig.API_PORT, "/proxies/" + group, null, prefs.getSecret());
+					boolean ok = gr.code == 200 && gr.body != null
+						&& name.equals(new JSONObject(gr.body).optString("now", null));
 					if (ok) break;
 				} catch (Exception ignore) {
 				}
@@ -777,22 +774,14 @@ public class SubscribeActivity extends BaseActivity {
 				}
 			}
 
-			Proxy proxy = new Proxy(Proxy.Type.HTTP,
-				new InetSocketAddress("127.0.0.1", proxyPort));
-			int timeoutMs = prefs.getProxyTestTimeout() * 1000;
 			Long result = null;
 			for (String target : fbTargets) {
 				try {
-					long start = System.currentTimeMillis();
-					HttpURLConnection c = (HttpURLConnection) new URL(target).openConnection(proxy);
-					c.setConnectTimeout(timeoutMs);
-					c.setReadTimeout(timeoutMs);
-					c.setInstanceFollowRedirects(false);
-					int code = c.getResponseCode();
-					long ms = System.currentTimeMillis() - start;
-					c.disconnect();
-					if (code >= 100) {
-						result = ms;
+					/* Reuse the VPN-bypassing proxy fetch so the app's own socket
+					   is not captured by the tunnel it runs. */
+					TProxyService.ApiResult pr = TProxyService.proxyFetch(proxyPort, target);
+					if (pr.code >= 100) {
+						result = pr.rtt;
 						break;
 					}
 				} catch (Exception ignore) {
@@ -810,25 +799,11 @@ public class SubscribeActivity extends BaseActivity {
 	   a 2xx response. Kept on the loopback control API (Proxy.NO_PROXY), like
 	   every other control call. */
 	private boolean putSelector(String group, String proxy) {
-		try {
-			HttpURLConnection put = (HttpURLConnection) new URL(
-				"http://" + resolveApiHost() + ":" + MihomoConfig.API_PORT
-				+ "/proxies/" + group).openConnection(java.net.Proxy.NO_PROXY);
-			MihomoConfig.applyAuth(put, prefs);
-			put.setRequestMethod("PUT");
-			put.setDoOutput(true);
-			put.setRequestProperty("Content-Type", "application/json");
-			put.setConnectTimeout(1500);
-			put.setReadTimeout(3000);
-			String body = "{\"name\":\""
-				+ proxy.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}";
-			put.getOutputStream().write(body.getBytes("UTF-8"));
-			int code = put.getResponseCode();
-			put.disconnect();
-			return code >= 200 && code < 300;
-		} catch (Exception e) {
-			return false;
-		}
+		TProxyService.ApiResult r = TProxyService.bridgeApi("PUT", TProxyService.apiBaseHost(),
+			MihomoConfig.API_PORT, "/proxies/" + group,
+			"{\"name\":\"" + proxy.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}",
+			prefs.getSecret());
+		return r.code >= 200 && r.code < 300;
 	}
 
 	/* Lazily fetch the running config's proxy list and index it by
@@ -844,16 +819,12 @@ public class SubscribeActivity extends BaseActivity {
 		if (host == null)
 		  return false;
 		try {
-			String base = "http://" + host + ":" + MihomoConfig.API_PORT;
-			HttpURLConnection c = (HttpURLConnection) new URL(base + "/proxies").openConnection(java.net.Proxy.NO_PROXY);
-			MihomoConfig.applyAuth(c, prefs);
-			c.setConnectTimeout(1500);
-			c.setReadTimeout(3000);
-			if (c.getResponseCode() != 200) {
-				c.disconnect();
+			TProxyService.ApiResult r = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
+				MihomoConfig.API_PORT, "/proxies", null, prefs.getSecret());
+			if (r.code != 200 || r.body == null) {
 				return false;
 			}
-			String body = readApiBody(c);
+			String body = r.body;
 			JSONObject o = new JSONObject(body);
 			JSONObject proxies = o.optJSONObject("proxies");
 			if (proxies == null)
@@ -904,24 +875,18 @@ public class SubscribeActivity extends BaseActivity {
 	}
 
 	private boolean probeApi(String host) {
-		HttpURLConnection c = null;
-		try {
-			c = (HttpURLConnection) new URL("http://" + host + ":"
-				+ MihomoConfig.API_PORT + "/version").openConnection(java.net.Proxy.NO_PROXY);
-			MihomoConfig.applyAuth(c, prefs);
-			c.setConnectTimeout(800);
-			c.setReadTimeout(800);
-			int code = c.getResponseCode();
-			/* 2xx = healthy. 401 = the listener is up but auth is wrong: still
-			   "reachable", so latch onto this host and let the real call surface
-			   the 401 instead of falling back to a dead address. */
-			return (code >= 200 && code < 300) || code == 401;
-		} catch (Exception e) {
-			return false;
-		} finally {
-			if (c != null)
-			  try { c.disconnect(); } catch (Exception ignore) { }
-		}
+	/* Reachability is decided by the in-process bridge first, so selector and
+	   speed-test logic proceed even when the clash-api HTTP listener (9090)
+	   never binds. Fall back to the HTTP /version probe only when the bridge
+	   is unavailable (e.g. core not loaded yet). */
+	if (TProxyService.isCoreReachable())
+	  return true;
+	TProxyService.ApiResult r = TProxyService.bridgeApi("GET", host,
+		MihomoConfig.API_PORT, "/version", null, prefs.getSecret());
+	/* 2xx = healthy. 401 = the listener is up but auth is wrong: still
+	   "reachable", so latch onto this host and let the real call surface
+	   the 401 instead of falling back to a dead address. */
+	return (r.code >= 200 && r.code < 300) || r.code == 401;
 	}
 
 	/* First non-loopback, non-TUN IPv4 of the device, kept as a fallback in case

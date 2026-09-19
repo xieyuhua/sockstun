@@ -46,6 +46,13 @@
 			android:drawablePadding="6dp"
 			android:textAppearance="?attr/textAppearanceBodyMedium"
 			android:textColor="?attr/colorOnSurface"/>
+		<com.google.android.material.button.MaterialButton
+			android:id="@+id/req_clear"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:layout_marginStart="8dp"
+			android:text="@string/recent_requests_clear"
+			style="?attr/materialButtonOutlinedStyle"/>
 	</LinearLayout>
 	<FrameLayout
 		android:layout_width="match_parent"

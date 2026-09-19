@@ -220,10 +220,16 @@ public class ConnectionsActivity extends BaseActivity {
 	   running), as opposed to an empty list. */
 	private List<Row> fetch() {
 		lastError = "";
-		String body = httpGet("http://127.0.0.1:" + MihomoConfig.API_PORT + "/connections");
+		/* Read through the in-process action bridge (apiAction "getConnections"),
+		   exactly like TProxyService.accumulateProxy does - no HTTP listener
+		   (9090) needed. If the bridge returns nothing the core is still warming
+		   up or the tunnel is not running. */
+		String body = TProxyService.apiAction("getConnections", null);
+		android.util.Log.d("ConnectionsActivity", "fetch bridge body="
+			+ (body == null ? "null" : ("len=" + body.length())));
 		if (body == null) {
 			if (lastError.isEmpty())
-			  lastError = "无响应（核心可能未运行 / 端口未监听）";
+			  lastError = "in-process 桥未返回（核心可能未就绪 / 未运行）";
 			return null;
 		}
 		List<Row> out = new ArrayList<Row>();
@@ -328,50 +334,10 @@ public class ConnectionsActivity extends BaseActivity {
 			.show();
 	}
 
-	private String httpGet(String url) {
-		lastError = "";
-		HttpURLConnection conn = null;
-		try {
-			conn = (HttpURLConnection) new URL(url).openConnection(java.net.Proxy.NO_PROXY);
-			MihomoConfig.applyAuth(conn, prefs);
-			conn.setConnectTimeout(2000);
-			conn.setReadTimeout(2000);
-			int code = conn.getResponseCode();
-			if (code != HttpURLConnection.HTTP_OK) {
-				lastError = "HTTP " + code;
-				return null;
-			}
-			StringBuilder sb = new StringBuilder();
-			try (BufferedReader reader = new BufferedReader(
-					new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-				String line;
-				while ((line = reader.readLine()) != null)
-				  sb.append(line);
-			}
-			return sb.toString();
-		} catch (Exception e) {
-			lastError = e.getClass().getSimpleName() + ": " + e.getMessage();
-			return null;
-		} finally {
-			if (conn != null)
-			  conn.disconnect();
-		}
-	}
-
 	private void httpDelete(String url) {
-		HttpURLConnection conn = null;
-		try {
-			conn = (HttpURLConnection) new URL(url).openConnection(java.net.Proxy.NO_PROXY);
-			MihomoConfig.applyAuth(conn, prefs);
-			conn.setRequestMethod("DELETE");
-			conn.setConnectTimeout(2000);
-			conn.setReadTimeout(2000);
-			conn.getResponseCode();
-		} catch (Exception ignored) {
-		} finally {
-			if (conn != null)
-			  conn.disconnect();
-		}
+		String path = url.indexOf('/', 7) >= 0 ? url.substring(url.indexOf('/', 7)) : "/";
+		TProxyService.bridgeApi("DELETE", TProxyService.apiBaseHost(),
+			MihomoConfig.API_PORT, path, null, prefs.getSecret());
 	}
 
 	private class RowAdapter extends BaseAdapter {

@@ -235,6 +235,8 @@
 	<string name="server_manual_hint">未配置订阅时，这里填写的节点会作为手动上游生效（支持 SOCKS5 / Hysteria2 / VMess / VLESS / Trojan / SS 等）；已配置订阅时以订阅为准。</string>
 	<string name="server_use_as_upstream">使用此 SOCKS5 作为上游（忽略订阅）</string>
 	<string name="settings">设置</string>
+	<string name="console">控制台</string>
+	<string name="console_open_failed">无法打开控制台：请先开启隧道（内嵌 clash-api 仅运行时可用）</string>
 	<string name="subs_config">订阅配置</string>
 	<string name="subs_add">新增订阅</string>
 	<string name="subs_edit">编辑订阅</string>
@@ -278,6 +280,17 @@
 	<string name="recent_requests_search_hint">搜索目标 / 规则 / 节点 / 应用</string>
 	<string name="recent_requests_no_match">无匹配请求</string>
 	<string name="recent_requests_unavailable">无法读取请求记录</string>
+	<string name="recent_requests_clear">清空</string>
+	<string name="recent_requests_clear_confirm">确定清空全部最近请求记录吗？此操作不可撤销。</string>
+	<string name="recent_requests_cleared">已清空最近请求</string>
+	<string name="request_detail_title">请求详情</string>
+	<string name="request_detail_target">目标地址</string>
+	<string name="request_detail_rule">匹配规则</string>
+	<string name="request_detail_chain">节点链</string>
+	<string name="request_detail_process">来源应用</string>
+	<string name="request_detail_upload">上行流量</string>
+	<string name="request_detail_download">下行流量</string>
+	<string name="request_detail_duration">持续时间</string>
 	<string name="connections_empty">当前没有活跃连接</string>
 	<string name="connections_summary">共 %1$d 条 · 上行 %2$s · 下行 %3$s</string>
 	<string name="connections_unavailable">无法读取连接信息（隧道可能未运行）</string>

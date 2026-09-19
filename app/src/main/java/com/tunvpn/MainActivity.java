@@ -15,6 +15,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.content.res.ColorStateList;
 import android.graphics.PorterDuff;
 import android.view.View;
@@ -89,6 +90,10 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 				  intent = new Intent(MainActivity.this, RulesHubActivity.class);
 				else if (id == R.id.nav_settings)
 				  intent = new Intent(MainActivity.this, SettingsActivity.class);
+				else if (id == R.id.nav_console) {
+					openConsole();
+					return true;
+				}
 				if (intent != null) {
 					startActivity(intent);
 					/* Those entries open their own screen, so keep "home"
@@ -166,6 +171,26 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		if ((result == RESULT_OK) && prefs.getEnable()) {
 			Intent intent = new Intent(this, TProxyService.class);
 			startService(intent.setAction(TProxyService.ACTION_CONNECT));
+		}
+	}
+
+	/* Open the in-app clash-api dashboard in the system browser. The embedded
+	   server (ClashApiServer) only lives while the tunnel is up, so bail out
+	   with a hint when it is not running. 127.0.0.1 reaches the server because
+	   it binds 0.0.0.0:API_PORT. */
+	private void openConsole() {
+		if (!prefs.getEnable() || TProxyService.apiBaseHost() == null) {
+			Toast.makeText(this, R.string.console_open_failed, Toast.LENGTH_LONG).show();
+			return;
+		}
+		int port = MihomoConfig.API_PORT;
+		Intent i = new Intent(Intent.ACTION_VIEW,
+			Uri.parse("http://127.0.0.1:" + port + "/ui"));
+		i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+		try {
+			startActivity(i);
+		} catch (Throwable e) {
+			Toast.makeText(this, "无法启动浏览器：" + e.getMessage(), Toast.LENGTH_SHORT).show();
 		}
 	}
 
