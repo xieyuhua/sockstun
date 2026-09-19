@@ -13,6 +13,7 @@ package com.tunvpn;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -81,6 +82,12 @@ public class RecentRequestsActivity extends BaseActivity {
 				if (mb.length() > 0)
 				  mb.append(" · ");
 				mb.append("时长 ").append(formatDuration(duration));
+			}
+			String t = formatClock(startMs);
+			if (!t.isEmpty()) {
+				if (mb.length() > 0)
+				  mb.append(" · ");
+				mb.append(t);
 			}
 			return mb.toString();
 		}
@@ -210,6 +217,20 @@ public class RecentRequestsActivity extends BaseActivity {
 		return h + "h" + (m % 60) + "m";
 	}
 
+	/* startMs is recorded as SystemClock.elapsedRealtime() (time since boot),
+	   not a wall-clock stamp. Convert it back to a real local time so the user
+	   sees "when" the request happened rather than an opaque uptime value. */
+	private static String formatClock(long elapsedMs) {
+		if (elapsedMs <= 0)
+		  return "";
+		long nowWall = System.currentTimeMillis();
+		long nowElapsed = SystemClock.elapsedRealtime();
+		long wallStart = nowWall - (nowElapsed - elapsedMs);
+		java.text.DateFormat df = new java.text.SimpleDateFormat(
+			"MM-dd HH:mm:ss", java.util.Locale.getDefault());
+		return df.format(new java.util.Date(wallStart));
+	}
+
 	private void updateSummary(boolean available) {
 		if (!available) {
 			textview_summary.setText(R.string.recent_requests_unavailable);
@@ -285,6 +306,7 @@ public class RecentRequestsActivity extends BaseActivity {
 		  addDetailRow(ll, R.string.request_detail_process, r.process);
 		addDetailRow(ll, R.string.request_detail_upload, TProxyService.formatBytes(r.up));
 		addDetailRow(ll, R.string.request_detail_download, TProxyService.formatBytes(r.down));
+		addDetailRow(ll, R.string.request_detail_start, formatClock(r.startMs));
 		long duration = Math.max(0, r.endMs - r.startMs);
 		if (duration > 0)
 		  addDetailRow(ll, R.string.request_detail_duration, formatDuration(duration));

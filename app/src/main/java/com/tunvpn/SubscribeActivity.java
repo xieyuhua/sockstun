@@ -97,12 +97,6 @@ public class SubscribeActivity extends BaseActivity {
 	   otherwise fire one thread - and one socket - per node at once. */
 	private final ExecutorService testPool = Executors.newFixedThreadPool(16);
 
-	/* Serializes the proxied-request fallback: the clash-api selector is global
-	   state, so only one node's select -> test -> restore may run at a time.
-	   Without this, "测速全部" would have every fallback thread fighting over
-	   the selector and corrupt each other's latency result. */
-	private final Object selectorLock = new Object();
-
 	/* Resolved mihomo proxy names for the current test pass: "server|port|type"
 	   -> the real (de-dup'd) proxy name in the running config. Filled lazily
 	   from the clash-api so per-node delay tests target the correct node even
@@ -620,26 +614,25 @@ public class SubscribeActivity extends BaseActivity {
 	}
 
 	/* Candidate targets for the real delay test. A node that answers ANY of
-	   them is alive; only when every target fails do we call it unusable. This
-	   mirrors TProxyService's multi-target reachability so a single blocked
-	   target cannot false-negative a working node. */
+	   them is alive; only when every target fails do we call it unusable. A
+	   spread of providers (Google / Microsoft / Cloudflare) means one blocked
+	   or geo-restricted host cannot false-negative a perfectly good node - the
+	   exact "代理本来正常却显示不可用" trap we want to avoid. */
 	private static final String[] PROXY_TEST_URLS = {
 		"http://www.gstatic.com/generate_204",
 		"http://www.google.com/generate_204",
 		"http://www.msftconnecttest.com/connecttest.txt",
+		"http://cp.cloudflare.com",
 	};
 
-	/* Dedicated, very-reliable target used ONLY by the proxied-request fallback
-	   (proxiedDelayMs). A node that cannot reach the usual generate_204 hosts
-	   still gets a fair chance to prove it can tunnel. Tried first in the
-	   fallback so a working node is never false-negatived. */
-	private static final String PROXY_TEST_URL_FALLBACK = "http://cp.cloudflare.com";
-
 	/* Ask mihomo to push a request through THIS node and report the real delay.
-	   Returns latency (>=0) when the node actually tunnels, -2 when it cannot,
-	   or null when the real test cannot run (tunnel down / node not in the
-	   running config). This is the ONLY availability verdict - no TCP fallback.
-	   Works for every protocol because mihomo does the handshake. */
+	   Like FlClash, the availability verdict comes solely from mihomo's
+	   /proxies/{name}/delay endpoint - no separate TCP probe and no "select
+	   the node and push a real request" fallback that used to flip the global
+	   selector and false-negative working nodes. Returns latency (>=0) when
+	   the node tunnels, -2 when it cannot, or null when the test cannot run
+	   (tunnel down / node not in the running config). Works for every protocol
+	   because mihomo performs the handshake. */
 	private Long proxyDelayMs(ClashNode n) {
 		if (!prefs.getEnable())
 		  return null;
@@ -651,7 +644,6 @@ public class SubscribeActivity extends BaseActivity {
 		String host = resolveApiHost();
 		if (host == null)
 		  return null;
-		String base = "http://" + host + ":" + MihomoConfig.API_PORT;
 		/* User's configured target first, then the built-in fallbacks. */
 		List<String> targets = new ArrayList<String>();
 		String userUrl = prefs.getAutoTestUrl();
@@ -690,112 +682,13 @@ public class SubscribeActivity extends BaseActivity {
 				return null;
 			}
 		}
-		/* /delay reported the node unusable for every target. As a fallback,
-		   actually select the node and push a real HTTP request THROUGH the
-		   proxy (mihomo's mixed-port), which proves the node can tunnel traffic
-		   rather than trusting /delay alone. The previous selection is restored
-		   so the user's active route is left untouched. */
-		if (failed != null && failed == -2L) {
-			Long proxied = proxiedDelayMs(n, targets);
-			if (proxied != null)
-			  return proxied;
-		}
+		/* Every target returned non-200: mihomo could not tunnel a request
+		   through this node for any of them, so it is genuinely unreachable
+		   from the node's exit - report it unavailable (-2). No further
+		   fallback: a "select + real request" test used to flip the global
+		   selector and false-negative working nodes, which is exactly the
+		   "代理本来正常却显示不可用" symptom we removed. */
 		return failed;
-	}
-
-	/* Fallback latency test used when mihomo's /delay reports a node unusable:
-	   select the node in our proxy group and drive a real HTTP request THROUGH
-	   the core's local mixed-port (127.0.0.1:<proxyPort>), so the bytes
-	   actually leave via that node and come back. This is a genuine proxied
-	   request - any HTTP response means the node can tunnel, which is exactly
-	   the "available" verdict /delay is supposed to give. The previous
-	   selection is restored afterwards so the user's active route is not left
-	   pointing at the tested node. Returns latency (>=0) on success, or null
-	   when it cannot be verified. Serialized via selectorLock because the
-	   selector is global state shared across every concurrent test thread. */
-	private Long proxiedDelayMs(ClashNode n, List<String> targets) {
-		final String name = realNodeName(n);
-		if (name == null)
-		  return null;
-		final String host = resolveApiHost();
-		if (host == null)
-		  return null;
-		final int proxyPort = prefs.getProxyPort();
-		final String base = "http://" + host + ":" + MihomoConfig.API_PORT;
-		final String group = encodePath(MihomoConfig.GROUP);
-
-		/* The dedicated fallback target is tried first, then the normal ones. */
-		List<String> fbTargets = new ArrayList<String>();
-		fbTargets.add(PROXY_TEST_URL_FALLBACK);
-		for (String t : targets)
-		  if (!fbTargets.contains(t))
-			fbTargets.add(t);
-
-		synchronized (selectorLock) {
-			/* Capture the currently-selected node so we can restore it later. */
-			String prev = null;
-			try {
-				TProxyService.ApiResult gr = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
-					MihomoConfig.API_PORT, "/proxies/" + group, null, prefs.getSecret());
-				if (gr.code == 200 && gr.body != null) {
-					JSONObject o = new JSONObject(gr.body);
-					prev = o.optString("now", null);
-				}
-			} catch (Exception ignore) {
-			}
-
-			/* Select this node in the group. */
-			if (!putSelector(group, name)) {
-				if (prev != null) putSelector(group, prev);
-				return null;
-			}
-			/* Wait (up to ~1s) for the selector to actually reflect the picked
-			   node before we measure, instead of a blind fixed sleep. */
-			for (int i = 0; i < 20; i++) {
-				try {
-					TProxyService.ApiResult gr = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
-						MihomoConfig.API_PORT, "/proxies/" + group, null, prefs.getSecret());
-					boolean ok = gr.code == 200 && gr.body != null
-						&& name.equals(new JSONObject(gr.body).optString("now", null));
-					if (ok) break;
-				} catch (Exception ignore) {
-				}
-				try {
-					Thread.sleep(50);
-				} catch (InterruptedException ignore) {
-				}
-			}
-
-			Long result = null;
-			for (String target : fbTargets) {
-				try {
-					/* Reuse the VPN-bypassing proxy fetch so the app's own socket
-					   is not captured by the tunnel it runs. */
-					TProxyService.ApiResult pr = TProxyService.proxyFetch(proxyPort, target);
-					if (pr.code >= 100) {
-						result = pr.rtt;
-						break;
-					}
-				} catch (Exception ignore) {
-				}
-			}
-
-			/* Restore the previous selection. */
-			if (prev != null)
-			  putSelector(group, prev);
-			return result;
-		}
-	}
-
-	/* PUT /proxies/{group} {"name": proxy} to move the selector. Returns true on
-	   a 2xx response. Kept on the loopback control API (Proxy.NO_PROXY), like
-	   every other control call. */
-	private boolean putSelector(String group, String proxy) {
-		TProxyService.ApiResult r = TProxyService.bridgeApi("PUT", TProxyService.apiBaseHost(),
-			MihomoConfig.API_PORT, "/proxies/" + group,
-			"{\"name\":\"" + proxy.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}",
-			prefs.getSecret());
-		return r.code >= 200 && r.code < 300;
 	}
 
 	/* Lazily fetch the running config's proxy list and index it by

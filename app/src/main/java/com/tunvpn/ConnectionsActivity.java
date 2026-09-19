@@ -74,6 +74,7 @@ public class ConnectionsActivity extends BaseActivity {
 		String target;
 		String route;
 		String process;
+		String time;
 		long up;
 		long down;
 	}
@@ -199,7 +200,8 @@ public class ConnectionsActivity extends BaseActivity {
 			rows.addAll(allRows);
 		} else {
 			for (Row r : allRows) {
-				if (contains(r.target, q) || contains(r.route, q) || contains(r.process, q))
+				if (contains(r.target, q) || contains(r.route, q)
+						|| contains(r.process, q) || contains(r.time, q))
 				  rows.add(r);
 			}
 		}
@@ -220,13 +222,23 @@ public class ConnectionsActivity extends BaseActivity {
 	   running), as opposed to an empty list. */
 	private List<Row> fetch() {
 		lastError = "";
-		/* Read through the in-process action bridge (apiAction "getConnections"),
-		   exactly like TProxyService.accumulateProxy does - no HTTP listener
-		   (9090) needed. If the bridge returns nothing the core is still warming
-		   up or the tunnel is not running. */
-		String body = TProxyService.apiAction("getConnections", null);
-		android.util.Log.d("ConnectionsActivity", "fetch bridge body="
-			+ (body == null ? "null" : ("len=" + body.length())));
+		/* Read the snapshot the background traffic poll already captured. The
+		   native action bridge supports only ONE in-flight call, and that poll
+		   runs every 1s; issuing our own overlapping call made the earlier
+		   result get dropped, so this screen stayed empty while the stats saw
+		   connections. Reusing the poll's snapshot avoids the contention and
+		   always shows exactly what the working poll produced. */
+		String body = TProxyService.lastConnectionsSnapshot();
+		boolean fromBridge = false;
+		if (body == null) {
+			/* Tunnel just started (no poll yet) or not running: fall back to a
+			   one-off bridge call. This can race the poll, so only when empty. */
+			body = TProxyService.apiAction("getConnections", null);
+			fromBridge = true;
+		}
+		android.util.Log.d("ConnectionsActivity", "fetch body="
+			+ (body == null ? "null" : ("len=" + body.length()))
+			+ (fromBridge ? " (bridge)" : " (snapshot)"));
 		if (body == null) {
 			if (lastError.isEmpty())
 			  lastError = "in-process 桥未返回（核心可能未就绪 / 未运行）";
@@ -246,6 +258,7 @@ public class ConnectionsActivity extends BaseActivity {
 				r.target = target(meta);
 				r.route = route(c);
 				r.process = process(meta);
+				r.time = formatConnStart(c.optString("start", ""));
 				r.up = c.optLong("upload");
 				r.down = c.optLong("download");
 				out.add(r);
@@ -313,6 +326,46 @@ public class ConnectionsActivity extends BaseActivity {
 		return sb.toString();
 	}
 
+	/* The core stamps each connection with "start" as an RFC3339 string, e.g.
+	   "2026-09-11T10:00:00.123456789+08:00" or "...Z". Parse it to a local
+	   wall-clock time so the list can show when the connection began. The
+	   timezone OFFSET must be honoured (the core reports the node's local time,
+	   not UTC); the nanosecond fraction is dropped first because
+	   SimpleDateFormat only reaches millis. */
+	private static String formatConnStart(String iso) {
+		if (iso == null || iso.isEmpty())
+		  return "";
+		String s = iso.trim();
+		/* Drop the fractional seconds: ".digits" -> "". */
+		int dot = s.indexOf('.');
+		if (dot >= 0) {
+			int end = dot + 1;
+			while (end < s.length() && Character.isDigit(s.charAt(end)))
+			  end++;
+			s = s.substring(0, dot) + s.substring(end);
+		}
+		java.util.Date d = null;
+		/* "XXX" parses both "Z" (UTC) and a numeric "+hh:mm"/"-hh:mm" offset;
+		   the second pattern is a fallback for a bare local timestamp. */
+		String[] patterns = { "yyyy-MM-dd'T'HH:mm:ssXXX", "yyyy-MM-dd'T'HH:mm:ss" };
+		for (String pattern : patterns) {
+			try {
+				java.text.SimpleDateFormat in = new java.text.SimpleDateFormat(
+					pattern, java.util.Locale.US);
+				in.setLenient(false);
+				in.setTimeZone(java.util.TimeZone.getDefault());
+				d = in.parse(s);
+				break;
+			} catch (Exception ignore) {
+			}
+		}
+		if (d == null)
+		  return "";
+		java.text.SimpleDateFormat out = new java.text.SimpleDateFormat(
+			"MM-dd HH:mm:ss", java.util.Locale.getDefault());
+		return out.format(d);
+	}
+
 	/* DELETE /connections drops every live connection. We confirm first because
 	   it is a blunt instrument and the user may only mean to clear a few. */
 	private void closeAll() {
@@ -324,10 +377,25 @@ public class ConnectionsActivity extends BaseActivity {
 			.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
 				@Override
 				public void onClick(DialogInterface d, int which) {
-					httpDelete("http://127.0.0.1:" + MihomoConfig.API_PORT + "/connections");
-					reload();
-					Toast.makeText(ConnectionsActivity.this,
-						R.string.connections_close_toast, Toast.LENGTH_SHORT).show();
+					/* The DELETE goes through the (blocking) bridge, so it must
+					   not run on the UI thread - a slow core would otherwise
+					   trigger an ANR. Fire it off and let the next poll refresh. */
+					new Thread(new Runnable() {
+						@Override
+						public void run() {
+							httpDelete("http://127.0.0.1:" + MihomoConfig.API_PORT + "/connections");
+							ui.post(new Runnable() {
+								@Override
+								public void run() {
+									if (isFinishing() || isDestroyed())
+									  return;
+									reload();
+									Toast.makeText(ConnectionsActivity.this,
+										R.string.connections_close_toast, Toast.LENGTH_SHORT).show();
+								}
+							});
+						}
+					}).start();
 				}
 			})
 			.setNegativeButton(android.R.string.cancel, null)
@@ -372,6 +440,13 @@ public class ConnectionsActivity extends BaseActivity {
 			} else {
 				pv.setVisibility(View.VISIBLE);
 				pv.setText(r.process);
+			}
+			TextView tv = (TextView) row.findViewById(R.id.conn_time);
+			if (r.time == null || r.time.isEmpty()) {
+				tv.setVisibility(View.GONE);
+			} else {
+				tv.setVisibility(View.VISIBLE);
+				tv.setText(r.time);
 			}
 			((TextView) row.findViewById(R.id.conn_traffic)).setText(
 				"↑ " + TProxyService.formatBytes(r.up)

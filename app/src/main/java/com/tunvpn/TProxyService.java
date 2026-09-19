@@ -679,7 +679,7 @@ public class TProxyService extends VpnService {
 			/* Rebuild the file once: rewrite the external-controller line to the
 			   chosen loopback port (or append it), align the secret (or append it),
 			   then append mixed-port if missing. A duplicate top-level key would be
-			   invalid YAML, so we replace in place (see docs/内核接口说明.md 6.7). */
+			   invalid YAML, so we replace in place (see docs/内核接口参考.md §5). */
 			StringBuilder out = new StringBuilder();
 			boolean ecWritten = false;
 			boolean secretWritten = false;
@@ -1121,6 +1121,12 @@ public class TProxyService extends VpnService {
 		sInstance.lastRecentFlush = 0;
 		sInstance.flushRecentRequests(android.os.SystemClock.elapsedRealtime());
 	}
+	/* Latest /connections snapshot the stats poll captured, or null when the
+	   tunnel is not running / has not polled yet. The connections screen reads
+	   this so it never has to issue its own bridge call. */
+	static String lastConnectionsSnapshot() {
+		return sInstance != null ? sInstance.connSnapshot : null;
+	}
 	static final class ApiResult {
 		int code = -1;   /* -1 = transport failure (API unreachable) */
 		String body;
@@ -1209,6 +1215,17 @@ public class TProxyService extends VpnService {
 		return r;
 	}
 
+	/* Serialises every apiAction() bridge call - the native bridge supports
+	   only one in-flight callback, so concurrent calls lose results (see
+	   apiAction). Static because callers are spread across the service, the
+	   Activities and the embedded clash-api server. */
+	private static final Object API_LOCK = new Object();
+	/* Latest /connections snapshot fetched by accumulateProxy() on statsThread.
+	   The connections screen reads this instead of issuing its own bridge call,
+	   so it always shows exactly the data the working poll produced (and never
+	   competes with that poll for the single callback slot). */
+	private volatile String connSnapshot = null;
+
 	/* === In-process control bridge ============================================
 	   libmihomo-android v0.3.3's quickSetup brings the mixed-port (7890) up but
 	   often never binds the external-controller (clash-api) HTTP listener on 9090
@@ -1223,38 +1240,47 @@ public class TProxyService extends VpnService {
 	static String apiAction(String method, String data) {
 		if (!Clash.INSTANCE.isLoaded())
 		  return null;
-		final String[] out = { null };
-		final boolean[] done = { false };
-		try {
-			JSONObject j = new JSONObject();
-			j.put("id", "");
-			j.put("method", method);
-			try { j.put("data", data == null ? JSONObject.NULL : new JSONObject(data)); }
-			catch (Throwable e) { j.put("data", data == null ? JSONObject.NULL : data); }
-			Clash.INSTANCE.invokeAction(j.toString(), new InvokeInterface() {
-				@Override
-				public void onResult(String result) {
-					if (result != null) {
-						try {
-							JSONObject r = new JSONObject(result);
-							if (r.optInt("code", -1) == 0) {
-								Object d = r.opt("data");
-								out[0] = (d == null || d == JSONObject.NULL) ? "" : d.toString();
-							}
-						} catch (Throwable ignore) { }
+		/* The native action bridge keeps a SINGLE in-flight callback: two
+		   overlapping invokeAction() calls make the earlier result get
+		   delivered to the wrong waiter, so that waiter never wakes and times
+		   out with null. The traffic poll (every 1s, on statsThread) and an
+		   Activity's own poll (every 1.5s) overlap constantly, which is why the
+		   connections screen silently came back empty while the background
+		   stats saw 6 connections. Serialise every bridge call here. */
+		synchronized (API_LOCK) {
+			final String[] out = { null };
+			final boolean[] done = { false };
+			try {
+				JSONObject j = new JSONObject();
+				j.put("id", "");
+				j.put("method", method);
+				try { j.put("data", data == null ? JSONObject.NULL : new JSONObject(data)); }
+				catch (Throwable e) { j.put("data", data == null ? JSONObject.NULL : data); }
+				Clash.INSTANCE.invokeAction(j.toString(), new InvokeInterface() {
+					@Override
+					public void onResult(String result) {
+						if (result != null) {
+							try {
+								JSONObject r = new JSONObject(result);
+								if (r.optInt("code", -1) == 0) {
+									Object d = r.opt("data");
+									out[0] = (d == null || d == JSONObject.NULL) ? "" : d.toString();
+								}
+							} catch (Throwable ignore) { }
+						}
+						synchronized (done) { done[0] = true; done.notifyAll(); }
 					}
-					synchronized (done) { done[0] = true; done.notifyAll(); }
+				});
+				synchronized (done) {
+					long end = System.currentTimeMillis() + 6000;
+					while (!done[0] && System.currentTimeMillis() < end)
+					  done.wait(end - System.currentTimeMillis());
 				}
-			});
-			synchronized (done) {
-				long end = System.currentTimeMillis() + 6000;
-				while (!done[0] && System.currentTimeMillis() < end)
-				  done.wait(end - System.currentTimeMillis());
+			} catch (Throwable e) {
+				return null;
 			}
-		} catch (Throwable e) {
-			return null;
+			return out[0];
 		}
-		return out[0];
 	}
 
 	/* Mirrors localApi()'s signature but routes through the in-process bridge.
@@ -1978,6 +2004,9 @@ public class TProxyService extends VpnService {
 		if (connFailStreak >= 5)
 		  appendLog("流量统计：/connections 已恢复");
 		connFailStreak = 0;
+		/* Publish this snapshot so the connections screen can show it without
+		   making its own (competing) bridge call. */
+		connSnapshot = body;
 		try {
 			JSONObject root = new JSONObject(body);
 			JSONArray arr = root.optJSONArray("connections");

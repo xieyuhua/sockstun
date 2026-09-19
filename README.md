@@ -8,7 +8,7 @@ A simple and lightweight VPN proxy client for Android. It embeds [mihomo](https:
 * **Multi-protocol**: any node type supported by mihomo — vmess / vless / trojan / shadowsocks / shadowsocksr / hysteria2 / tuic / socks5 / wireguard and more.
 * Redirect TCP connections and UDP packets.
 * **Two upstream sources, pick either**: a remote `clash.yml` subscription, or a manual SOCKS5 server.
-* **Clash subscription**: import a remote `clash.yml` (plain or base64), list **all** proxy nodes, latency-test them, sort by latency and filter available / unavailable.
+* **Clash subscription**: import a remote `clash.yml` (plain or base64), merge every subscription into one node pool, latency-test nodes through the core, filter by country / protocol and sort by latency (only reachable nodes are listed).
 * **Switch node without reconnecting**: picking a node applies it to the running tunnel right away.
 * The active node is shown on the home screen and in the notification (live rates are always kept visible).
 * IPv4/IPv6 dual stack, global / per-App modes.
@@ -18,9 +18,10 @@ A simple and lightweight VPN proxy client for Android. It embeds [mihomo](https:
 
 ## Documents
 
-* [使用教程 (Usage guide, 中文)](docs/使用教程.md)
-* [启动与架构说明 (Startup & architecture, 中文)](docs/启动与架构说明.md)
-* [内核接口说明 (mihomo external-controller API, 中文)](docs/内核接口说明.md)
+* [文档索引 (Docs index)](docs/README.md)
+* [用户手册 (User guide, 中文)](docs/用户手册.md)
+* [开发与架构 (Architecture, 中文)](docs/开发与架构.md)
+* [内核接口参考 (mihomo external-controller API, 中文)](docs/内核接口参考.md)
 
 ## How to Build
 
