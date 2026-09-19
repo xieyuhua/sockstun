@@ -51,6 +51,8 @@ import java.util.Map;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -94,6 +96,12 @@ public class SubscribeActivity extends BaseActivity {
 	/* Bounded pool for latency tests. "Test all" on a large subscription would
 	   otherwise fire one thread - and one socket - per node at once. */
 	private final ExecutorService testPool = Executors.newFixedThreadPool(16);
+
+	/* Serializes the proxied-request fallback: the clash-api selector is global
+	   state, so only one node's select -> test -> restore may run at a time.
+	   Without this, "测速全部" would have every fallback thread fighting over
+	   the selector and corrupt each other's latency result. */
+	private final Object selectorLock = new Object();
 
 	/* Resolved mihomo proxy names for the current test pass: "server|port|type"
 	   -> the real (de-dup'd) proxy name in the running config. Filled lazily
@@ -621,6 +629,12 @@ public class SubscribeActivity extends BaseActivity {
 		"http://www.msftconnecttest.com/connecttest.txt",
 	};
 
+	/* Dedicated, very-reliable target used ONLY by the proxied-request fallback
+	   (proxiedDelayMs). A node that cannot reach the usual generate_204 hosts
+	   still gets a fair chance to prove it can tunnel. Tried first in the
+	   fallback so a working node is never false-negatived. */
+	private static final String PROXY_TEST_URL_FALLBACK = "http://cp.cloudflare.com";
+
 	/* Ask mihomo to push a request through THIS node and report the real delay.
 	   Returns latency (>=0) when the node actually tunnels, -2 when it cannot,
 	   or null when the real test cannot run (tunnel down / node not in the
@@ -676,7 +690,145 @@ public class SubscribeActivity extends BaseActivity {
 				return null;
 			}
 		}
+		/* /delay reported the node unusable for every target. As a fallback,
+		   actually select the node and push a real HTTP request THROUGH the
+		   proxy (mihomo's mixed-port), which proves the node can tunnel traffic
+		   rather than trusting /delay alone. The previous selection is restored
+		   so the user's active route is left untouched. */
+		if (failed != null && failed == -2L) {
+			Long proxied = proxiedDelayMs(n, targets);
+			if (proxied != null)
+			  return proxied;
+		}
 		return failed;
+	}
+
+	/* Fallback latency test used when mihomo's /delay reports a node unusable:
+	   select the node in our proxy group and drive a real HTTP request THROUGH
+	   the core's local mixed-port (127.0.0.1:<proxyPort>), so the bytes
+	   actually leave via that node and come back. This is a genuine proxied
+	   request - any HTTP response means the node can tunnel, which is exactly
+	   the "available" verdict /delay is supposed to give. The previous
+	   selection is restored afterwards so the user's active route is not left
+	   pointing at the tested node. Returns latency (>=0) on success, or null
+	   when it cannot be verified. Serialized via selectorLock because the
+	   selector is global state shared across every concurrent test thread. */
+	private Long proxiedDelayMs(ClashNode n, List<String> targets) {
+		final String name = realNodeName(n);
+		if (name == null)
+		  return null;
+		final String host = resolveApiHost();
+		if (host == null)
+		  return null;
+		final int proxyPort = prefs.getProxyPort();
+		final String base = "http://" + host + ":" + MihomoConfig.API_PORT;
+		final String group = encodePath(MihomoConfig.GROUP);
+
+		/* The dedicated fallback target is tried first, then the normal ones. */
+		List<String> fbTargets = new ArrayList<String>();
+		fbTargets.add(PROXY_TEST_URL_FALLBACK);
+		for (String t : targets)
+		  if (!fbTargets.contains(t))
+			fbTargets.add(t);
+
+		synchronized (selectorLock) {
+			/* Capture the currently-selected node so we can restore it later. */
+			String prev = null;
+			try {
+				HttpURLConnection g = (HttpURLConnection) new URL(base + "/proxies/" + group)
+					.openConnection(java.net.Proxy.NO_PROXY);
+				MihomoConfig.applyAuth(g, prefs);
+				g.setConnectTimeout(1500);
+				g.setReadTimeout(3000);
+				if (g.getResponseCode() == 200) {
+					JSONObject o = new JSONObject(readApiBody(g));
+					prev = o.optString("now", null);
+				}
+				g.disconnect();
+			} catch (Exception ignore) {
+			}
+
+			/* Select this node in the group. */
+			if (!putSelector(group, name)) {
+				if (prev != null) putSelector(group, prev);
+				return null;
+			}
+			/* Wait (up to ~1s) for the selector to actually reflect the picked
+			   node before we measure, instead of a blind fixed sleep. */
+			for (int i = 0; i < 20; i++) {
+				try {
+					HttpURLConnection g = (HttpURLConnection) new URL(base + "/proxies/" + group)
+						.openConnection(java.net.Proxy.NO_PROXY);
+					MihomoConfig.applyAuth(g, prefs);
+					g.setConnectTimeout(500);
+					g.setReadTimeout(500);
+					boolean ok = false;
+					if (g.getResponseCode() == 200) {
+						JSONObject o = new JSONObject(readApiBody(g));
+						ok = name.equals(o.optString("now", null));
+					}
+					g.disconnect();
+					if (ok) break;
+				} catch (Exception ignore) {
+				}
+				try {
+					Thread.sleep(50);
+				} catch (InterruptedException ignore) {
+				}
+			}
+
+			Proxy proxy = new Proxy(Proxy.Type.HTTP,
+				new InetSocketAddress("127.0.0.1", proxyPort));
+			int timeoutMs = prefs.getProxyTestTimeout() * 1000;
+			Long result = null;
+			for (String target : fbTargets) {
+				try {
+					long start = System.currentTimeMillis();
+					HttpURLConnection c = (HttpURLConnection) new URL(target).openConnection(proxy);
+					c.setConnectTimeout(timeoutMs);
+					c.setReadTimeout(timeoutMs);
+					c.setInstanceFollowRedirects(false);
+					int code = c.getResponseCode();
+					long ms = System.currentTimeMillis() - start;
+					c.disconnect();
+					if (code >= 100) {
+						result = ms;
+						break;
+					}
+				} catch (Exception ignore) {
+				}
+			}
+
+			/* Restore the previous selection. */
+			if (prev != null)
+			  putSelector(group, prev);
+			return result;
+		}
+	}
+
+	/* PUT /proxies/{group} {"name": proxy} to move the selector. Returns true on
+	   a 2xx response. Kept on the loopback control API (Proxy.NO_PROXY), like
+	   every other control call. */
+	private boolean putSelector(String group, String proxy) {
+		try {
+			HttpURLConnection put = (HttpURLConnection) new URL(
+				"http://" + resolveApiHost() + ":" + MihomoConfig.API_PORT
+				+ "/proxies/" + group).openConnection(java.net.Proxy.NO_PROXY);
+			MihomoConfig.applyAuth(put, prefs);
+			put.setRequestMethod("PUT");
+			put.setDoOutput(true);
+			put.setRequestProperty("Content-Type", "application/json");
+			put.setConnectTimeout(1500);
+			put.setReadTimeout(3000);
+			String body = "{\"name\":\""
+				+ proxy.replace("\\", "\\\\").replace("\"", "\\\"") + "\"}";
+			put.getOutputStream().write(body.getBytes("UTF-8"));
+			int code = put.getResponseCode();
+			put.disconnect();
+			return code >= 200 && code < 300;
+		} catch (Exception e) {
+			return false;
+		}
 	}
 
 	/* Lazily fetch the running config's proxy list and index it by

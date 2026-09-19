@@ -410,6 +410,24 @@ public class TProxyService extends VpnService {
 		   节点改在下面用 REST API 选择，全程标准 UTF-8，名字能精确匹配。 */
 		String setupParams = "{\"selected-map\":{}," +
 			"\"profile\":\"" + configFile.getAbsolutePath() + "\"}";
+		/* Forward mihomo's log/event stream into our log file BEFORE quickSetup,
+		   so the core's own message about why the control API (external-
+		   controller) failed to bind - e.g. "failed to start clash api:
+		   listen tcp 127.0.0.1:9090: bind: address already in use" - lands in
+		   tproxy.log instead of being silently dropped. The listener used to be
+		   attached only AFTER quickSetup, by which point the bind had already
+		   happened and the error with it. */
+		try {
+			Clash.INSTANCE.setEventListener(new InvokeInterface() {
+				@Override
+				public void onResult(String result) {
+					if (result != null && !result.isEmpty())
+					  appendLog("mihomo: " + result);
+				}
+			});
+		} catch (Throwable e) {
+		}
+
 		try {
 			Clash.INSTANCE.quickSetup(initParams, setupParams, new InvokeInterface() {
 				@Override
@@ -440,18 +458,6 @@ public class TProxyService extends VpnService {
 			startupAborted = true;
 			failStartup("内核配置错误：" + configErrorReason(quickSetupError));
 			return;
-		}
-
-		/* Forward mihomo's log/event stream into our log file. */
-		try {
-			Clash.INSTANCE.setEventListener(new InvokeInterface() {
-				@Override
-				public void onResult(String result) {
-					if (result != null && !result.isEmpty())
-					  appendLog("mihomo: " + result);
-				}
-			});
-		} catch (Throwable e) {
 		}
 
 		/* Bring the TUN up on the VPN fd we just established. The TunInterface
@@ -865,6 +871,30 @@ public class TProxyService extends VpnService {
 			if (probeHost("::1"))
 			  appendLog("controller: 但 [::1]:" + MihomoConfig.API_PORT
 				  + " 通了 —— 核心绑在 IPv6 回环，App 走 IPv4 才失败");
+			/* Pin down whether the chosen API port is genuinely still occupied
+			   (a stale tunnel / adb forward / emulator holding 9090) or free but
+			   mihomo refused to bind it (config / permission issue). This single
+			   line is the most useful one for "9090 起不来" debugging. */
+			boolean portFree = false;
+			java.net.ServerSocket probe = null;
+			try {
+				probe = new java.net.ServerSocket();
+				probe.setReuseAddress(true);
+				probe.bind(new java.net.InetSocketAddress("127.0.0.1", MihomoConfig.API_PORT));
+				portFree = true;
+			} catch (Throwable e) {
+				appendLog("controller: 端口 127.0.0.1:" + MihomoConfig.API_PORT
+					+ " 仍被占用（" + e.getClass().getSimpleName()
+					+ (e.getMessage() == null ? "" : (": " + e.getMessage()))
+					+ "）—— 这就是控制接口起不来的直接原因");
+			} finally {
+				if (probe != null) {
+					try { probe.close(); } catch (Throwable ignore) { }
+				}
+			}
+			if (portFree)
+			  appendLog("controller: 127.0.0.1:" + MihomoConfig.API_PORT
+					+ " 当前空闲但仍未监听 —— 不是端口占用，而是 mihomo 绑定/配置问题（见上方 mihomo: 日志）");
 			dumpControllerLog();
 			dumpConfigTail();
 			}).start();
