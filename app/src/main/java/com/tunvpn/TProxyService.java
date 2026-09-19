@@ -2423,11 +2423,17 @@ public class TProxyService extends VpnService {
 		  return bytes + " B";
 		String[] units = { "KB", "MB", "GB", "TB" };
 		double value = bytes;
-		int unit = 0;
+		/* unit starts at -1 because the FIRST division already turns bytes into
+		   KB, so the result must land on units[0]. Starting from 0 (and
+		   incrementing before use) shifted EVERY value one unit up: 100 KB came
+		   out as "100.0 MB", 3.7 MB as "3.7 GB", and so on. */
+		int unit = -1;
 		while (value >= 1024 && unit < units.length - 1) {
 			value /= 1024;
 			unit++;
 		}
+		if (unit < 0)
+		  unit = 0;
 		return String.format(Locale.US, value < 10 ? "%.2f %s" : "%.1f %s", value, units[unit]);
 	}
 
