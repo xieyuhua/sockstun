@@ -72,7 +72,8 @@ class CoreTestHost {
 			if (cfg == null)
 			  return true;
 			boolean same = cfg.equals(lastConfig);
-			TProxyService.log("测试内核配置：" + countProxies(cfg) + " 个代理条目 · "
+			int nodeCount = countProxies(cfg);
+			TProxyService.log("测试内核配置：" + nodeCount + " 个代理条目 · "
 				+ cfg.length() + " 字节 · 路径 " + new File(home, "config.yaml").getAbsolutePath()
 				+ (same ? "（与上次相同，跳过重新应用）" : ""));
 			if (same)
@@ -91,10 +92,24 @@ class CoreTestHost {
 					synchronized (lock) { done[0] = true; lock.notifyAll(); }
 				}
 			});
+			/* The wait scales with the config: parsing a few hundred nodes takes
+			   seconds, and a FIXED 8s window meant a big pool was declared ready
+			   while the core was still loading - every probe then failed and the
+			   whole selection came back 不可用 (single-country worked because its
+			   config is tiny and loads in time). A timeout is a FAILURE, never a
+			   silent success. */
 			synchronized (lock) {
-				long end = System.currentTimeMillis() + 8000;
+				long waitMs = Math.min(60000L, 8000L + nodeCount * 30L);
+				long end = System.currentTimeMillis() + waitMs;
 				while (!done[0] && System.currentTimeMillis() < end)
 				  lock.wait(Math.max(1, end - System.currentTimeMillis()));
+				if (!done[0]) {
+					TProxyService.log("测试内核配置加载超时（等待 " + waitMs + "ms · "
+						+ nodeCount + " 个节点）→ 本次不测速，等它加载完再试");
+					applied = false;
+					lastConfig = "";
+					return false;
+				}
 			}
 			if (err[0] != null) {
 				Log.w(TAG, "quickSetup: " + err[0]);
@@ -138,6 +153,13 @@ class CoreTestHost {
 	private static volatile int delayShape = -1;
 	/* Serialises that one-shot decision (see testDelay). */
 	private static final Object SHAPE_LOCK = new Object();
+	/* Per-probe success lines help when testing ONE node and are pure I/O noise
+	   for a thousand-node pass (each line opens and closes the log file). */
+	private static volatile boolean verbose = true;
+
+	static void setVerbose(boolean v) {
+		verbose = v;
+	}
 
 	/* Body for the testDelay action in shape #shape.index. Shared with
 	   ClashApiServer, which answers the REST /delay route the same way. */
@@ -302,7 +324,8 @@ class CoreTestHost {
 			}
 			/* mihomo's own number, used as-is: no offset, no estimate. */
 			r.measured = ms;
-			TProxyService.log("delay: 可用 name=" + proxyName + " " + ms + "ms shape#"
+			if (verbose)
+			  TProxyService.log("delay: 可用 name=" + proxyName + " " + ms + "ms shape#"
 				+ shape + " @" + url);
 			return r;
 		} catch (Throwable e) {

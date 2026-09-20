@@ -97,9 +97,12 @@ public class SubscribeActivity extends BaseActivity {
 	/* subId -> subscription name, so each row can show where it came from. */
 	private final java.util.Map<String, String> subNames =
 		new java.util.HashMap<String, String>();
-	/* Bounded pool for latency tests. "Test all" on a large subscription would
-	   otherwise fire one thread - and one socket - per node at once. */
-	private final ExecutorService testPool = Executors.newFixedThreadPool(16);
+	/* Bounded pool for latency tests. The in-process action bridge serialises
+	   anyway (one in-flight callback), so 16 workers just meant 15 threads
+	   parked on a lock per probe - memory and scheduler pressure, no speed.
+	   Four is plenty to keep the core fed and keeps a huge subscription from
+	   piling up work it cannot retire. */
+	private final ExecutorService testPool = Executors.newFixedThreadPool(4);
 
 	/* Resolved mihomo proxy names for the current test pass: "server|port|type"
 	   -> the real (de-dup'd) proxy name in the running config. Filled lazily
@@ -109,6 +112,10 @@ public class SubscribeActivity extends BaseActivity {
 	/* How many testable proxies the core reported, for the logs: it separates
 	   "the generated config carries no nodes" from "this node is not in it". */
 	private volatile int coreNodeCount = 0;
+	/* Nodes the pass skipped because its time budget ran out. Reported at the
+	   end so "N 个未测速" is never a mystery. */
+	private final java.util.concurrent.atomic.AtomicInteger passSkipped =
+		new java.util.concurrent.atomic.AtomicInteger();
 	/* Nodes this pass could not find in the core (usually because the test
 	   core was built from the country-filtered pool). Drives the hint shown
 	   after a pass that measured almost nothing. */
@@ -168,6 +175,29 @@ public class SubscribeActivity extends BaseActivity {
 
 	/* Guards the one-off /proxies fetch (see ensureProxyNameCache). */
 	private final Object nameCacheLock = new Object();
+
+	/* ONE latency pass at a time. A second pass while the first was still
+	   running corrupts the counters (a single re-test resets pendingTests to 1
+	   in the middle of a batch) and piles thousands of extra probes onto an
+	   already busy core - the app froze and then died. A new pass is refused
+	   with a toast until the running one finishes. */
+	private final java.util.concurrent.atomic.AtomicBoolean passRunning =
+		new java.util.concurrent.atomic.AtomicBoolean();
+	/* Wall-clock budget of the running pass. Hundreds of dead nodes cannot be
+	   probed in a useful time even with capped timeouts, so the pass stops
+	   probing when the budget is spent and reports the rest as 未测速: it always
+	   terminates, and it never lies about what it measured. */
+	private volatile long passDeadlineMs = 0;
+	/* True while a "测速全部" pass is in flight (drives the capped batch timeout
+	   and the quieter logging). */
+	private volatile boolean batchPass = false;
+	/* Per-target timeout used for a BATCH. A batch must not inherit a 30s
+	   setting: 4 targets + 2 rescue probes x 30s = 3 minutes for ONE dead node. */
+	private static final int BATCH_PROBE_TIMEOUT_MS = 6000;
+	/* How long a pass may run before the remaining nodes are left alone. */
+	private static long passBudgetMs(int nodeCount) {
+		return Math.min(8 * 60 * 1000L, 45000L + nodeCount * 2000L);
+	}
 
 	/* Latency order by default: fastest first is what people actually want. */
 	private int pendingTests = 0;
@@ -591,6 +621,13 @@ public class SubscribeActivity extends BaseActivity {
 			updateTestProgress();
 			return;
 		}
+		/* Refuse to start while a pass is still running (see passRunning). */
+		if (!passRunning.compareAndSet(false, true)) {
+			updateTestProgress();
+			TProxyService.log("测速: 上一轮还没结束，拒绝开始新的测速");
+			Toast.makeText(this, R.string.sub_test_busy, Toast.LENGTH_SHORT).show();
+			return;
+		}
 		/* Test exactly the pool the list is scoped to: 「全部」 tests every node,
 		   a country chip tests that country's nodes. The test core is built from
 		   the same pool, so a node in the list is never "missing from the core" -
@@ -603,18 +640,25 @@ public class SubscribeActivity extends BaseActivity {
 		}
 		if (toTest.isEmpty()) {
 			/* Staying silent here made the button look dead. */
+			passRunning.set(false);
 			updateTestProgress();
 			TProxyService.log("测速: 当前筛选（"
 				+ (filterCountry.isEmpty() ? "全部" : filterCountry) + "）没有匹配到节点");
 			Toast.makeText(this, R.string.sub_test_empty_scope, Toast.LENGTH_SHORT).show();
 			return;
 		}
+		/* Fastest-known first: with hundreds of nodes the budget WILL run out,
+		   and this way the nodes the user cares about are measured first. */
+		Collections.sort(toTest, latencyComparator);
+		batchPass = true;
+		passDeadlineMs = System.currentTimeMillis() + passBudgetMs(toTest.size());
 		/* The running config may have changed (subscription edited / re-picked);
 		   rebuild the node-name map and re-probe the api host from scratch. */
 		proxyNameCache = null;
 		apiHost = null;
 		coreNodeCount = 0;
 		passNotFound.set(0);
+		passSkipped.set(0);
 		corePrepared = false;
 		pendingTests = toTest.size();
 		testTotal = toTest.size();
@@ -624,18 +668,25 @@ public class SubscribeActivity extends BaseActivity {
 		updateTestProgress();
 		/* Pass header: enough context to read a run in which a node flipped
 		   from 可用 to 不可用 (which core answered, how long we waited, at
-		   which URL). */
+		   which URL, and how long it may run).
+		   A batch also logs one line per FAILING probe only (see CoreTestHost):
+		   a thousand-node pass would otherwise write a thousand lines through
+		   an open/close per line - that I/O alone contributed to the freeze. */
+		CoreTestHost.setVerbose(false);
+		int capSec = Math.min(prefs.getProxyTestTimeout() * 1000, BATCH_PROBE_TIMEOUT_MS) / 1000;
 		TProxyService.log("=== 测速开始：" + toTest.size() + " 个节点 · VPN="
 			+ (prefs.getEnable() ? "已连接" : "未连接")
-			+ " · 单目标超时 " + prefs.getProxyTestTimeout() + "s · 测速地址 "
+			+ " · 单目标超时 " + capSec + "s" + (capSec != prefs.getProxyTestTimeout()
+				? ("（设置 " + prefs.getProxyTestTimeout() + "s，批量已收紧）") : "")
+			+ " · 时间预算 " + (passBudgetMs(toTest.size()) / 1000) + "s · 测速地址 "
 			+ prefs.getAutoTestUrl() + " · 内置目标 " + PROXY_TEST_URLS.length + " 个"
 			+ " · 国家筛选=" + (prefs.getSubCountryFilter().isEmpty()
 				? "全部" : prefs.getSubCountryFilter()) + " ===");
 		for (ClashNode n : toTest)
 		  testNode(n, true);
 		/* Watchdog: a pass that lands NOTHING within a generous window is stuck
-		   (core / bridge / hostname resolution), not merely slow. Recorded with
-		   the counters so a frozen progress bar is explainable after the fact. */
+		   (core / bridge / hostname resolution), not merely slow. It also lets
+		   the UI go: a wedged pass must not keep the button dead forever. */
 		final int expected = toTest.size();
 		ui.postDelayed(new Runnable() {
 			@Override
@@ -643,9 +694,31 @@ public class SubscribeActivity extends BaseActivity {
 				if (pendingTests <= 0 || testsDone > 0)
 				  return;                       /* finished, or visibly moving */
 				TProxyService.log("测速: 60 秒内没有任何结果（应测 " + expected + "，待完成 "
-					+ pendingTests + "）→ 疑似卡在内核/桥/域名解析，详见上面日志");
+					+ pendingTests + "）→ 结束本轮，剩余按未测速处理（详见上面日志）");
+				releasePass();
+				pendingTests = 0;
+				testTotal = 0;
+				updateTestProgress();
 			}
 		}, 60000);
+	}
+
+	/* End of a pass: drop the single-flight flag and the budget. Called as soon
+	   as the last node has reported, and by the watchdog. */
+	private void releasePass() {
+		passRunning.set(false);
+		passDeadlineMs = 0;
+		batchPass = false;
+		CoreTestHost.setVerbose(true);
+	}
+
+	/* True when the running pass is out of time (or is no longer the current
+	   one): the node is then reported as 未测速 without any probing. */
+	private boolean passExpired() {
+		if (!passRunning.get())
+		  return true;
+		long d = passDeadlineMs;
+		return d > 0 && System.currentTimeMillis() > d;
 	}
 
 	/* Progress: the bar in the card plus the stats line, and the FAB is simply
@@ -742,11 +815,16 @@ public class SubscribeActivity extends BaseActivity {
 		testPool.execute(new Runnable() {
 			@Override
 			public void run() {
+				/* The pass may already be over (budget spent, the watchdog
+				   finished it, or a newer pass replaced it): report the node as
+				   untested WITHOUT probing, so the pass drains fast instead of
+				   fighting a core it no longer owns. */
+				final boolean expired = passExpired();
 				/* Make sure a core is available for the real-forwarding test:
 			   the TUN-less test core when disconnected (or when the user asked
 			   for all-nodes testing), which also refreshes its node set. Only
 			   the first task of a pass does the work. */
-				if (!corePrepared) {
+				if (!expired && !corePrepared) {
 					synchronized (SubscribeActivity.this) {
 						if (!corePrepared) {
 							boolean coreOk = prepareTestCore();
@@ -767,11 +845,15 @@ public class SubscribeActivity extends BaseActivity {
 				   enough, so the socket probe was removed. When the real test
 				   cannot run (no core, or the node is absent from the loaded
 				   config) we leave the node unverified (-1), not "unavailable". */
-				Long real = proxyDelayMs(n);
+				Long real = expired ? null : proxyDelayMs(n);
 				if (real != null)
 				  n.latency = real;        // >=0 usable, -2 could not tunnel
 				else
 				  n.latency = -1;          // not verifiable -> unknown, not "available"
+				if (expired) {
+					passSkipped.incrementAndGet();
+					logOnce("budget", "测速: 已超过时间预算，剩余节点按未测速处理");
+				}
 				/* Per-node verdict. "不可用" is logged for every such node
 				   (that is the symptom being chased); "未测速" only once per
 				   pass, because it is normally a pass-wide condition (no core)
@@ -817,6 +899,9 @@ public class SubscribeActivity extends BaseActivity {
 						refreshCountryChips();
 						refreshProtoFilterSpinner();
 						applyView();
+						/* Last node reported: the pass is over, let the next one
+						   start (and restore the normal logging). */
+						releasePass();
 						updateTestProgress();
 						if (batch) {
 							int ok = 0;
@@ -830,8 +915,11 @@ public class SubscribeActivity extends BaseActivity {
 								else
 								  un++;
 							}
+							int skipped = passSkipped.get();
 							TProxyService.log("=== 测速结束：可用 " + ok + " / 不可用 "
-								+ bad + " / 未测速 " + un + " · 详见上面每行「测速:」 ===");
+								+ bad + " / 未测速 " + un + (skipped > 0
+									? ("（其中 " + skipped + " 个超出时间预算未测）") : "")
+								+ " · 详见上面每行「测速:」 ===");
 							/* Nothing was measured at all: say so out loud
 							   instead of leaving the user with an unchanged
 							   list and no reason. */
@@ -843,6 +931,10 @@ public class SubscribeActivity extends BaseActivity {
 							  Toast.makeText(SubscribeActivity.this,
 								getString(R.string.sub_test_missing_nodes, missing),
 								Toast.LENGTH_LONG).show();
+							else if (skipped > 0)
+							  Toast.makeText(SubscribeActivity.this,
+								getString(R.string.sub_test_budget_out, skipped),
+								Toast.LENGTH_LONG).show();
 						}
 					}
 				});
@@ -850,7 +942,7 @@ public class SubscribeActivity extends BaseActivity {
 				   never freeze the progress. Re-resolved each pass so a mislabeled
 				   flag (a stale "RU" on a US IP) self-heals; a failure yields
 				   UNKNOWN, which is kept out so a good value is never clobbered. */
-				String cc = GeoIp.countryOf(prefs, n.server, true);
+				String cc = expired ? null : GeoIp.countryOf(prefs, n.server, true);
 				if (cc != null && !cc.isEmpty() && !GeoIp.UNKNOWN.equals(cc)
 						&& !cc.equals(n.country)) {
 					n.country = cc;
@@ -986,11 +1078,20 @@ public class SubscribeActivity extends BaseActivity {
 		  if (!targets.contains(u))
 			targets.add(u);
 		int timeoutMs = prefs.getProxyTestTimeout() * 1000;
+		/* A batch must not inherit a 30s per-target setting: 4 targets plus 2
+		   rescue probes x 30s is three minutes for ONE dead node, and a
+		   subscription has hundreds. Cap it (logged once). */
+		boolean capped = false;
+		if (batchPass && timeoutMs > BATCH_PROBE_TIMEOUT_MS) {
+			timeoutMs = BATCH_PROBE_TIMEOUT_MS;
+			capped = true;
+		}
 		/* First pass at the configured timeout. A success on ANY target means
 		   available. A genuine failure (504/408: the core really could not
 		   complete the probe) is remembered; a malfunction (401/404/...) is not
 		   a verdict, so it only ever leaves the node untested. */
 		boolean failed = false;
+		int hardFails = 0;
 		for (String target : targets) {
 			Long d = delayProbe(name, target, timeoutMs);
 			if (d != null && d >= 0)
@@ -1000,16 +1101,28 @@ public class SubscribeActivity extends BaseActivity {
 			   a full trace (target + what came back). */
 			TProxyService.log("测速: " + name + " @" + target + " -> "
 				+ (d == null ? "无判定（测试没跑起来）" : "失败(" + d + ")"));
-			if (d != null)
-			  failed = true;
+			if (d != null) {
+				failed = true;
+				hardFails++;
+				/* Two independent hard failures are enough to fall through to
+				   the rescue probe: trying all four only makes a dead node
+				   slower, and the rescue pass (different targets, longer
+				   timeout) is what really protects a slow-but-working node. */
+				if (hardFails >= 2)
+				  break;
+			}
 		}
+		if (capped)
+		  logOnce("cap", "测速: 批量测速把单目标超时收紧为 "
+			+ (BATCH_PROBE_TIMEOUT_MS / 1000) + "s（设置在 "
+			+ prefs.getProxyTestTimeout() + "s）");
 		if (!failed)
 		  return null;              /* only inconclusive -> untested, NOT 不可用 */
 		/* Rescue pass: one longer-timeout probe on the most reliable targets,
 		   for slow-but-working nodes that a tight timeout just failed. This is
 		   what the old "real request" fallback used to rescue, without touching
 		   the global selector; it only runs for nodes about to be flagged. */
-		int retryMs = Math.max(timeoutMs, 12000);
+		int retryMs = Math.max(timeoutMs, batchPass ? 10000 : 12000);
 		for (String target : RETRY_TEST_URLS) {
 			Long d = delayProbe(name, target, retryMs);
 			if (d != null && d >= 0) {
@@ -1493,11 +1606,24 @@ public class SubscribeActivity extends BaseActivity {
 			test.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
+					/* Same single-flight rule as "测速全部": starting one in the
+					   middle of a pass would reset pendingTests/testTotal and
+					   corrupt the whole batch. */
+					if (!passRunning.compareAndSet(false, true)) {
+						Toast.makeText(SubscribeActivity.this, R.string.sub_test_busy,
+							Toast.LENGTH_SHORT).show();
+						return;
+					}
 					corePrepared = false;
 					/* Fresh pass keys: a single-node re-test must log its own
 					   reason even if the same one was already printed by a
 					   previous "测速全部". */
 					passLogged.clear();
+					/* A single test keeps the user's own timeout and verbose
+					   logging; only the pass bookkeeping changes. */
+					batchPass = false;
+					CoreTestHost.setVerbose(true);
+					passDeadlineMs = System.currentTimeMillis() + 120000;
 					/* Show the same progress line/bar (0/1 -> 1/1) so a single
 					   re-test is visibly "running" too. */
 					testsDone = 0;
