@@ -211,6 +211,37 @@ public class MihomoConfig {
 		return out;
 	}
 
+	/* Build a minimal, TUN-less, listener-less profile for the in-app TEST core
+	   (see CoreTestHost). It only needs the node list so the core's isolated
+	   latency test (the "testDelay" action) can run without a VPN: no `tun:`
+	   means no interface, no `mixed-port` means nothing binds, no
+	   `external-controller` means no API listener - so this core can never
+	   clash with the tunnel core running in the :native process. Writes
+	   <homeDir>/config.yaml and returns its content (for change detection). */
+	public static String buildTestCoreConfig(Preferences prefs,
+			boolean allNodes, File homeDir) throws IOException {
+		String body = mergedConfig(prefs, allNodes);
+		StringBuilder sb = new StringBuilder(body);
+		if (!body.endsWith("\n"))
+		  sb.append('\n');
+		sb.append("mode: rule\n");
+		sb.append("log-level: silent\n");
+		sb.append("ipv6: false\n");
+		if (!sectionExists(sb, "dns:"))
+		  sb.append("dns:\n")
+			.append("  enable: true\n")
+			.append("  enhanced-mode: fake-ip\n")
+			.append("  fake-ip-range: 198.18.0.1/16\n")
+			.append("  nameserver:\n")
+			.append("    - 223.5.5.5\n")
+			.append("    - 119.29.29.29\n");
+		File out = new File(homeDir, "config.yaml");
+		try (FileOutputStream fos = new FileOutputStream(out, false)) {
+			fos.write(sb.toString().getBytes("UTF-8"));
+		}
+		return sb.toString();
+	}
+
 	/* One-line summary of what the config contains, for the log: an empty
 	   merged pool is the kind of thing that stays invisible until every
 	   connection times out. */
@@ -252,6 +283,13 @@ public class MihomoConfig {
 	/* Merge every subscription into one node pool and point a single
 	   self-built group at it. */
 	private static String mergedConfig(Preferences prefs) throws IOException {
+		return mergedConfig(prefs, false);
+	}
+
+	/* allNodes=true ignores the country filter: used to build the TUN-less
+	   TEST core so every node in the list can be latency-tested (the tunnel's
+	   own pool stays narrowed to the picked country). */
+	private static String mergedConfig(Preferences prefs, boolean allNodes) throws IOException {
 		List<String> taken = new ArrayList<String>();
 		StringBuilder proxies = new StringBuilder();
 
@@ -259,7 +297,7 @@ public class MihomoConfig {
 		   country's proxies, so "auto fastest" and a manual pick both stay
 		   inside that country. An empty filter means "all countries". */
 		String cc = prefs.getSubCountryFilter();
-		boolean ccSet = (cc != null && !cc.isEmpty());
+		boolean ccSet = !allNodes && (cc != null && !cc.isEmpty());
 
 		for (Subscription sub : prefs.getSubscriptions()) {
 			/* A disabled subscription is kept but not merged into the pool. */

@@ -117,6 +117,8 @@ public class SubscribeActivity extends BaseActivity {
 
 	/* Latency order by default: fastest first is what people actually want. */
 	private int pendingTests = 0;
+	/* Set once per "test" pass: the TUN-less test core has been prepared. */
+	private volatile boolean corePrepared = false;
 	/* Progress of a "test all" run, and the last time the list was fully
 	   re-filtered. Sorting hundreds of rows on every single result would cost
 	   more than the wait it saves, so a full refresh is throttled. */
@@ -245,15 +247,25 @@ public class SubscribeActivity extends BaseActivity {
 		refreshProtoFilterSpinner();
 	}
 
+	@Override
+	protected void onResume() {
+		super.onResume();
+		/* Settings may have changed "显示不可用节点" (or the test-core switches);
+		   re-filter so the list reflects the new choice as soon as we return. */
+		applyView();
+	}
+
 	/* Rebuild the visible list from nodes according to filter + sort. */
 	private void applyView() {
 		refreshSubNames();
 		shown.clear();
-		/* Default view: only reachable (available) proxies, sorted fastest-first
-		   by latency. The country chips and protocol spinner still narrow the
-		   list down further. */
+		/* Default view: only reachable (available) proxies, sorted
+		   fastest-first by latency. "显示不可用节点" (Settings → 订阅) also
+		   lists the broken (-2) and never-tested (-1) ones, which rank to the
+		   bottom. The country chips and protocol spinner still narrow further. */
+		boolean showAll = prefs.getShowUnavailable();
 		for (ClashNode n : nodes) {
-			if (!isAvailable(n))
+			if (!showAll && !isAvailable(n))
 			  continue;
 			if (!filterCountry.isEmpty() && !matchesCountry(n, filterCountry))
 			  continue;
@@ -446,8 +458,9 @@ public class SubscribeActivity extends BaseActivity {
 			String t = nodeType(n);
 			if (t.isEmpty())
 			  continue;
-			/* Only a node that passed a latency test is usable. */
-			if (n.latency < 0)
+			/* Count what the list shows: with "显示不可用节点" on, unusable
+			   nodes are listed too, so they belong in the protocol counts. */
+			if (n.latency < 0 && !prefs.getShowUnavailable())
 			  continue;
 			Integer c = counts.get(t);
 			counts.put(t, c == null ? 1 : c + 1);
@@ -497,6 +510,7 @@ public class SubscribeActivity extends BaseActivity {
 		   rebuild the node-name map and re-probe the api host from scratch. */
 		proxyNameCache = null;
 		apiHost = null;
+		corePrepared = false;
 		pendingTests = nodes.size();
 		testsDone = 0;
 		lastTestUiUpdate = 0;
@@ -512,18 +526,53 @@ public class SubscribeActivity extends BaseActivity {
 		updateStats();
 	}
 
+	/* Load/refresh the TUN-less test core when the settings allow it, so the
+	   latency test can use the core's REAL forwarding delay. Returns true when
+	   a test core is available in this process. Runs on a pool thread (loading
+	   the core takes a moment). */
+	private boolean prepareTestCore() {
+		try {
+			if (prefs.getEnable()) {
+				/* Connected: a separate all-nodes test core is only built when
+				   the user asked for it ("测速并入全量节点"); otherwise the
+				   tunnel core is used through the embedded REST API. */
+				if (!prefs.getTestAllNodes())
+				  return false;
+				return CoreTestHost.ensureReady(this, prefs);
+			}
+			/* Disconnected: only if "未连接时内核测速" is on. */
+			if (!prefs.getPreloadCore())
+			  return false;
+			return CoreTestHost.ensureReady(this, prefs);
+		} catch (Throwable e) {
+			return false;
+		}
+	}
+
 	/* batch = part of "test all": only refresh + persist once the last one
 	   finishes, otherwise we would rewrite the whole cache per node. */
 	private void testNode(final ClashNode n, final boolean batch) {
 		testPool.execute(new Runnable() {
 			@Override
 			public void run() {
-				/* The verdict comes ONLY from mihomo pushing a request through
-				   THIS node (GET /proxies/{name}/delay). That proves the proxy
-				   actually tunnels traffic - a bare TCP port-open is NOT enough,
-				   so the socket probe was removed. When the real test cannot run
-				   (tunnel down, or the node is absent from the running config) we
-				   leave the node unverified (-1) rather than claim it is usable. */
+				/* Make sure a core is available for the real-forwarding test:
+			   the TUN-less test core when disconnected (or when the user asked
+			   for all-nodes testing), which also refreshes its node set. Only
+			   the first task of a pass does the work. */
+				if (!corePrepared) {
+					synchronized (SubscribeActivity.this) {
+						if (!corePrepared) {
+							prepareTestCore();
+							corePrepared = true;
+						}
+					}
+				}
+				/* The verdict comes ONLY from the core pushing a request through
+				   THIS node (the isolated "testDelay" probe). That proves the
+				   proxy actually tunnels traffic - a bare TCP port-open is NOT
+				   enough, so the socket probe was removed. When the real test
+				   cannot run (no core, or the node is absent from the loaded
+				   config) we leave the node unverified (-1), not "unavailable". */
 				Long real = proxyDelayMs(n);
 				if (real != null)
 				  n.latency = real;        // >=0 usable, -2 could not tunnel
@@ -634,7 +683,9 @@ public class SubscribeActivity extends BaseActivity {
 	   (tunnel down / node not in the running config). Works for every protocol
 	   because mihomo performs the handshake. */
 	private Long proxyDelayMs(ClashNode n) {
-		if (!prefs.getEnable())
+		/* Works while the tunnel is up (tunnel core) OR when a TUN-less test
+		   core has been loaded in this process (CoreTestHost). */
+		if (!prefs.getEnable() && !CoreTestHost.isReady())
 		  return null;
 		if (!ensureProxyNameCache())
 		  return null;
@@ -693,6 +744,15 @@ public class SubscribeActivity extends BaseActivity {
 	   run at all (transport down / auth / route / other status) - which must NOT
 	   be reported as "unavailable". */
 	private Long delayProbe(String name, String target, int timeoutMs) {
+		/* Preferred: the core's own isolated probe through the action bridge.
+		   Available whenever a core is loaded in THIS process - i.e. the
+		   TUN-less test core - so latency can be measured with the VPN off and
+		   without any HTTP. Returns null when no core lives here. */
+		Long viaCore = CoreTestHost.testDelay(name, target, timeoutMs);
+		if (viaCore != null)
+		  return viaCore;
+		/* Fallback: the REST /delay served by the app's embedded control API
+		   (used when only the :native tunnel core is available). */
 		try {
 			String path = "/proxies/" + encodePath(name)
 				+ "/delay?timeout=" + timeoutMs + "&url=" + URLEncoder.encode(target, "UTF-8");
@@ -724,7 +784,9 @@ public class SubscribeActivity extends BaseActivity {
 	private boolean ensureProxyNameCache() {
 		if (proxyNameCache != null)
 		  return true;
-		if (!prefs.getEnable())
+		/* Work with the tunnel core OR the TUN-less test core loaded in this
+		   process (CoreTestHost). */
+		if (!prefs.getEnable() && !CoreTestHost.isReady())
 		  return false;
 		String host = resolveApiHost();
 		if (host == null)
@@ -1022,6 +1084,7 @@ public class SubscribeActivity extends BaseActivity {
 			test.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
+					corePrepared = false;
 					testNode(n, false);
 				}
 			});

@@ -116,6 +116,18 @@ public class Preferences
 	   LAN. */
 	public static final String PROXY_PORT = "ProxyPort";
 	public static final String ALLOW_LAN = "AllowLan";
+	/* Latency-test behaviour:
+	   - PRELOAD_CORE: keep a TUN-less core alive in the app process so the
+	     core's REAL forwarding delay can be measured even when the VPN tunnel
+	     is not connected (the core never needs a TUN to test a proxy).
+	   - TEST_ALL_NODES: build that test core from ALL subscription nodes,
+	     ignoring the country filter, so every node in the list is testable. */
+	public static final String PRELOAD_CORE = "PreloadCore";
+	public static final String TEST_ALL_NODES = "TestAllNodes";
+	/* Show every node in the subscribe list - including the ones a latency
+	   test marked unusable (-2) or never reached (-1). Off (default) lists only
+	   reachable nodes. */
+	public static final String SHOW_UNAVAILABLE = "ShowUnavailable";
 	public static final int DEFAULT_PROXY_PORT = 7890;
 	public static final int MIN_PROXY_PORT = 1024;
 	public static final int MAX_PROXY_PORT = 65535;
@@ -760,6 +772,41 @@ public class Preferences
 	public void setAllowLan(boolean allow) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putBoolean(key(ALLOW_LAN), allow);
+		editor.commit();
+	}
+
+	/* Use the core's real forwarding delay for the latency test even when the
+	   VPN is not connected (loads a TUN-less core in the app process). */
+	public boolean getPreloadCore() {
+		return prefs.getBoolean(key(PRELOAD_CORE), true);
+	}
+
+	public void setPreloadCore(boolean v) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putBoolean(key(PRELOAD_CORE), v);
+		editor.commit();
+	}
+
+	/* Build the test core from ALL subscription nodes (ignore the country
+	   filter) so nodes outside the current pool can still be tested. */
+	public boolean getTestAllNodes() {
+		return prefs.getBoolean(key(TEST_ALL_NODES), true);
+	}
+
+	public void setTestAllNodes(boolean v) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putBoolean(key(TEST_ALL_NODES), v);
+		editor.commit();
+	}
+
+	/* List unusable / untested nodes in the subscribe page too. */
+	public boolean getShowUnavailable() {
+		return prefs.getBoolean(key(SHOW_UNAVAILABLE), false);
+	}
+
+	public void setShowUnavailable(boolean v) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putBoolean(key(SHOW_UNAVAILABLE), v);
 		editor.commit();
 	}
 

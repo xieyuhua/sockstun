@@ -114,6 +114,36 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			getString(R.string.sub_test_timeout, prefs.getProxyTestTimeout()), R.id.settings_test_timeout);
 		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_autosel_interval,
 			autoSelectIntervalSubtitle(), R.id.settings_autosel_interval);
+		/* Latency-test behaviour: whether a TUN-less core is kept alive so the
+		   real forwarding delay can be measured while disconnected, and
+		   whether that core carries ALL nodes (ignore the country filter). */
+		addSwitchRow(group_subscription, R.drawable.ic_routing, R.string.settings_preload_core,
+			R.string.settings_preload_core_hint, prefs.getPreloadCore(),
+			new CompoundButton.OnCheckedChangeListener() {
+				@Override
+				public void onCheckedChanged(CompoundButton button, boolean checked) {
+					prefs.setPreloadCore(checked);
+					CoreTestHost.reset();
+				}
+			});
+		addSwitchRow(group_subscription, R.drawable.ic_routing, R.string.settings_test_all_nodes,
+			R.string.settings_test_all_nodes_hint, prefs.getTestAllNodes(),
+			new CompoundButton.OnCheckedChangeListener() {
+				@Override
+				public void onCheckedChanged(CompoundButton button, boolean checked) {
+					prefs.setTestAllNodes(checked);
+					CoreTestHost.reset();
+				}
+			});
+		/* Whether the subscribe list also shows unusable / untested nodes. */
+		addSwitchRow(group_subscription, R.drawable.ic_routing, R.string.settings_show_unavailable,
+			R.string.settings_show_unavailable_hint, prefs.getShowUnavailable(),
+			new CompoundButton.OnCheckedChangeListener() {
+				@Override
+				public void onCheckedChanged(CompoundButton button, boolean checked) {
+					prefs.setShowUnavailable(checked);
+				}
+			});
 		addRow(group_general, R.drawable.ic_log, R.string.log,
 			logSubtitle(), R.id.settings_log);
 		addRow(group_general, R.drawable.ic_rules, R.string.settings_config,
