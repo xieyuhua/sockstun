@@ -151,6 +151,16 @@ public class TProxyService extends VpnService {
 	private volatile boolean controllerReady = false;
 	private volatile String controllerHost = "127.0.0.1";
 	private volatile String proxyTestStatus = "";
+	/* Debounce for an automatic config rebuild after a failed selector PUT
+	   (see rebuildForSelection), and the tick counter of the periodic
+	   "which node is actually active" refresh (see sampleStats). */
+	private volatile long lastSelectRebuildMs = 0;
+	private int nodeSyncTick = 0;
+	/* True while applying a node the USER just picked (ACTION_SELECT), false
+	   for the apply that runs as part of starting the tunnel. Only the former
+	   justifies a config rebuild when the node is missing from the running
+	   config (see rebuildForSelection). */
+	private volatile boolean selectUserAction = false;
 	private static final String PROXY_TEST_URL = "http://www.gstatic.com/generate_204";
 	/* 延迟测试候选地址：节点只要能通任意一个，就给出干净的“可用”。Clash 自己的
 	   /delay 语义是“代理回了任何 HTTP 响应即节点管线通”，502 只说明该目标被节点
@@ -272,8 +282,13 @@ public class TProxyService extends VpnService {
 		/* mihomo can change a selector while running, so a newly picked node
 		   takes effect immediately instead of waiting for a restart. */
 		if (intent != null && ACTION_SELECT.equals(intent.getAction())) {
-			if (tunFd != null)
-			  applySelectedNode(new Preferences(this));
+			if (tunFd != null) {
+				/* Mark it as the user's own pick: only then is a config
+				   rebuild (see rebuildForSelection) the right fallback when
+				   the node is absent from the running config. */
+				selectUserAction = true;
+				applySelectedNode(new Preferences(this));
+			}
 			return START_STICKY;
 		}
 		startService();
@@ -546,7 +561,14 @@ public class TProxyService extends VpnService {
 		appendLog("Clash.startTUN OK (fd=" + tunFd.getFd() + ", stack=" + started
 			+ ", addr=" + address + ", mtu=" + prefs.getTunnelMtu() + ")");
 
-		/* Best-effort: apply the node the user picked in the subscription. */
+		/* A brand-new tunnel has not selected anything yet: drop the node
+		   recorded by the previous run, so the home page / notification cannot
+		   show a stale name until the pick below has actually landed. */
+		prefs.setActiveNode("");
+		/* Best-effort: apply the node the user picked in the subscription. This
+		   is NOT a user action of its own: the config was just built from the
+		   same preferences (see rebuildForSelection). */
+		selectUserAction = false;
 		applySelectedNode(prefs);
 		/* Independent of the selection: confirm the control API really answers,
 		   and record why it does not when it does not. Without this the core's
@@ -953,14 +975,116 @@ public class TProxyService extends VpnService {
 			if (target == null)
 			  target = proxy; /* last-ditch: try the raw name */
 			int code = putSelector(group, target);
-			String note = (code >= 200 && code < 300) ? "ok" : ("http " + code);
+			boolean ok = (code >= 200 && code < 300);
+			String note = ok ? "ok" : ("http " + code);
 			if (!target.equals(proxy))
 			  note += " (resolved to " + target + ")";
 			appendLog("selector set: " + note);
+			if (ok) {
+				/* The pick IS in force now: record what the core really uses,
+				   so the home page / notification cannot keep showing a stale
+				   node. */
+				syncActiveNode(group);
+			} else {
+				/* The node is not a member of the group the core is running -
+				   typically because the pool was baked in earlier (the user
+				   just changed the country filter, or the config predates the
+				   pick). mihomo cannot switch to it, so the ONLY way to make
+				   the selection real is to rebuild the config: writing the
+				   preference alone left the old node carrying the traffic
+				   while the UI showed the new one. */
+				rebuildForSelection("目标节点不在当前内核配置的组里");
+			}
 			testProxyConnectivity(new Preferences(this));
 		} catch (Throwable e) {
 			appendLog("selector set skipped: " + e);
 		}
+	}
+
+	/* Record the proxy the core has ACTUALLY selected for `group` (and, in auto
+	   mode, the node behind the country url-test group). Stored in Preferences
+	   so both the UI process and this service's notification show the truth. */
+	private void syncActiveNode(String group) {
+		try {
+			String secret = new Preferences(this).getSecret();
+			String name = nowOf(group, 0, secret);
+			if (name == null || name.isEmpty())
+			  return;
+			Preferences p = new Preferences(this);
+			if (!name.equals(p.getActiveNode())) {
+				p.setActiveNode(name);
+				appendLog("active node: " + name);
+				updateNotification();
+			}
+		} catch (Throwable e) {
+			appendLog("active node: 读取失败 " + e);
+		}
+	}
+
+	/* GET /proxies/{group} and follow `now`, descending into nested groups
+	   (auto mode selects a country url-test group, whose own health check picks
+	   the real node). Returns null when the API cannot be read. */
+	private String nowOf(String group, int depth, String secret) throws IOException {
+		ApiResult r = bridgeApi("GET", apiHost, MihomoConfig.API_PORT,
+			"/proxies/" + encodePath(group), null, secret);
+		if (r.code == -1 || r.body == null)
+		  return null;
+		JSONObject o;
+		try {
+			o = new JSONObject(r.body);
+		} catch (JSONException e) {
+			return null;
+		}
+		String now = o.optString("now", "");
+		if (now.isEmpty())
+		  return "";
+		/* A group answers with `all`; a real proxy does not. */
+		if (depth < 2 && o.has("all")) {
+			String inner = nowOf(now, depth + 1, secret);
+			if (inner != null && !inner.isEmpty())
+			  return inner;
+		}
+		return now;
+	}
+
+	/* A selection could not be applied to the running core: rebuild the config
+	   once (it is baked at start time, so the new pick/country only exists in a
+	   fresh one). Debounced, because a rebuild runs applySelectedNode again and
+	   a genuinely impossible pick would otherwise loop forever. */
+	private void rebuildForSelection(final String why) {
+		long now = System.currentTimeMillis();
+		/* Only a user-initiated pick is worth a rebuild: the STARTUP apply
+		   reads a config that was just built from the very same preferences, so
+		   rebuilding would change nothing and would tear down a working tunnel
+		   for nothing. */
+		if (!selectUserAction) {
+			appendLog("selector: " + why + "（启动时自动应用，重建无意义，仅提示）");
+			return;
+		}
+		if (prefs != null && prefs.getCustomConfig()) {
+			appendLog("selector: 使用自定义配置，所选节点不在其中，无法自动切换；"
+				+ "请在自定义配置里包含该节点");
+			return;
+		}
+		if (now - lastSelectRebuildMs < 60000) {
+			appendLog("selector: " + why + " → 60s 内已重建过一次，跳过自动重建");
+			return;
+		}
+		if (tunFd == null) {
+			appendLog("selector: " + why + "（隧道未在运行，无需重建）");
+			return;
+		}
+		lastSelectRebuildMs = now;
+		appendLog("selector: " + why + " → 自动重建隧道配置，使这次选择立即生效");
+		/* rebuildTunnel() tears the fd down and re-establishes, so it must run
+		   where onStartCommand's own work runs: the main thread. */
+		new Handler(Looper.getMainLooper()).post(new Runnable() {
+			@Override
+			public void run() {
+				if (tunFd != null)
+				  rebuildTunnel();
+			}
+		});
 	}
 
 	/* Poll the core's control API until it answers, so a selector PUT right
@@ -1960,7 +2084,11 @@ public class TProxyService extends VpnService {
 		stopStats();
 		stopEmbeddedApi();
 
-		new Preferences(this).setEnable(false);
+		Preferences p = new Preferences(this);
+		p.setEnable(false);
+		/* The recorded node belongs to the tunnel that has just been torn down:
+		   keeping it would make the UI show a node that is no longer in use. */
+		p.setActiveNode("");
 		QSTileService.requestUpdate(this);
 
 		stopForeground(true);
@@ -2211,6 +2339,15 @@ public class TProxyService extends VpnService {
 
 		saveStats();
 		saveProxyStats();
+
+		/* Re-read which node the core is really using every ~30s: in auto mode
+		   the core's own health check moves the selector by itself, so the
+		   home page / notification would otherwise keep showing the first
+		   node forever. */
+		if (++nodeSyncTick >= 30) {
+			nodeSyncTick = 0;
+			syncActiveNode(MihomoConfig.GROUP);
+		}
 	}
 
 	/* A stuck traffic counter is invisible from the UI - it just keeps

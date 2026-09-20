@@ -264,6 +264,19 @@ class CoreTestHost {
 	   unavailable. Getting that distinction wrong is what made working nodes
 	   flip to 不可用. */
 	static Long testDelay(String proxyName, String url, int timeoutMs) {
+		return testDelay(proxyName, url, timeoutMs, 0);
+	}
+
+	/* Same, with an explicit bound on how long we may wait for the reply. The
+	   caller's per-node time limit (设置 → 每节点测速上限) can be TIGHTER than
+	   the probe's own timeout; waiting past it would make that limit a lie (the
+	   core would still hold the single bridge slot after the caller gave up),
+	   so the bound is threaded all the way down to the bridge wait. 0 = the
+	   default (probe timeout + 5s). */
+	static Long testDelay(String proxyName, String url, int timeoutMs, long waitBound) {
+		final long waitMs = waitBound > 0
+			? Math.max(500L, Math.min(timeoutMs + 5000L, waitBound))
+			: timeoutMs + 5000L;
 		/* No core in THIS process means the tunnel core (in :native) must be
 		   reached over HTTP instead, so answer "no verdict" without a bridge
 		   call - otherwise every probe would log a skipped action. */
@@ -276,7 +289,7 @@ class CoreTestHost {
 		if (delayShape < 0) {
 			synchronized (SHAPE_LOCK) {
 				if (delayShape < 0) {
-					int found = detectShape(proxyName, url, timeoutMs);
+					int found = detectShape(proxyName, url, timeoutMs, waitMs);
 					if (found < 0) {
 						TProxyService.log("delay: 所有参数形状都被内核拒绝，测速无法进行");
 						return null;
@@ -291,7 +304,7 @@ class CoreTestHost {
 		int shape = delayShape;
 		if (shape < 0)
 		  return null;
-		Probe p = probe(shape, proxyName, url, timeoutMs);
+		Probe p = probe(shape, proxyName, url, timeoutMs, waitMs);
 		if (p.rejected) {
 			/* The remembered shape stopped being accepted (the core reloaded
 			   with another build?): forget it so the next call re-detects,
@@ -316,9 +329,10 @@ class CoreTestHost {
 	   shape (5 x (timeout+5s) = over a minute with a long timeout) and that
 	   stall happens BEFORE any node is tested, so the user just sees a frozen
 	   0% progress bar. */
-	private static int detectShape(String proxyName, String url, int timeoutMs) {
+	private static int detectShape(String proxyName, String url, int timeoutMs,
+			long waitMs) {
 		for (int i = 0; i < DELAY_SHAPES.length; i++) {
-			Probe p = probe(i, proxyName, url, timeoutMs);
+			Probe p = probe(i, proxyName, url, timeoutMs, waitMs);
 			if (!p.rejected)
 			  return i;
 			TProxyService.log("delay: 内核不接受参数形状#" + i + "（" + DELAY_SHAPES[i][0]
@@ -329,14 +343,14 @@ class CoreTestHost {
 	}
 
 	/* One attempt with shape #shape. */
-	private static Probe probe(int shape, String proxyName, String url, int timeoutMs) {
+	private static Probe probe(int shape, String proxyName, String url, int timeoutMs,
+			long waitMs) {
 		Probe r = new Probe();
 		try {
 			String params = delayData(shape, proxyName, url, timeoutMs);
 			/* The probe may run for `timeoutMs` inside the core, so wait beyond
-			   that - the default 6s bridge wait would abort a 12s rescue probe
-			   and throw the answer away. */
-			String raw = TProxyService.apiActionRaw("testDelay", params, timeoutMs + 5000L);
+			   that - but never past the caller's per-node budget. */
+			String raw = TProxyService.apiActionRaw("testDelay", params, waitMs);
 			r.raw = raw;
 			if (raw == null) {
 				TProxyService.log("delay: 动作无返回 name=" + proxyName + " url=" + url

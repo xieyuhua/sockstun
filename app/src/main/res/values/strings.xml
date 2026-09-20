@@ -214,9 +214,12 @@
 	<string name="sub_test_url_invalid">请输入 http 或 https 开头的地址</string>
 	<string name="settings_test_timeout">延迟测试超时</string>
 	<string name="settings_node_limit">每节点测速上限</string>
+	<string name="settings_probe_timeout_fail">无响应判为不可用</string>
+	<string name="settings_probe_timeout_fail_hint">探测在该节点的时限内没有任何响应（内核/控制接口不回包）时，直接把该节点判为「不可用」（默认开）。关闭则更保守：这类情况记为「未测速」，只有内核明确报失败才判不可用。</string>
 	<string name="sub_test_node_limit">每节点最长 %1$d 秒</string>
-	<string name="sub_test_node_limit_hint">一个节点的全部尝试（含救援探测）最多用这么久，超出即按「未测速」处理。调小整轮更快，调大更利于救回慢节点。上限不会小于一次探测超时（自动保证）。</string>
+	<string name="sub_test_node_limit_hint">一个节点的全部尝试（每次探测的等待也在内）最多用这么久。调小整轮更快，但慢节点更容易被判超时；调大更利于救回慢节点。</string>
 	<string name="sub_test_node_limit_invalid">请输入 5–120 之间的秒数</string>
+	<string name="sub_test_all_timeout">本轮所有「不可用」都来自节点无响应。若这些节点本来可用，多半是内核/桥异常，请查看「日志」</string>
 	<string name="settings_preload_core">未连接时内核测速</string>
 	<string name="settings_preload_core_hint">未连接 VPN 时提前加载测速内核，使测速立刻开始；关闭后点「测速」时才按需加载（首次稍慢，功能不受影响）</string>
 
@@ -235,10 +238,12 @@
 	<string name="sub_test_budget_out">本轮测速已达时间上限，剩余 %1$d 个节点未测速（可稍后再测）</string>
 	<string name="sub_help">使用说明</string>
 	<string name="sub_help_title">订阅怎么用？</string>
-	<string name="sub_help_text">1. 可以保存多个订阅（设置 → 订阅配置）。点「拉取订阅」会更新全部订阅，节点合并成一个池，再排序、筛选、测速。\n\n2. 「自动选择最快节点」：打开后由内核定时测速，自动使用延迟最低的那个，测速间隔和测试地址点下方文字修改。关掉即为手动模式，点哪个节点就用哪个。\n\n3. 测速全部：绿色 = 可用，红色 = 不可用，数字是内核经该节点**真实转发**测得的延迟（不是端口连通），只代表链路快慢，不代表实际带宽。测速范围跟随顶部选中的国家/地区：选「全部」就测全部节点，选某个国家就测该国的全部节点。测速要经内核逐个真实转发，而内核一次只处理一个探测，所以总时间≈各节点之和（进度条会显示剩余估算）；每个节点最多花多久、是否显示不可用节点、未连接时是否预先加载内核，见 设置 → 订阅 里的「每节点测速上限 / 显示不可用节点 / 未连接时内核测速」。\n\n4. 分流由「路由规则」页统一决定（域名 / IP / IP 段 → 代理或直连），未命中的按该页顶部的开关处理；订阅自带的规则不参与。\n\n5. 与「服务器」页的关系：有订阅就用订阅；没有订阅时，「服务器」里启用的 SOCKS5 会作为手动上游生效。</string>
+	<string name="sub_help_text">1. 可以保存多个订阅（设置 → 订阅配置）。点「拉取订阅」会更新全部订阅，节点合并成一个池，再排序、筛选、测速。\n\n2. 「自动选择最快节点」：打开后由内核定时测速，自动使用延迟最低的那个，测速间隔和测试地址点下方文字修改。关掉即为手动模式，点哪个节点就用哪个。\n\n3. 测速全部：绿色 = 可用，红色 = 不可用，数字是内核经该节点**真实转发**测得的延迟（不是端口连通），只代表链路快慢，不代表实际带宽。测速范围跟随顶部选中的国家/地区：选「全部」就测全部节点，选某个国家就测该国的全部节点。测速要经内核逐个真实转发，而内核一次只处理一个探测，所以总时间≈各节点之和（进度条会显示剩余估算）；每个节点最多花多久、无响应算不算不可用，见 设置 → 订阅 里的「每节点测速上限 / 无响应判为不可用」；是否显示不可用节点、未连接时是否预先加载内核也在那里。\n\n4. 分流由「路由规则」页统一决定（域名 / IP / IP 段 → 代理或直连），未命中的按该页顶部的开关处理；订阅自带的规则不参与。\n\n5. 与「服务器」页的关系：有订阅就用订阅；没有订阅时，「服务器」里启用的 SOCKS5 会作为手动上游生效。</string>
 	<string name="sub_applied_hint">已选择：%s\n下次启动隧道时生效</string>
 	<string name="sub_switched">已选择：%s</string>
 	<string name="sub_switched_restart">已选择：%1$s\n自动选择已关闭，重新连接后固定使用该节点</string>
+	<string name="sub_switched_now">已选择：%1$s\n正在切换到该节点…（若它不在当前配置里会自动重连）</string>
+	<string name="sub_country_filter_applying">已切换国家/地区，正在重新连接以应用（新配置只含该地区节点）</string>
 	<string name="sub_add_to_server">已添加到服务器列表：%s</string>
 	<string name="sub_server_exists">该节点已在服务器列表中</string>
 	<string name="sub_add_to_server_failed">无法获取该节点原始配置，无法添加到服务器列表（可改用「服务器」页手动粘贴节点定义）</string>

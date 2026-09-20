@@ -225,8 +225,10 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		updateControlState();
 	}
 
-	/* Which node the tunnel is using: the picked subscription node, the manual
-	   SOCKS5 upstream, or the subscription's own default. */
+	/* Which node the tunnel is using: while the tunnel is UP this is the node
+	   the core has ACTUALLY selected (TProxyService records it from the running
+	   config), otherwise the picked subscription node, the manual SOCKS5
+	   upstream, or the subscription's own default. */
 	private void updateNode() {
 		String node = prefs.getCurrentNode();
 		String label = node.isEmpty()

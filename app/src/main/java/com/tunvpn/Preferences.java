@@ -30,6 +30,10 @@ public class Preferences
 	public static final String SUB_NODES = "SubNodes";
 	public static final String SUB_RAW = "SubRaw";
 	public static final String SUB_SELECTED = "SubSelected";
+	/* The proxy the core has ACTUALLY selected right now (written by
+	   TProxyService from the running config). SubSelected is only the wish;
+	   this is the truth the UI must show while the tunnel is up. */
+	public static final String ACTIVE_NODE = "ActiveNode";
 	public static final String SOCKS_SERVERS = "SocksServers";
 	public static final String SOCKS_ACTIVE = "SocksActive";
 	public static final String SUBSCRIPTIONS = "Subscriptions";
@@ -109,6 +113,13 @@ public class Preferences
 	public static final int DEFAULT_NODE_TEST_LIMIT = 15;
 	public static final int MIN_NODE_TEST_LIMIT = 5;
 	public static final int MAX_NODE_TEST_LIMIT = 120;
+	/* When a probe gets NO answer at all (our wait expires, the core never
+	   replies), what does that mean for the node? ON (default): 不可用 - a
+	   probe that never answers is exactly what a user calls a dead node, and
+	   it is what the per-node time limit implies. OFF: only an explicit
+	   failure from the core marks a node unavailable, everything else is
+	   未测速 (the conservative mode used while chasing false negatives). */
+	public static final String PROBE_TIMEOUT_AS_FAIL = "ProbeTimeoutAsFail";
 	/* clash-api bearer token. Generated once and persisted so the secret baked
 	   into the generated config and every client request stay in sync across
 	   restarts. */
@@ -321,6 +332,7 @@ public class Preferences
 		editor.remove(key(profile, SUB_NODES));
 		editor.remove(key(profile, SUB_RAW));
 		editor.remove(key(profile, SUB_SELECTED));
+		editor.remove(key(profile, ACTIVE_NODE));
 		editor.remove(key(profile, SOCKS_SERVERS));
 		editor.remove(key(profile, SOCKS_ACTIVE));
 		editor.remove(key(profile, SUBSCRIPTIONS));
@@ -456,6 +468,18 @@ public class Preferences
 		editor.commit();
 	}
 
+	/* The node the running core is really using (empty when unknown / down). */
+	public String getActiveNode() {
+		String s = prefs.getString(key(ACTIVE_NODE), "");
+		return s == null ? "" : s;
+	}
+
+	public void setActiveNode(String name) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(ACTIVE_NODE), name == null ? "" : name);
+		editor.commit();
+	}
+
 	public boolean hasSubscription() {
 		/* Only an enabled subscription counts as a usable upstream: a disabled
 		   one is kept but never merged, so it must not satisfy "configured". */
@@ -509,12 +533,19 @@ public class Preferences
 		return null;
 	}
 
-	/* Which node the tunnel is meant to use. Empty means "let the
-	   subscription decide for itself". */
+	/* Which node the tunnel is using. Empty means "let the subscription decide
+	   for itself". While the tunnel is UP this reports the node the core has
+	   ACTUALLY selected (recorded by TProxyService, which reads it from the
+	   running config); the pick alone is only a wish, and showing it made the
+	   home page and the notification claim a node the traffic was not using
+	   (e.g. after a country switch, which needs a config rebuild). */
 	public String getCurrentNode() {
 		SocksServer s = getActiveSocksServer();
 		if (s != null)
 		  return socks5Label(s);
+		String actual = getActiveNode();
+		if (getEnable() && actual != null && !actual.isEmpty())
+		  return actual;
 		String sel = getSubSelected();
 		if (sel != null && !sel.isEmpty())
 		  return sel;
@@ -623,6 +654,17 @@ public class Preferences
 		int t = Math.max(MIN_PROXY_TEST_TIMEOUT, Math.min(MAX_PROXY_TEST_TIMEOUT, seconds));
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putInt(key(PROXY_TEST_TIMEOUT), t);
+		editor.commit();
+	}
+
+	/* Whether a probe with no answer means "node unavailable". */
+	public boolean getProbeTimeoutAsFail() {
+		return prefs.getBoolean(key(PROBE_TIMEOUT_AS_FAIL), true);
+	}
+
+	public void setProbeTimeoutAsFail(boolean v) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putBoolean(key(PROBE_TIMEOUT_AS_FAIL), v);
 		editor.commit();
 	}
 

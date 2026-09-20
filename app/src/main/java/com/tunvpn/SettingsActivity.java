@@ -118,6 +118,18 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_node_limit,
 			getString(R.string.sub_test_node_limit, prefs.getNodeTestLimit()),
 			R.id.settings_node_limit);
+		/* What a probe with NO answer means for the node: 不可用 (default) or
+		   未测速. Kept as a switch because "all my nodes became unavailable" is
+		   otherwise hard to tell apart from a broken core/bridge. */
+		addSwitchRow(group_subscription, R.drawable.ic_routing,
+			R.string.settings_probe_timeout_fail,
+			R.string.settings_probe_timeout_fail_hint, prefs.getProbeTimeoutAsFail(),
+			new CompoundButton.OnCheckedChangeListener() {
+				@Override
+				public void onCheckedChanged(CompoundButton button, boolean checked) {
+					prefs.setProbeTimeoutAsFail(checked);
+				}
+			});
 		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_autosel_interval,
 			autoSelectIntervalSubtitle(), R.id.settings_autosel_interval);
 		/* Latency-test behaviour: whether a TUN-less core is kept alive so the

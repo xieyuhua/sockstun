@@ -144,6 +144,11 @@ public class SubscribeActivity extends BaseActivity {
 	   after a pass that measured almost nothing. */
 	private final java.util.concurrent.atomic.AtomicInteger passNotFound =
 		new java.util.concurrent.atomic.AtomicInteger();
+	/* Nodes this pass reported 不可用 purely because their probes never answered
+	   (设置 → 「无响应判为不可用」). When that is the WHOLE pass, the cause is
+	   almost always the core/bridge, not the nodes - worth saying out loud. */
+	private final java.util.concurrent.atomic.AtomicInteger passTimeoutFail =
+		new java.util.concurrent.atomic.AtomicInteger();
 
 	/* Working clash-api host for this test pass. We probe 127.0.0.1 (the
 	   loopback the external-controller is bound to) and keep the device IP as a
@@ -600,12 +605,18 @@ public class SubscribeActivity extends BaseActivity {
 				coreNodeCount = 0;
 				applyView();
 				refreshProtoFilterSpinner();
-				/* The tunnel's node pool is baked in at startup
-				   (MihomoConfig.mergedConfig), so a running tunnel keeps the
-				   old country until it is reconnected. */
-				if (prefs.getEnable())
-				  Toast.makeText(SubscribeActivity.this,
-					  R.string.sub_country_filter_reconnect, Toast.LENGTH_LONG).show();
+				/* The tunnel's node pool is baked into config.yaml at start
+				   time (MihomoConfig.mergedConfig), so a running tunnel keeps
+				   the OLD country's nodes no matter what this page shows.
+				   Rebuild its config right here instead of telling the user to
+				   reconnect by hand - that instruction was the reason the
+				   traffic seemed to ignore the new country. */
+				if (prefs.getEnable()) {
+					startService(new Intent(SubscribeActivity.this, TProxyService.class)
+						.setAction(TProxyService.ACTION_RECONNECT));
+					Toast.makeText(SubscribeActivity.this,
+						R.string.sub_country_filter_applying, Toast.LENGTH_LONG).show();
+				}
 			}
 		});
 		return chip;
@@ -730,6 +741,7 @@ public class SubscribeActivity extends BaseActivity {
 		coreNodeCount = 0;
 		passNotFound.set(0);
 		passSkipped.set(0);
+		passTimeoutFail.set(0);
 		corePrepared = false;
 		lastTestUiUpdate = 0;
 		lastSavedDone = 0;
@@ -756,7 +768,8 @@ public class SubscribeActivity extends BaseActivity {
 			+ (passBudgetMs(toTest.size(), prefs.getNodeTestLimit()) / 1000) + "s · 测速地址 "
 			+ prefs.getAutoTestUrl() + " · 内置目标 " + PROXY_TEST_URLS.length + " 个"
 			+ " · 国家筛选=" + (prefs.getSubCountryFilter().isEmpty()
-				? "全部" : prefs.getSubCountryFilter()) + " ===");
+				? "全部" : prefs.getSubCountryFilter())
+			+ " · 无响应=" + (prefs.getProbeTimeoutAsFail() ? "不可用" : "未测速") + " ===");
 		for (ClashNode n : toTest)
 		  testNode(n, true, gen);
 		/* Stall watchdog. The old one was a single 60s check that only fired when
@@ -1055,7 +1068,18 @@ public class SubscribeActivity extends BaseActivity {
 							   instead of leaving the user with an unchanged
 							   list and no reason. */
 							int missing = passNotFound.get();
-							if (ok == 0 && bad == 0 && un > 0)
+							int timedOut = passTimeoutFail.get();
+							if (ok == 0 && bad > 0 && timedOut >= bad) {
+								/* EVERY failure came from "no answer at all":
+								   that is a pass-wide plumbing problem (core /
+								   bridge), not hundreds of dead nodes. */
+								TProxyService.log("测速: 本轮 " + bad + " 个「不可用」全部来自"
+									+ "「无响应」（按设置判为不可用）——整轮无一节点有过响应，"
+									+ "通常是内核/桥异常，而不是所有节点都死了；"
+									+ "看上面的 bridge/delay 行确认");
+								Toast.makeText(SubscribeActivity.this,
+									R.string.sub_test_all_timeout, Toast.LENGTH_LONG).show();
+							} else if (ok == 0 && bad == 0 && un > 0)
 							  Toast.makeText(SubscribeActivity.this,
 								R.string.sub_test_no_core, Toast.LENGTH_LONG).show();
 							else if (missing > 0)
@@ -1251,31 +1275,44 @@ public class SubscribeActivity extends BaseActivity {
 		   them made the pass look frozen. Never shorter than the first probe's
 		   own timeout: cutting a probe off mid-flight yields no verdict and
 		   only wastes the work already done. */
-		int nodeLimitMs = Math.max(prefs.getNodeTestLimit() * 1000, timeoutMs + 1000);
+		/* The user's per-node cap, honoured EXACTLY: it bounds the very probe we
+		   send (its timeout and our wait), not merely the attempts after the
+		   first - a 5s cap used to allow a single 9s probe, so the setting
+		   looked like it did nothing. */
+		int nodeLimitMs = Math.max(1000, prefs.getNodeTestLimit() * 1000);
 		final long nodeDeadline = System.currentTimeMillis() + nodeLimitMs;
 		boolean failed = false;
 		int hardFails = 0;
 		for (String target : targets) {
-			if (!TestProgress.running() || System.currentTimeMillis() >= nodeDeadline) {
-				logOnce("nodelimit:" + name, "测速: " + name + " 已达单节点上限 "
-					+ (nodeLimitMs / 1000) + "s（或本轮已结束）→ 停止尝试，按未测速处理");
-				return null;
+			if (!TestProgress.running()) {
+				logOnce("nodelimit:" + name,
+					"测速: 本轮已结束 → " + name + " 按未测速处理");
+				return null;              /* the pass was abandoned, not the node */
 			}
-			Long d = delayProbe(name, target, timeoutMs);
+			long remaining = nodeDeadline - System.currentTimeMillis();
+			if (remaining < 500) {
+				logOnce("nodelimit:" + name, "测速: " + name + " 已达单节点上限 "
+					+ (nodeLimitMs / 1000) + "s → 停止尝试");
+				return noVerdict(true);
+			}
+			/* Never hand the core more time than this node has left: it would
+			   hold the single probe slot past our own limit. */
+			int effTimeout = (int) Math.max(1000L, Math.min((long) timeoutMs, remaining));
+			Long d = delayProbe(name, target, effTimeout, remaining);
 			if (d != null && d >= 0)
 			  return d;
 			/* Only failures/malfunctions are logged here, so a node that just
 			   works produces no noise while a node about to be flagged leaves
 			   a full trace (target + what came back). */
 			TProxyService.log("测速: " + name + " @" + target + " -> "
-				+ (d == null ? "无判定（测试没跑起来）" : "失败(" + d + ")"));
+				+ (d == null ? ("无响应（等待 " + (remaining / 1000) + "s 上限内没有判定）")
+					: "失败(" + d + ")"));
 			if (d == null) {
-				/* NO verdict at all means the plumbing is the problem (bridge
-				   silent, controller unreachable, unreadable reply) - not this
-				   target. Walking the remaining targets would just repeat the
-				   same silence at 9s each, which is exactly how a broken
-				   bridge turned one node into ~36s of dead time. */
-				return null;
+				/* No answer at all from this probe. Walking the remaining
+				   targets would just repeat the same silence, so stop here and
+				   let the policy decide: with 「无响应判为不可用」 on (default)
+				   this is 不可用, which is what a timeout means to the user. */
+				return noVerdict(true);
 			}
 			failed = true;
 			hardFails++;
@@ -1292,39 +1329,55 @@ public class SubscribeActivity extends BaseActivity {
 			+ (BATCH_PROBE_TIMEOUT_MS / 1000) + "s（设置在 "
 			+ prefs.getProxyTestTimeout() + "s），并对失败节点提前转入救援探测");
 		if (!failed)
-		  return null;              /* only inconclusive -> untested, NOT 不可用 */
+		  return noVerdict(false);  /* nothing was actually probed */
 		/* Rescue pass: a longer-timeout probe on the most reliable target(s),
 		   for slow-but-working nodes that a tight timeout just failed. This is
 		   what the old "real request" fallback used to rescue, without touching
 		   the global selector; it only runs for nodes about to be flagged. */
 		long leftMs = nodeDeadline - System.currentTimeMillis();
 		if (leftMs < 1000 || !TestProgress.running()) {
-			/* A hard failure was seen, but this node's budget is spent. Without
-			   the rescue probe to confirm it, the honest verdict is 未测速
-			   rather than 不可用 - the cap was chosen by the user. */
+			/* A hard failure was seen, but this node's budget is spent: no rescue
+			   probe can confirm it. Report it by policy - the cap was chosen by
+			   the user, and with 「无响应判为不可用」 on a spent budget IS a
+			   failure (that is exactly the "5 秒没响应就是不可用" case). */
 			logOnce("nodelimit-r:" + name, "测速: " + name
-				+ " 单节点上限（" + (nodeLimitMs / 1000) + "s）已用尽，跳过救援探测 → 未测速");
-			return null;
+				+ " 单节点上限（" + (nodeLimitMs / 1000) + "s）已用尽，跳过救援探测");
+			return noVerdict(TestProgress.running());
 		}
 		int retryMs = (int) Math.min(
 			Math.max(timeoutMs, TestProgress.batch() ? 8000 : 12000), leftMs);
 		int retryCount = TestProgress.batch() ? 1 : RETRY_TEST_URLS.length;
 		for (int ri = 0; ri < retryCount; ri++) {
 			String target = RETRY_TEST_URLS[ri];
-			Long d = delayProbe(name, target, retryMs);
+			Long d = delayProbe(name, target, retryMs, leftMs);
 			if (d != null && d >= 0) {
 				TProxyService.log("测速: " + name + " 救援探测成功 " + d + "ms @"
 					+ target + "（首轮 " + timeoutMs / 1000 + "s 超时偏紧）");
 				return d;
 			}
 			if (d == null) {
-				TProxyService.log("测速: " + name + " 救援探测无判定 @" + target + " → 未测速");
-				return null;           /* malfunction on retry -> untested */
+				TProxyService.log("测速: " + name + " 救援探测无响应 @" + target);
+				return noVerdict(true);
 			}
 			TProxyService.log("测速: " + name + " 救援探测失败 @" + target + " -> " + d);
 		}
 		TProxyService.log("测速: " + name + " → 判定不可用（目标与救援探测均失败）");
 		return -2L;                   /* genuinely unreachable */
+	}
+
+	/* Final verdict when no probe produced a latency.
+	   nodeLevel = the failure is about THIS node (its probes were sent and never
+	   answered, or its budget ran out) - then 设置 → 订阅 → 「无响应判为不可用」
+	   decides: on (default) => 不可用 (-2), which is what a timeout means to the
+	   user; off => 未测速 (-1), the conservative mode.
+	   nodeLevel = false for situations that say nothing about the node (nothing
+	   was probed at all, the pass was abandoned): always 未测速. */
+	private Long noVerdict(boolean nodeLevel) {
+		if (nodeLevel && prefs.getProbeTimeoutAsFail()) {
+			passTimeoutFail.incrementAndGet();
+			return Long.valueOf(-2L);
+		}
+		return null;
 	}
 
 	/* Most reliable targets, used only by the rescue pass. */
@@ -1337,12 +1390,14 @@ public class SubscribeActivity extends BaseActivity {
 	   reports a genuine probe failure (504/408), or null when the test could not
 	   run at all (transport down / auth / route / other status) - which must NOT
 	   be reported as "unavailable". */
-	private Long delayProbe(String name, String target, int timeoutMs) {
+	private Long delayProbe(String name, String target, int timeoutMs, long maxWaitMs) {
 		/* Preferred: the core's own isolated probe through the action bridge.
 		   Available whenever a core is loaded in THIS process - i.e. the
 		   TUN-less test core - so latency can be measured with the VPN off and
-		   without any HTTP. Returns null when no core lives here. */
-		Long viaCore = CoreTestHost.testDelay(name, target, timeoutMs);
+		   without any HTTP. Returns null when no core lives here.
+		   maxWaitMs = the node's remaining budget: waiting longer than it would
+		   make 设置 → 每节点测速上限 a lie. */
+		Long viaCore = CoreTestHost.testDelay(name, target, timeoutMs, maxWaitMs);
 		if (viaCore != null)
 		  return viaCore;
 		/* This process holds the TUN-less test core, which IS the authoritative
@@ -1366,8 +1421,12 @@ public class SubscribeActivity extends BaseActivity {
 			/* The reply only arrives after the core's own probe finishes, so
 			   the client must wait longer than the probe timeout instead of
 			   the default 6s (which silently capped a 30s setting). */
+			/* Bounded by the same per-node budget: the reply only arrives after
+			   the core's own probe finishes, so waiting longer than this node is
+			   allowed to take would be pointless. */
+			int sockMs = (int) Math.max(1000L, Math.min((long) timeoutMs + 6000L, maxWaitMs));
 			TProxyService.ApiResult r = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
-				MihomoConfig.API_PORT, path, null, prefs.getSecret(), timeoutMs + 6000);
+				MihomoConfig.API_PORT, path, null, prefs.getSecret(), sockMs);
 			if (r.code == 200) {
 				JSONObject o = new JSONObject(r.body == null ? "{}" : r.body);
 				if (!o.has("delay")) {
@@ -1661,11 +1720,14 @@ public class SubscribeActivity extends BaseActivity {
 		prefs.setActiveSocksId("");
 		String msg;
 		if (prefs.getEnable()) {
+			/* The service applies it to the running core; if the node is not in
+			   the config it is running, it rebuilds the config itself (see
+			   applySelector/rebuildForSelection), so no "reconnect by hand". */
 			startService(new Intent(this, TProxyService.class)
 				.setAction(TProxyService.ACTION_SELECT));
 			msg = auto
 				? getString(R.string.sub_auto_pick, n.name)
-				: getString(R.string.sub_switched_restart, n.name);
+				: getString(R.string.sub_switched_now, n.name);
 		} else {
 			msg = auto
 				? getString(R.string.sub_auto_pick, n.name)
