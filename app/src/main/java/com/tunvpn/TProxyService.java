@@ -1247,6 +1247,12 @@ public class TProxyService extends VpnService {
 	   apiAction). Static because callers are spread across the service, the
 	   Activities and the embedded clash-api server. */
 	private static final Object API_LOCK = new Object();
+	/* Whether the action bridge wants `data` as a JSON STRING (FlClash's shape)
+	   or as an inline JSON object: -1 unknown, 1 string, 0 object. Decided once,
+	   empirically, by apiActionRaw - see the note there. */
+	private static volatile int dataAsString = -1;
+	/* Serialises that one-shot decision (see apiActionRaw). */
+	private static final Object DETECT_LOCK = new Object();
 	/* Latest /connections snapshot fetched by accumulateProxy() on statsThread
 	   (kept for in-process callers). */
 	private volatile String connSnapshot = null;
@@ -1278,42 +1284,112 @@ public class TProxyService extends VpnService {
 	   entirely (the caller then falls back or reports the node untested), so
 	   such callers must extend the wait past the action's own deadline. */
 	static String apiAction(String method, String data, long waitMs) {
+		String raw = apiActionRaw(method, data, waitMs);
+		if (raw == null)
+		  return null;
+		try {
+			JSONObject r = new JSONObject(raw);
+			if (r.optInt("code", -1) != 0)
+			  return null;
+			Object d = r.opt("data");
+			return (d == null || d == JSONObject.NULL) ? "" : d.toString();
+		} catch (Throwable e) {
+			return null;
+		}
+	}
+
+	/* The RAW {"id","method","data","code"} reply, or null when there was no
+	   reply at all. Needed to tell "the core REFUSED these parameters"
+	   (code != 0, e.g. "invalid data type" for a field with the wrong JSON
+	   type) from "no answer" - the convenience wrapper above cannot express
+	   the difference, since both surface as null.
+	   The native action bridge keeps a SINGLE in-flight callback: two
+	   overlapping invokeAction() calls make the earlier result get delivered
+	   to the wrong waiter, so that waiter never wakes and times out with null.
+	   The traffic poll (every 1s) and an Activity's own poll (every 1.5s)
+	   overlap constantly, which is why the connections screen once came back
+	   empty while the background stats saw connections. Serialise here. */
+	static String apiActionRaw(String method, String data, long waitMs) {
 		if (!Clash.INSTANCE.isLoaded())
 		  return null;   /* no core here (e.g. the main process) - not an error */
-		/* The native action bridge keeps a SINGLE in-flight callback: two
-		   overlapping invokeAction() calls make the earlier result get
-		   delivered to the wrong waiter, so that waiter never wakes and times
-		   out with null. The traffic poll (every 1s, on statsThread) and an
-		   Activity's own poll (every 1.5s) overlap constantly, which is why the
-		   connections screen silently came back empty while the background
-		   stats saw 6 connections. Serialise every bridge call here. */
+		if (data == null)
+		  return invokeAction(method, null, false, waitMs);
+		/* How `data` must be carried is NOT documented, and the core validates
+		   the container BEFORE dispatching: the wrong one is answered with
+		   code=-1 "invalid data type". Getting it wrong silently broke EVERY
+		   action that takes parameters - the delay test and node switching -
+		   while the parameterless ones (getConnections / getProxies) kept
+		   working, which is exactly what made this so hard to see. Try the
+		   string form first (what FlClash sends: the core unmarshals the string
+		   itself), fall back to the inline object, and remember the winner. */
+		if (dataAsString == 1)
+		  return invokeAction(method, data, true, waitMs);
+		if (dataAsString == 0)
+		  return invokeAction(method, data, false, waitMs);
+		/* Undecided: settle it on ONE thread. This latch is shared by every
+		   probe, and 16 concurrent ones racing it could latch the WRONG form and
+		   then fail at once - the "单个测速能用、测速全部全废" symptom. */
+		synchronized (DETECT_LOCK) {
+			if (dataAsString == 1)
+			  return invokeAction(method, data, true, waitMs);
+			if (dataAsString == 0)
+			  return invokeAction(method, data, false, waitMs);
+			String raw = invokeAction(method, data, true, waitMs);
+			/* Only a DEFINITE rejection proves the string form wrong. "No answer
+			   at all" (null) is not evidence: latching the object form on it
+			   would break every later call - including a later SINGLE test -
+			   until the process restarts. */
+			if (raw == null || !badDataType(raw)) {
+				if (raw != null) {
+					dataAsString = 1;
+					TestLog.append("bridge: data 采用字符串形式（内核接受）");
+				}
+				return raw;
+			}
+			dataAsString = 0;
+			TestLog.append("bridge: data 字符串形式被拒 " + truncate(raw) + " → 改用内联对象");
+			return invokeAction(method, data, false, waitMs);
+		}
+	}
+
+	/* The core refused the payload container rather than the node. */
+	private static boolean badDataType(String raw) {
+		return raw != null && raw.contains("invalid data type");
+	}
+
+	/* One bridge call. `asString` carries `data` as a JSON string (the core
+	   unmarshals it) instead of an inline JSON object. Serialised on API_LOCK:
+	   the native action bridge keeps a SINGLE in-flight callback, so
+	   overlapping invokeAction() calls make the earlier result get delivered to
+	   the wrong waiter, which then never wakes and times out with null. */
+	private static String invokeAction(String method, String data, boolean asString,
+			long waitMs) {
 		synchronized (API_LOCK) {
-			final String[] out = { null };
 			final boolean[] done = { false };
 			/* Kept for the diagnosis log below: "no answer at all" (timeout)
 			   and "the core answered with an error code" are very different
-			   failures, and the return value alone cannot tell them apart
-			   (both are null). */
+			   failures, and the return value alone cannot tell them apart. */
 			final int[] code = { Integer.MIN_VALUE };
 			final String[] raw = { null };
 			try {
 				JSONObject j = new JSONObject();
 				j.put("id", "");
 				j.put("method", method);
-				try { j.put("data", data == null ? JSONObject.NULL : new JSONObject(data)); }
-				catch (Throwable e) { j.put("data", data == null ? JSONObject.NULL : data); }
+				if (data == null)
+				  j.put("data", JSONObject.NULL);
+				else if (asString)
+				  j.put("data", data);
+				else {
+					try { j.put("data", new JSONObject(data)); }
+					catch (Throwable e) { j.put("data", data); }
+				}
 				Clash.INSTANCE.invokeAction(j.toString(), new InvokeInterface() {
 					@Override
 					public void onResult(String result) {
 						raw[0] = result;
 						if (result != null) {
 							try {
-								JSONObject r = new JSONObject(result);
-								code[0] = r.optInt("code", -1);
-								if (code[0] == 0) {
-									Object d = r.opt("data");
-									out[0] = (d == null || d == JSONObject.NULL) ? "" : d.toString();
-								}
+								code[0] = new JSONObject(result).optInt("code", -1);
 							} catch (Throwable ignore) { }
 						}
 						synchronized (done) { done[0] = true; done.notifyAll(); }
@@ -1335,7 +1411,7 @@ public class TProxyService extends VpnService {
 				TestLog.append("bridge: 动作 " + method + " 异常 " + e);
 				return null;
 			}
-			return out[0];
+			return raw[0];
 		}
 	}
 

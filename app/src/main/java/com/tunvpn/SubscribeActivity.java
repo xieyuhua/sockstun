@@ -101,7 +101,15 @@ public class SubscribeActivity extends BaseActivity {
 	   -> the real (de-dup'd) proxy name in the running config. Filled lazily
 	   from the clash-api so per-node delay tests target the correct node even
 	   when mergedConfig renamed duplicates to "name (N)". */
-	private java.util.Map<String, String> proxyNameCache = null;
+	private volatile java.util.Map<String, String> proxyNameCache = null;
+	/* How many testable proxies the core reported, for the logs: it separates
+	   "the generated config carries no nodes" from "this node is not in it". */
+	private volatile int coreNodeCount = 0;
+	/* Nodes this pass could not find in the core (usually because the test
+	   core was built from the country-filtered pool). Drives the hint shown
+	   after a pass that measured almost nothing. */
+	private final java.util.concurrent.atomic.AtomicInteger passNotFound =
+		new java.util.concurrent.atomic.AtomicInteger();
 
 	/* Working clash-api host for this test pass. We probe 127.0.0.1 (the
 	   loopback the external-controller is bound to) and keep the device IP as a
@@ -129,6 +137,33 @@ public class SubscribeActivity extends BaseActivity {
 		if (passLogged.add(key))
 		  TProxyService.log(msg);
 	}
+
+	/* mihomo's built-in adapters plus every proxy-GROUP type: not dialable
+	   nodes, so they must never be offered as a delay-test target. Needed
+	   because current mihomo no longer reports server/port in /proxies, so the
+	   "has an address" test cannot be used to classify entries. */
+	private static boolean isBuiltinOrGroup(String name, String type) {
+		String t = type == null ? "" : type.toLowerCase();
+		if (t.equals("selector") || t.equals("urltest") || t.equals("fallback")
+				|| t.equals("loadbalance") || t.equals("relay")
+				|| t.equals("direct") || t.equals("reject") || t.equals("rejectdrop")
+				|| t.equals("compatible") || t.equals("pass") || t.equals("passrule"))
+		  return true;
+		String n = name == null ? "" : name.toUpperCase();
+		return n.equals("DIRECT") || n.equals("REJECT") || n.equals("REJECT-DROP")
+			|| n.equals("GLOBAL") || n.equals("COMPATIBLE") || n.equals("PASS");
+	}
+
+	/* Short, single-line form of an arbitrary JSON fragment for the log. */
+	private static String shortText(Object o) {
+		if (o == null)
+		  return "(无)";
+		String s = String.valueOf(o).replace('\n', ' ');
+		return s.length() > 400 ? s.substring(0, 400) + "…" : s;
+	}
+
+	/* Guards the one-off /proxies fetch (see ensureProxyNameCache). */
+	private final Object nameCacheLock = new Object();
 
 	/* Latency order by default: fastest first is what people actually want. */
 	private int pendingTests = 0;
@@ -268,6 +303,19 @@ public class SubscribeActivity extends BaseActivity {
 		/* Settings may have changed "显示不可用节点" (or the test-core switches);
 		   re-filter so the list reflects the new choice as soon as we return. */
 		applyView();
+		/* Preload the TUN-less test core so the first 测速 is instant. This is
+		   all the 「未连接时内核测速」 switch does: without it the core is still
+		   loaded on demand when 测速 is tapped, just a few seconds later.
+		   Off the UI thread - loading a core takes a moment. */
+		if (!prefs.getEnable() && prefs.getPreloadCore()) {
+			final android.content.Context app = getApplicationContext();
+			new Thread(new Runnable() {
+				@Override
+				public void run() {
+					CoreTestHost.ensureReady(app, prefs);
+				}
+			}, "test-core-preload").start();
+		}
 	}
 
 	/* Rebuild the visible list from nodes according to filter + sort. */
@@ -441,6 +489,11 @@ public class SubscribeActivity extends BaseActivity {
 			public void onClick(View v) {
 				filterCountry = code;
 				prefs.setSubCountryFilter(filterCountry);
+				/* With 「测速并入全量节点」 off the test core is rebuilt from the
+				   new pool, so the cached node-name map must be refetched (it
+				   was read off the UI thread, hence the volatile fields). */
+				proxyNameCache = null;
+				coreNodeCount = 0;
 				applyView();
 				refreshProtoFilterSpinner();
 				/* The tunnel's node pool is baked in at startup
@@ -525,6 +578,8 @@ public class SubscribeActivity extends BaseActivity {
 		   rebuild the node-name map and re-probe the api host from scratch. */
 		proxyNameCache = null;
 		apiHost = null;
+		coreNodeCount = 0;
+		passNotFound.set(0);
 		corePrepared = false;
 		pendingTests = nodes.size();
 		testsDone = 0;
@@ -537,7 +592,10 @@ public class SubscribeActivity extends BaseActivity {
 		TProxyService.log("=== 测速开始：" + nodes.size() + " 个节点 · VPN="
 			+ (prefs.getEnable() ? "已连接" : "未连接")
 			+ " · 单目标超时 " + prefs.getProxyTestTimeout() + "s · 测速地址 "
-			+ prefs.getAutoTestUrl() + " · 内置目标 " + PROXY_TEST_URLS.length + " 个 ===");
+			+ prefs.getAutoTestUrl() + " · 内置目标 " + PROXY_TEST_URLS.length + " 个"
+			+ " · 国家筛选=" + (prefs.getSubCountryFilter().isEmpty()
+				? "全部" : prefs.getSubCountryFilter())
+			+ " · 并入全量节点=" + (prefs.getTestAllNodes() ? "开" : "关") + " ===");
 		for (ClashNode n : nodes)
 		  testNode(n, true);
 	}
@@ -566,16 +624,59 @@ public class SubscribeActivity extends BaseActivity {
 				}
 				return CoreTestHost.ensureReady(this, prefs);
 			}
-			/* Disconnected: only if "未连接时内核测速" is on. */
-			if (!prefs.getPreloadCore()) {
-				logOnce("core-path", "测速: 未连接且未开「未连接时内核测速」"
-					+ " → 本次没有内核可测，全部按未测速处理");
-				return false;
-			}
+			/* Disconnected: a core is the ONLY thing that can measure a node
+			   (the tunnel one is gone), so an explicit tap on 测速 always loads
+			   the TUN-less test core - on demand. The 「未连接时内核测速」 switch
+			   only decides whether it is preloaded ahead of time (see onResume);
+			   gating the load itself made the button look broken: every node
+			   silently came back "未测速" and nothing was ever tested. */
+			if (!prefs.getPreloadCore())
+			  TProxyService.log("测速: 未连接，未开「未连接时内核测速」→ 现在按需加载测试内核");
+			else
+			  TProxyService.log("测速: 未连接 → 使用测试内核（未预加载）");
 			return CoreTestHost.ensureReady(this, prefs);
 		} catch (Throwable e) {
 			TProxyService.log("测速: 准备测试内核异常 " + e);
 			return false;
+		}
+	}
+
+	/* One serial probe before the worker pool starts, using the first node that
+	   actually resolves to a core proxy. It fixes, on a single thread: the
+	   bridge payload container, the testDelay parameter shape and the node-name
+	   map - three shared one-shot latches whose races are invisible in a single
+	   test but break a whole batch. Its result is also the clearest line in the
+	   log when someone reports "测速不准/全废". */
+	private void delaySelfTest(boolean coreOk) {
+		try {
+			if (nodes.isEmpty())
+			  return;
+			ensureProxyNameCache();
+			ClashNode pick = null;
+			for (ClashNode x : nodes) {
+				if (realNodeName(x) != null) {
+					pick = x;
+					break;
+				}
+			}
+			if (pick == null)
+			  pick = nodes.get(0);
+			String name = realNodeName(pick);
+			if (name == null)
+			  name = pick.name;
+			if (name == null || name.isEmpty())
+			  return;
+			/* Keep the self-test short: it only has to prove the plumbing, not
+			   measure the slowest node in the list. */
+			int probeMs = Math.min(prefs.getProxyTestTimeout() * 1000, 8000);
+			Long d = CoreTestHost.testDelay(name, prefs.getAutoTestUrl(), probeMs);
+			TProxyService.log("测速自检：" + (d == null
+				? "无判定（看上面 bridge/delay 行，多为参数或内核问题）"
+				: (d >= 0 ? ("可用 " + d + "ms") : "该节点不可用(-2)"))
+				+ " · 节点 " + name + " · 内核=" + (coreOk ? "测试内核" : "隧道内核(REST)")
+				+ " · 可测节点 " + coreNodeCount + " 个");
+		} catch (Throwable e) {
+			TProxyService.log("测速自检异常 " + e);
 		}
 	}
 
@@ -592,7 +693,14 @@ public class SubscribeActivity extends BaseActivity {
 				if (!corePrepared) {
 					synchronized (SubscribeActivity.this) {
 						if (!corePrepared) {
-							prepareTestCore();
+							boolean coreOk = prepareTestCore();
+							/* Settle the bridge's payload container, the delay
+							   action's parameter shape and the node-name map on
+							   ONE thread BEFORE the 16-worker pool fans out.
+							   All three are shared one-shot latches, and racing
+							   them is what made "测速全部" fail while a single
+							   test was fine. */
+							delaySelfTest(coreOk);
 							corePrepared = true;
 						}
 					}
@@ -668,6 +776,17 @@ public class SubscribeActivity extends BaseActivity {
 							}
 							TProxyService.log("=== 测速结束：可用 " + ok + " / 不可用 "
 								+ bad + " / 未测速 " + un + " · 详见上面每行「测速:」 ===");
+							/* Nothing was measured at all: say so out loud
+							   instead of leaving the user with an unchanged
+							   list and no reason. */
+							int missing = passNotFound.get();
+							if (ok == 0 && bad == 0 && un > 0)
+							  Toast.makeText(SubscribeActivity.this,
+								R.string.sub_test_no_core, Toast.LENGTH_LONG).show();
+							else if (missing > 0)
+							  Toast.makeText(SubscribeActivity.this,
+								getString(R.string.sub_test_missing_nodes, missing),
+								Toast.LENGTH_LONG).show();
 						}
 					}
 				});
@@ -750,16 +869,31 @@ public class SubscribeActivity extends BaseActivity {
 		}
 		String name = realNodeName(n);
 		if (name == null) {
-			/* The node exists in the list but not in the config the core is
-			   actually running (filtered out, or the config is stale): the
-			   probe cannot even be aimed at it, so it is untested. */
-			logOnce("noname:" + n.server + ":" + n.port + ":" + n.type,
-				"测速: 内核配置里没有该节点 → 未测速 [" + n.server + ":" + n.port
-				+ " " + (n.type == null ? "?" : n.type) + "] name=" + n.name);
-			return null;
+			/* The /proxies map has no entry for this node - but that does NOT
+			   prove the core lacks it: mihomo may report a RESOLVED IP in
+			   `server` (breaking the address key) while the name we generate is
+			   exactly the subscription name. So try that name directly; the core
+			   runs a config WE generated. A wrong guess only costs one failed
+			   probe (the action answers "proxy not exist") and leaves the node
+			   untested, so there is nothing to lose. */
+			if (n.name == null || n.name.isEmpty()) {
+				passNotFound.incrementAndGet();
+				logOnce("noname:" + n.server + ":" + n.port + ":" + n.type,
+					"测速: 节点没有名字且在 /proxies 映射里找不到 → 未测速 [addr="
+					+ n.server + ":" + n.port + " " + (n.type == null ? "?" : n.type)
+					+ "]（内核报告可测节点 " + coreNodeCount + " 个）");
+				return null;
+			}
+			name = n.name;
+			logOnce("guess:" + n.name, "测速: /proxies 映射里没有该节点，改用节点名直试 name="
+				+ n.name + " addr=" + n.server + ":" + n.port + "（内核报告可测节点 "
+				+ coreNodeCount + " 个）");
 		}
+		/* The in-process probe needs no HTTP host at all - only the REST route
+		   does. Requiring one here turned the whole pass into "未测速" whenever
+		   the loopback check happened to fail. */
 		String host = resolveApiHost();
-		if (host == null) {
+		if (host == null && !CoreTestHost.isReady()) {
 			logOnce("no-api", "测速: 控制接口不可达（127.0.0.1 探测失败）→ 未测速");
 			return null;
 		}
@@ -831,6 +965,17 @@ public class SubscribeActivity extends BaseActivity {
 		Long viaCore = CoreTestHost.testDelay(name, target, timeoutMs);
 		if (viaCore != null)
 		  return viaCore;
+		/* This process holds the TUN-less test core, which IS the authoritative
+		   probe. The REST route below would go to the :native TUNNEL core,
+		   whose node pool can be a different (country-filtered) set - a miss
+		   there says nothing about this node, and in a 45-node batch it costs
+		   one extra round trip per probe and floods the log with 502s. Report
+		   "no verdict" instead and let the caller judge. */
+		if (CoreTestHost.isReady()) {
+			TProxyService.log("测速: " + name + " 测试内核无判定 @" + target
+				+ "（已有本进程内核，不再回退隧道内核 REST）");
+			return null;
+		}
 		/* Fallback: the REST /delay served by the app's embedded control API
 		   (used when only the :native tunnel core is available). */
 		try {
@@ -886,6 +1031,17 @@ public class SubscribeActivity extends BaseActivity {
 	private boolean ensureProxyNameCache() {
 		if (proxyNameCache != null)
 		  return true;
+		/* One fetch per pass: the 16 test threads all reach here at once and
+		   every fetch goes through the single-callback bridge, so 16
+		   overlapping copies would only slow the pass down and log 16 times. */
+		synchronized (nameCacheLock) {
+			if (proxyNameCache != null)
+			  return true;
+			return fetchProxyNameCache();
+		}
+	}
+
+	private boolean fetchProxyNameCache() {
 		/* Work with the tunnel core OR the TUN-less test core loaded in this
 		   process (CoreTestHost). */
 		if (!prefs.getEnable() && !CoreTestHost.isReady())
@@ -904,33 +1060,94 @@ public class SubscribeActivity extends BaseActivity {
 			String body = r.body;
 			JSONObject o = new JSONObject(body);
 			JSONObject proxies = o.optJSONObject("proxies");
-			if (proxies == null)
-			  return false;
+			if (proxies == null) {
+				logOnce("proxies-shape", "测速: /proxies 响应里没有 proxies 对象 → 无法建立映射，前 200 字："
+					+ (body.length() > 200 ? body.substring(0, 200) : body));
+				return false;
+			}
+			StringBuilder topKeys = new StringBuilder();
+			java.util.Iterator<String> kk = o.keys();
+			while (kk.hasNext()) {
+				if (topKeys.length() > 0)
+				  topKeys.append(',');
+				topKeys.append(kk.next());
+			}
 			java.util.Map<String, String> map = new java.util.HashMap<String, String>();
 			java.util.Iterator<String> it = proxies.keys();
+			int total = 0;
+			int withAddr = 0;
+			StringBuilder sample = new StringBuilder();
+			/* Raw samples: they answer "does the core's config really carry the
+			   nodes?" (and in which shape) without another round trip. */
+			String firstObj = null;
+			String firstAddressed = null;
 			while (it.hasNext()) {
 				String pname = it.next();
-				JSONObject p = proxies.optJSONObject(pname);
-				if (p == null)
-				  continue;
+				Object pv = proxies.opt(pname);
+				if (!(pv instanceof JSONObject)) {
+					if (firstObj == null)
+					  firstObj = pname + " -> " + pv;
+					continue;
+				}
+				JSONObject p = (JSONObject) pv;
+				total++;
+				if (firstObj == null)
+				  firstObj = pname + " -> " + p;
+				String type = p.optString("type", "");
 				String server = p.optString("server", "");
 				int port = p.optInt("port", 0);
-				String type = p.optString("type", "");
-				if (server.isEmpty() || port == 0)
+				/* Recent mihomo DROPPED server/port from /proxies - an entry is
+				   just {"type","name","alive",...} now - so an address can no
+				   longer be used to tell a node from a group. Classify by TYPE
+				   instead and index every real node BY NAME (which is exactly
+				   the name we wrote into the generated config). Built-ins
+				   (DIRECT / REJECT / COMPATIBLE) and the config's own groups are
+				   the only things skipped. */
+				if (isBuiltinOrGroup(pname, type))
 				  continue;
-				String base = server.toLowerCase() + "|" + port;
-				/* Key by ADDRESS first: mihomo reports "Shadowsocks" / "Vmess"
-				   while the subscription says "ss" / "vmess", so a
-				   type-qualified key never matched and the delay test could not
-				   even find the node. A lower-cased type key is kept as a
-				   secondary so two protocols on one address still resolve. */
-				if (!map.containsKey(base))
-				  map.put(base, pname);
-				map.put(base + "|" + type.toLowerCase(), pname);
+				withAddr++;
+				if (firstAddressed == null)
+				  firstAddressed = pname + " -> " + p;
+				if (!map.containsKey("name:" + pname))
+				  map.put("name:" + pname, pname);
+				if (!server.isEmpty() && port != 0) {
+					String base = server.toLowerCase() + "|" + port;
+					/* Address key kept for cores that still report one, and as a
+					   fallback when a node arrives from somewhere else (manual
+					   server list) with no matching name. */
+					if (!map.containsKey(base))
+					  map.put(base, pname);
+					map.put(base + "|" + type.toLowerCase(), pname);
+				}
+				if (sample.length() < 300) {
+					if (sample.length() > 0)
+					  sample.append(", ");
+					sample.append(pname).append('/').append(type)
+						.append(server.isEmpty() ? "" : ("=" + server + ":" + port));
+				}
 			}
 			proxyNameCache = map;
+			coreNodeCount = withAddr;
+			/* Logged even on success: "the config has no nodes" and "the node
+			   is not in the config" look identical in the UI, and this one line
+			   tells them apart at a glance. */
+			TProxyService.log("测速: 内核 /proxies 共 " + total + " 项，可测节点 "
+				+ withAddr + " 个（映射 " + map.size() + " 键）· 国家筛选="
+				+ (prefs.getSubCountryFilter().isEmpty() ? "全部" : prefs.getSubCountryFilter())
+				+ " · 并入全量节点=" + (prefs.getTestAllNodes() ? "开" : "关")
+				+ (sample.length() == 0 ? "" : (" · 示例 " + sample)));
+			/* The two shapes worth seeing: a proxy object as the core really
+			   reports it, and the top-level keys it really uses. Together they
+			   say whether the config carries the nodes, and whether the fields
+			   are named the way we look them up. */
+			if (withAddr == 0)
+			  TProxyService.log("测速: 内核 /proxies 里没有任何可测节点 → 配置里可能真的没有代理。"
+				+ "响应顶层键=" + topKeys + " · 首项 " + shortText(firstObj));
+			else
+			  TProxyService.log("测速: 内核首个可测节点 " + shortText(firstAddressed));
 			return true;
 		} catch (Exception e) {
+			logOnce("proxies-ex", "测速: 解析 /proxies 失败 " + e);
 			return false;
 		}
 	}
@@ -938,6 +1155,15 @@ public class SubscribeActivity extends BaseActivity {
 	private String realNodeName(ClashNode n) {
 		if (proxyNameCache == null)
 		  return null;
+		/* 1) By the node's own NAME first: the running core was configured by
+		   us, so its proxy names are the subscription names (plus our own
+		   de-dup suffix) and this match cannot be broken by the core reporting
+		   a resolved IP or a different protocol spelling. */
+		if (n.name != null && !n.name.isEmpty()) {
+			String byName = proxyNameCache.get("name:" + n.name);
+			if (byName != null)
+			  return byName;
+		}
 		String server = n.server == null ? "" : n.server.toLowerCase();
 		String base = server + "|" + n.port;
 		String name = proxyNameCache.get(base);

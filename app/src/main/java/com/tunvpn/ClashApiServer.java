@@ -212,14 +212,14 @@ class ClashApiServer {
 		try { timeout = Integer.parseInt(param(query, "timeout")); } catch (Throwable ignore) { }
 		if (timeout <= 0)
 		  timeout = 5000;
-		JSONObject data = new JSONObject();
-		data.put("proxy-name", name);
-		data.put("test-url", url);
-		data.put("timeout", timeout);
+		/* Same parameter shape the in-process probe uses (CoreTestHost knows
+		   which one this core accepts - see DELAY_SHAPES). */
+		String data = CoreTestHost.delayData(name, url, timeout);
 		/* The probe may run for `timeout` inside the core, so wait past it -
 		   the default 6s bridge wait cuts a long probe off and loses the
 		   verdict (which then looked like a failed node). */
-		String r = TProxyService.apiAction("testDelay", data.toString(), timeout + 5000L);
+		String r = data == null ? null
+			: TProxyService.apiAction("testDelay", data, timeout + 5000L);
 		if (r == null) {
 			/* No answer at all: the bridge/core is the problem, the node is
 			   NOT proven dead. 502 = "test could not run"; the caller must

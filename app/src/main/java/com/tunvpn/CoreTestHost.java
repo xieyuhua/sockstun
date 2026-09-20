@@ -67,7 +67,15 @@ class CoreTestHost {
 				Log.w(TAG, "build test config failed: " + e);
 				return false;
 			}
-			if (cfg == null || cfg.equals(lastConfig))
+			/* Direct evidence for "is the generated config carrying the nodes?":
+			   the number of entries in its own `proxies:` section. */
+			if (cfg == null)
+			  return true;
+			boolean same = cfg.equals(lastConfig);
+			TProxyService.log("测试内核配置：" + countProxies(cfg) + " 个代理条目 · "
+				+ cfg.length() + " 字节 · 路径 " + new File(home, "config.yaml").getAbsolutePath()
+				+ (same ? "（与上次相同，跳过重新应用）" : ""));
+			if (same)
 			  return true;
 			String initParams = "{\"home-dir\":\"" + home.getAbsolutePath() + "\"}";
 			String setupParams = "{\"selected-map\":{},\"profile\":\""
@@ -104,6 +112,55 @@ class CoreTestHost {
 		}
 	}
 
+	/* Parameter shapes the "testDelay" action may expect. The library documents
+	   none of them, so these are tried in order and the accepted one is
+	   remembered (the probing then costs one call, not one per node).
+	   What the core has told us so far, from its own error text:
+	     * `data` must be the params JSON as a STRING, not an inline object -
+	       otherwise: {"data":"invalid data type","code":-1}
+	     * inside it, `timeout` must be a NUMBER: sending a string gives
+	       "json: cannot unmarshal string into Go struct field
+	       TestDelayParams.timeout of type int64".
+	   Hence the numeric-timeout shape comes first. */
+	private static final String[][] DELAY_SHAPES = {
+		{ "proxy-name", "test-url", "n" },   /* the shape the core asked for */
+		{ "proxy-name", "test-url", "s" },
+		{ "proxy-name", "url", "n" },        /* shorter url key */
+		{ "name", "url", "n" },              /* shortest keys */
+		{ "name", "url", "s" },
+	};
+	private static volatile int delayShape = -1;
+	/* Serialises that one-shot decision (see testDelay). */
+	private static final Object SHAPE_LOCK = new Object();
+
+	/* Body for the testDelay action in shape #shape.index. Shared with
+	   ClashApiServer, which answers the REST /delay route the same way. */
+	static String delayData(int shape, String proxyName, String url, int timeoutMs) {
+		try {
+			String[] s = DELAY_SHAPES[shape];
+			JSONObject d = new JSONObject();
+			d.put(s[0], proxyName);
+			d.put(s[1], url);
+			d.put("timeout", "s".equals(s[2]) ? String.valueOf(timeoutMs) : timeoutMs);
+			return d.toString();
+		} catch (Throwable e) {
+			return null;
+		}
+	}
+
+	/* Body using the remembered shape (shape 0 until one is accepted). */
+	static String delayData(String proxyName, String url, int timeoutMs) {
+		return delayData(delayShape < 0 ? 0 : delayShape, proxyName, url, timeoutMs);
+	}
+
+	/* One probe attempt. */
+	private static final class Probe {
+		long measured = -1;   /* >=0 when the core measured a latency */
+		boolean answered;     /* the core produced a delay verdict */
+		boolean rejected;     /* the core refused THESE PARAMS (wrong shape) */
+		String raw;
+	}
+
 	/* The core's ISOLATED per-proxy probe (the "testDelay" action - what
 	   FlClash uses). Returns the latency (>=0) on success, -2 when the core
 	   itself reports that the node could not complete the probe, or null when
@@ -117,39 +174,154 @@ class CoreTestHost {
 		   call - otherwise every probe would log a skipped action. */
 		if (!isReady())
 		  return null;
+		/* The accepted shape is a shared one-shot latch. Settle it on ONE thread
+		   before the pool fans out: 16 concurrent probes racing it could latch
+		   shape #0 while it was still being rejected (or vice versa) and then
+		   fail every node at once - the "单个测速能用、测速全部全废" symptom. */
+		if (delayShape < 0) {
+			synchronized (SHAPE_LOCK) {
+				if (delayShape < 0) {
+					int found = detectShape(proxyName, url, timeoutMs);
+					if (found < 0) {
+						TProxyService.log("delay: 所有参数形状都被内核拒绝，测速无法进行");
+						return null;
+					}
+					delayShape = found;
+					TProxyService.log("delay: 采用参数形状#" + found + "（"
+						+ DELAY_SHAPES[found][0] + "/" + DELAY_SHAPES[found][1]
+						+ "/timeout=" + DELAY_SHAPES[found][2] + "）");
+				}
+			}
+		}
+		int shape = delayShape;
+		if (shape < 0)
+		  return null;
+		Probe p = probe(shape, proxyName, url, timeoutMs);
+		if (p.rejected) {
+			/* The remembered shape stopped being accepted (the core reloaded
+			   with another build?): forget it so the next call re-detects,
+			   instead of failing every remaining node this pass. */
+			synchronized (SHAPE_LOCK) {
+				delayShape = -1;
+			}
+			TProxyService.log("delay: 形状#" + shape + " 失效，下次调用重新探测");
+			return null;
+		}
+		if (p.measured >= 0)
+		  return Long.valueOf(p.measured);
+		if (p.answered)
+		  return Long.valueOf(-2L);
+		return null;
+	}
+
+	/* Try each shape until the core accepts one (i.e. it processed the call
+	   instead of rejecting the parameters). Runs on one thread only. */
+	private static int detectShape(String proxyName, String url, int timeoutMs) {
+		for (int i = 0; i < DELAY_SHAPES.length; i++) {
+			Probe p = probe(i, proxyName, url, timeoutMs);
+			if (p.answered)
+			  return i;
+			TProxyService.log("delay: 内核不接受参数形状#" + i + "（" + DELAY_SHAPES[i][0]
+				+ "/" + DELAY_SHAPES[i][1] + "/timeout=" + DELAY_SHAPES[i][2]
+				+ "）→ 试下一种 · 内核回 " + truncate(p.raw));
+		}
+		return -1;
+	}
+
+	/* One attempt with shape #shape. */
+	private static Probe probe(int shape, String proxyName, String url, int timeoutMs) {
+		Probe r = new Probe();
 		try {
-			JSONObject d = new JSONObject();
-			d.put("proxy-name", proxyName);
-			d.put("test-url", url);
-			d.put("timeout", timeoutMs);
-			/* The probe may run for `timeoutMs` inside the core, so wait
-			   beyond that - the default 6s bridge wait would abort a 12s
-			   rescue probe and throw the answer away. */
-			String r = TProxyService.apiAction("testDelay", d.toString(), timeoutMs + 5000L);
-			if (r == null)
-			  return null;
+			String params = delayData(shape, proxyName, url, timeoutMs);
+			/* The probe may run for `timeoutMs` inside the core, so wait beyond
+			   that - the default 6s bridge wait would abort a 12s rescue probe
+			   and throw the answer away. */
+			String raw = TProxyService.apiActionRaw("testDelay", params, timeoutMs + 5000L);
+			r.raw = raw;
+			if (raw == null) {
+				TProxyService.log("delay: 动作无返回 name=" + proxyName + " url=" + url
+					+ " shape#" + shape);
+				return r;
+			}
+			int code;
+			Object data;
+			try {
+				JSONObject o = new JSONObject(raw);
+				code = o.optInt("code", -1);
+				data = o.opt("data");
+			} catch (Throwable e) {
+				TProxyService.log("delay: 动作返回无法解析 " + truncate(raw));
+				return r;
+			}
+			if (code != 0) {
+				String msg = String.valueOf(data);
+				/* These are the core REFUSING THE PARAMETERS (wrong container,
+				   wrong field type, wrong field name), NOT a verdict about the
+				   node - so the caller tries the next shape instead of writing
+				   the node off. The core spells it out: "invalid data type" for
+				   a bad container and "json: cannot unmarshal ..." for a field
+				   of the wrong type. */
+				r.rejected = msg.contains("invalid data type")
+					|| msg.contains("cannot unmarshal")
+					|| msg.contains("unmarshal")
+					|| msg.startsWith("json:")
+					|| msg.contains("invalid params");
+				TProxyService.log("delay: 动作失败 code=" + code + " data=" + truncate(msg)
+					+ " name=" + proxyName + " url=" + url + " shape#" + shape
+					+ (r.rejected ? "（参数被拒，换形状）" : ""));
+				return r;
+			}
+			String s = (data == null || data == JSONObject.NULL) ? "" : data.toString().trim();
 			int ms;
 			try {
-				ms = Integer.parseInt(r.trim());
+				ms = Integer.parseInt(s);
 			} catch (Throwable e) {
-				/* The core answered, but not with a number. That is a
-				   malfunction (bad reply / node missing from the config), so
-				   the node stays untested instead of being called broken. */
-				TProxyService.log("delay: 内核动作返回非数字 \"" + truncate(r)
-					+ "\" name=" + proxyName + " url=" + url);
-				return null;
+				/* Answered, but not with a number: a malfunction (bad reply),
+				   so the node stays untested rather than being called broken. */
+				TProxyService.log("delay: 动作返回非数字 \"" + truncate(s) + "\" name="
+					+ proxyName + " url=" + url);
+				return r;
 			}
+			r.answered = true;
 			if (ms <= 0) {
 				/* The core's own verdict: the probe could not complete. */
 				TProxyService.log("delay: 内核判定失败(" + ms + ") name=" + proxyName
 					+ " url=" + url);
-				return Long.valueOf(-2L);
+				return r;
 			}
-			return Long.valueOf(ms);
+			/* mihomo's own number, used as-is: no offset, no estimate. */
+			r.measured = ms;
+			TProxyService.log("delay: 可用 name=" + proxyName + " " + ms + "ms shape#"
+				+ shape + " @" + url);
+			return r;
 		} catch (Throwable e) {
 			TProxyService.log("delay: testDelay 异常 " + e + " name=" + proxyName);
-			return null;
+			return r;
 		}
+	}
+
+	/* Number of list entries inside the config's own `proxies:` section, i.e.
+	   how many nodes the generated profile actually declares. Counting stops at
+	   the next top-level key so rules / groups are never included. */
+	static int countProxies(String cfg) {
+		if (cfg == null)
+		  return 0;
+		int n = 0;
+		boolean inProxies = false;
+		for (String line : cfg.split("\n", -1)) {
+			if (line.startsWith("proxies:")) {
+				inProxies = true;
+				continue;
+			}
+			if (!inProxies)
+			  continue;
+			/* A non-indented, non-empty line is the next top-level section. */
+			if (!line.isEmpty() && !line.startsWith(" ") && !line.startsWith("\t"))
+			  break;
+			if (line.trim().startsWith("- "))
+			  n++;
+		}
+		return n;
 	}
 
 	private static String truncate(String s) {
