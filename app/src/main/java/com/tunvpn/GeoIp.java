@@ -140,14 +140,47 @@ public class GeoIp {
 		}
 	}
 
-	/* Hostname -> IP. IP literals are returned unchanged. Null on failure. */
+	/* How long a single hostname resolution may take. */
+	private static final int DNS_TIMEOUT_MS = 3000;
+	/* DNS runs here so it can be abandoned when it overruns: 4 workers, and a
+	   task that never returns only occupies its own thread (the caller has
+	   already given up on it by then). */
+	private static final java.util.concurrent.ExecutorService DNS_POOL =
+		java.util.concurrent.Executors.newFixedThreadPool(4,
+			new java.util.concurrent.ThreadFactory() {
+				@Override
+				public Thread newThread(Runnable r) {
+					Thread t = new Thread(r, "geoip-dns");
+					t.setDaemon(true);
+					return t;
+				}
+			});
+
+	/* Hostname -> IP. IP literals are returned unchanged. Null on failure.
+	   InetAddress.getByName() has NO timeout: on a broken or unreachable
+	   resolver it blocks for tens of seconds, and a test pass resolves one host
+	   per node - so all 16 test threads could end up parked here while the UI
+	   shows a frozen 0% progress bar. Enforce our own deadline. */
 	private static String resolve(String server) {
 		if (server.matches("^[0-9.]+$") || server.contains(":"))
 		  return server;
+		final String host = server;
+		java.util.concurrent.Future<String> f =
+			DNS_POOL.submit(new java.util.concurrent.Callable<String>() {
+				@Override
+				public String call() {
+					try {
+						return InetAddress.getByName(host).getHostAddress();
+					} catch (Exception e) {
+						return null;
+					}
+				}
+			});
 		try {
-			InetAddress a = InetAddress.getByName(server);
-			return a.getHostAddress();
-		} catch (Exception e) {
+			return f.get(DNS_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+		} catch (Throwable e) {
+			f.cancel(true);
+			Log.w(TAG, "DNS 解析超时（" + DNS_TIMEOUT_MS + "ms），跳过国别判定：" + server);
 			return null;
 		}
 	}

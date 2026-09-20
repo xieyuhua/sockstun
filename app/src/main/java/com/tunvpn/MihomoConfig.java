@@ -220,14 +220,37 @@ public class MihomoConfig {
 	   <homeDir>/config.yaml and returns its content (for change detection). */
 	public static String buildTestCoreConfig(Preferences prefs, File homeDir)
 			throws IOException {
-		/* The SAME pool the list and the tunnel are scoped to: the country
-		   filter is the scope, so "全部" carries every node and a country chip
-		   carries that country's nodes. That is what makes "测速范围 = 你看到的
-		   列表" true without a separate switch. */
+		/* Same node pool the list/tunnel is scoped to: the country filter IS the
+		   scope, so "全部" carries every node and a country chip carries that
+		   country's nodes. */
 		String body = mergedConfig(prefs);
-		StringBuilder sb = new StringBuilder(body);
-		if (!body.endsWith("\n"))
+
+		/* Keep ONLY the `proxies:` section. A latency test needs the nodes and
+		   nothing else: the tunnel's groups are not just useless here, they are
+		   actively harmful. mihomo runs a url-test group's health check as soon
+		   as the config loads - and it dials EVERY member at the same time - so
+		   with the full multi-country pool (one url-test group per country PLUS
+		   a global one covering all of them) the core fires dozens of concurrent
+		   probes the moment it starts. Our own testDelay calls then queue behind
+		   that storm and time out one after another, which is exactly why
+		   「全部」came back all-不可用 while a single country (a handful of
+		   members) was fine. */
+		int cut = body.indexOf("\nproxy-groups:");
+		String proxies = cut > 0 ? body.substring(0, cut + 1) : body;
+		StringBuilder sb = new StringBuilder(proxies);
+		if (!proxies.endsWith("\n"))
 		  sb.append('\n');
+		/* One select group listing every node: enough for the config to be
+		   well-formed (a group must only reference proxies declared before it,
+		   which they are), with nothing periodic running in the background. */
+		sb.append("proxy-groups:\n");
+		sb.append("  - name: \"").append(GROUP).append("\"\n");
+		sb.append("    type: select\n");
+		sb.append("    proxies:\n");
+		for (ClashParser.ProxyDef p : ClashParser.extractProxies(proxies))
+		  sb.append("      - \"").append(escapeYaml(p.name)).append("\"\n");
+		sb.append("rules:\n");
+		sb.append("  - MATCH,").append(GROUP).append('\n');
 		sb.append("mode: rule\n");
 		sb.append("log-level: silent\n");
 		sb.append("ipv6: false\n");

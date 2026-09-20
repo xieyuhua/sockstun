@@ -582,8 +582,15 @@ public class SubscribeActivity extends BaseActivity {
 
 
 	private void testAll() {
-		if (nodes.isEmpty())
-		  return;
+		/* Drop the previous pass's progress state FIRST: an early return below
+		   must never leave a stale 0% bar on screen with the FAB disabled. */
+		pendingTests = 0;
+		testsDone = 0;
+		testTotal = 0;
+		if (nodes.isEmpty()) {
+			updateTestProgress();
+			return;
+		}
 		/* Test exactly the pool the list is scoped to: 「全部」 tests every node,
 		   a country chip tests that country's nodes. The test core is built from
 		   the same pool, so a node in the list is never "missing from the core" -
@@ -594,8 +601,14 @@ public class SubscribeActivity extends BaseActivity {
 			  continue;
 			toTest.add(n);
 		}
-		if (toTest.isEmpty())
-		  return;
+		if (toTest.isEmpty()) {
+			/* Staying silent here made the button look dead. */
+			updateTestProgress();
+			TProxyService.log("测速: 当前筛选（"
+				+ (filterCountry.isEmpty() ? "全部" : filterCountry) + "）没有匹配到节点");
+			Toast.makeText(this, R.string.sub_test_empty_scope, Toast.LENGTH_SHORT).show();
+			return;
+		}
 		/* The running config may have changed (subscription edited / re-picked);
 		   rebuild the node-name map and re-probe the api host from scratch. */
 		proxyNameCache = null;
@@ -620,6 +633,19 @@ public class SubscribeActivity extends BaseActivity {
 				? "全部" : prefs.getSubCountryFilter()) + " ===");
 		for (ClashNode n : toTest)
 		  testNode(n, true);
+		/* Watchdog: a pass that lands NOTHING within a generous window is stuck
+		   (core / bridge / hostname resolution), not merely slow. Recorded with
+		   the counters so a frozen progress bar is explainable after the fact. */
+		final int expected = toTest.size();
+		ui.postDelayed(new Runnable() {
+			@Override
+			public void run() {
+				if (pendingTests <= 0 || testsDone > 0)
+				  return;                       /* finished, or visibly moving */
+				TProxyService.log("测速: 60 秒内没有任何结果（应测 " + expected + "，待完成 "
+					+ pendingTests + "）→ 疑似卡在内核/桥/域名解析，详见上面日志");
+			}
+		}, 60000);
 	}
 
 	/* Progress: the bar in the card plus the stats line, and the FAB is simply
@@ -694,14 +720,17 @@ public class SubscribeActivity extends BaseActivity {
 			if (name == null || name.isEmpty())
 			  return;
 			/* Keep the self-test short: it only has to prove the plumbing, not
-			   measure the slowest node in the list. */
-			int probeMs = Math.min(prefs.getProxyTestTimeout() * 1000, 8000);
+			   measure the slowest node in the list. It runs BEFORE any node is
+			   tested, so every extra second here is a second of frozen 0%. */
+			int probeMs = Math.min(prefs.getProxyTestTimeout() * 1000, 5000);
+			long t0 = System.currentTimeMillis();
 			Long d = CoreTestHost.testDelay(name, prefs.getAutoTestUrl(), probeMs);
 			TProxyService.log("测速自检：" + (d == null
 				? "无判定（看上面 bridge/delay 行，多为参数或内核问题）"
 				: (d >= 0 ? ("可用 " + d + "ms") : "该节点不可用(-2)"))
 				+ " · 节点 " + name + " · 内核=" + (coreOk ? "测试内核" : "隧道内核(REST)")
-				+ " · 可测节点 " + coreNodeCount + " 个");
+				+ " · 可测节点 " + coreNodeCount + " 个 · 耗时 "
+				+ (System.currentTimeMillis() - t0) + "ms");
 		} catch (Throwable e) {
 			TProxyService.log("测速自检异常 " + e);
 		}
@@ -753,15 +782,11 @@ public class SubscribeActivity extends BaseActivity {
 				else if (real == null)
 				  logOnce("untested", "测速结果: 无判定 → 未测速，例如 " + n.name + " ["
 					+ n.server + ":" + n.port + "]");
-				/* (Re)resolve the node's country on every test pass and overwrite
-				   the cached value, so a mislabeled flag (e.g. a stale "RU" for a
-				   US IP) self-heals instead of being stuck forever. The in-memory
-				   cache still dedupes repeated servers within this run. A failed
-				   lookup (offline / rate-limited) yields UNKNOWN, which we keep out
-				   so a good cached value is never clobbered into "unknown". */
-				String cc = GeoIp.countryOf(prefs, n.server, true);
-				if (cc != null && !cc.isEmpty() && !GeoIp.UNKNOWN.equals(cc))
-				  n.country = cc;
+				/* Report the result FIRST, then look up the country. The lookup
+				   needs DNS, and a slow resolver used to hold the whole
+				   "0% -> nothing" state: the progress counter is only bumped by
+				   the post below, so it stayed frozen while a hostname crawled.
+				   The country is cosmetic (flag + chips), the latency is not. */
 				ui.post(new Runnable() {
 					@Override
 					public void run() {
@@ -821,6 +846,30 @@ public class SubscribeActivity extends BaseActivity {
 						}
 					}
 				});
+				/* Country LAST (see above): it needs DNS, and a slow resolver must
+				   never freeze the progress. Re-resolved each pass so a mislabeled
+				   flag (a stale "RU" on a US IP) self-heals; a failure yields
+				   UNKNOWN, which is kept out so a good value is never clobbered. */
+				String cc = GeoIp.countryOf(prefs, n.server, true);
+				if (cc != null && !cc.isEmpty() && !GeoIp.UNKNOWN.equals(cc)
+						&& !cc.equals(n.country)) {
+					n.country = cc;
+					ui.post(new Runnable() {
+						@Override
+						public void run() {
+							if (isFinishing() || isDestroyed())
+							  return;
+							/* Repaint the row's flag; persist + refresh the chips
+							   only once the pass is over, because the tail may
+							   already have saved while this lookup was running. */
+							adapter.notifyDataSetChanged();
+							if (pendingTests <= 0) {
+								refreshCountryChips();
+								saveNodes();
+							}
+						}
+					});
+				}
 			}
 		});
 	}

@@ -99,6 +99,12 @@ class CoreTestHost {
 			if (err[0] != null) {
 				Log.w(TAG, "quickSetup: " + err[0]);
 				TProxyService.log("测试内核 quickSetup 失败：" + err[0]);
+				/* This config was NOT applied, so the core is either empty or
+				   still running the PREVIOUS pool. Either way it must not be
+				   treated as ready: probing it would aim every node at a stale
+				   node set and report nonsense. */
+				applied = false;
+				lastConfig = "";
 				return false;
 			}
 			lastConfig = cfg;
@@ -214,12 +220,17 @@ class CoreTestHost {
 		return null;
 	}
 
-	/* Try each shape until the core accepts one (i.e. it processed the call
-	   instead of rejecting the parameters). Runs on one thread only. */
+	/* Try each shape until the core stops complaining about the parameters.
+	   Runs on one thread only.
+	   "Accepted" means the core did not refuse the payload - NOT that it
+	   produced a delay: waiting for a real answer here costs one full probe per
+	   shape (5 x (timeout+5s) = over a minute with a long timeout) and that
+	   stall happens BEFORE any node is tested, so the user just sees a frozen
+	   0% progress bar. */
 	private static int detectShape(String proxyName, String url, int timeoutMs) {
 		for (int i = 0; i < DELAY_SHAPES.length; i++) {
 			Probe p = probe(i, proxyName, url, timeoutMs);
-			if (p.answered)
+			if (!p.rejected)
 			  return i;
 			TProxyService.log("delay: 内核不接受参数形状#" + i + "（" + DELAY_SHAPES[i][0]
 				+ "/" + DELAY_SHAPES[i][1] + "/timeout=" + DELAY_SHAPES[i][2]
