@@ -229,6 +229,22 @@ public class TProxyService extends VpnService {
 		}
 	}
 
+	/* Profile handed to the core, kept so that a rejected proxy can be dropped
+	   and the profile re-applied (see retryWithoutRejectedProxy). */
+	private volatile String coreInitParams = null;
+	private volatile String coreSetupParams = null;
+	private volatile File coreConfigFile = null;
+	private volatile boolean coreCustomConfig = false;
+	/* Node names the core has refused. Excluded from every later rebuild, and
+	   remembered for the life of the process. */
+	private final java.util.Set<String> rejectedNodes =
+		java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+	private volatile int configRetry = 0;
+	/* True while a retry is rebuilding the profile, so the synchronous
+	   "config is broken" check does not race it. */
+	private volatile boolean configRetryRunning = false;
+	private static final int MAX_CONFIG_RETRIES = 8;
+
 	private ParcelFileDescriptor tunFd = null;
 	/* Non-empty when the core reported a problem while loading the generated
 	   config. The control API never binds in that case, so the error is kept
@@ -327,9 +343,13 @@ public class TProxyService extends VpnService {
 				appendLog("config: 使用自定义 config.yaml（已关闭自动生成）");
 				ensureControlApi(configFile, prefs);
 			} else {
-				configFile = MihomoConfig.build(this, prefs);
+				/* Nodes the core already refused must not come back on a
+				   reconnect, or the profile would fail again every time. */
+				configFile = MihomoConfig.build(this, prefs, rejectedNodes);
 				appendLog("config: " + configFile.getAbsolutePath());
-				appendLog("routing: " + MihomoConfig.describe(prefs));
+				appendLog("routing: " + MihomoConfig.describe(prefs)
+					+ (rejectedNodes.isEmpty() ? ""
+						: ("（已排除内核拒绝的节点 " + rejectedNodes.size() + " 个）")));
 			}
 			/* One line, not the whole file: these keys decide whether the node
 			   picker and the traffic counters can reach the core at all. */
@@ -461,33 +481,24 @@ public class TProxyService extends VpnService {
 		} catch (Throwable e) {
 		}
 
+		/* Kept for the drop-and-retry path (see retryWithoutRejectedProxy). */
+		coreInitParams = initParams;
+		coreSetupParams = setupParams;
+		coreConfigFile = configFile;
+		coreCustomConfig = prefs.getCustomConfig();
+		configRetry = 0;
 		try {
-			Clash.INSTANCE.quickSetup(initParams, setupParams, new InvokeInterface() {
-				@Override
-				public void onResult(String result) {
-					if (result == null || result.isEmpty()) {
-						appendLog("mihomo quickSetup OK");
-					} else {
-						/* A non-empty result is the core reporting a problem
-						   with the config it was handed (unknown proxy / group,
-						   bad rule, ...). Nothing about the session can work
-						   then - no group, no rules, no control API - so keep
-						   the text and stop with the core's own message instead
-						   of pretending the tunnel came up. */
-						quickSetupError = result;
-						appendLog("mihomo quickSetup: " + result);
-						if (looksLikeError(result))
-						  abortOnConfigError(result);
-					}
-				}
-			});
+			quickSetupCore();
 		} catch (Throwable e) {
 			failStartup("启动内核失败：" + e.getMessage());
 			return;
 		}
-		/* quickSetup may run its callback on the calling thread; when it did,
-		   fail right here so startTUN is never reached with a broken config. */
-		if (quickSetupError != null && looksLikeError(quickSetupError)) {
+		/* quickSetup may run its callback on the calling thread; when it did and
+		   the profile is broken, the retry path has already handled it (or
+		   scheduled the abort), so startTUN is never reached with a dead config.
+		   A retry that is still running on another thread is left to finish. */
+		if (quickSetupError != null && looksLikeError(quickSetupError)
+				&& !configRetryRunning) {
 			startupAborted = true;
 			failStartup("内核配置错误：" + configErrorReason(quickSetupError));
 			return;
@@ -612,6 +623,85 @@ public class TProxyService extends VpnService {
 			|| t.contains("invalid") || t.contains("yaml") || t.contains("unsupported")
 			|| t.contains("cannot") || t.contains("no such") || t.contains("unknown")
 			|| t.contains("proxy") || t.contains("group");
+	}
+
+	/* Hand the current profile to the core. Factored out because a rejected
+	   proxy makes us rewrite the profile and call it again. */
+	private void quickSetupCore() {
+		final String init = coreInitParams;
+		final String setup = coreSetupParams;
+		if (init == null || setup == null)
+		  return;
+		Clash.INSTANCE.quickSetup(init, setup, new InvokeInterface() {
+			@Override
+			public void onResult(String result) {
+				if (result == null || result.isEmpty()) {
+					appendLog("mihomo quickSetup OK");
+					quickSetupError = null;
+					configRetryRunning = false;
+					return;
+				}
+				/* A non-empty result is the core reporting a problem with the
+				   config it was handed (unknown proxy / group, bad rule, ...).
+				   Nothing about the session can work then - no group, no rules,
+				   no control API - so keep the text, and try to recover if the
+				   core named a specific proxy. */
+				quickSetupError = result;
+				appendLog("mihomo quickSetup: " + result);
+				if (looksLikeError(result))
+				  retryWithoutRejectedProxy(result);
+			}
+		});
+	}
+
+	/* mihomo validates the whole profile in ONE pass: a single invalid proxy
+	   ("proxy 645: invalid REALITY short ID") makes it refuse the entire file -
+	   the tunnel never comes up, and so does every latency test. Before giving
+	   up, drop exactly that node, rewrite the profile and hand it back.
+	   Bounded, and only for generated profiles: a hand-edited custom config is
+	   never touched. */
+	private void retryWithoutRejectedProxy(final String err) {
+		if (coreCustomConfig || configRetry >= MAX_CONFIG_RETRIES) {
+			abortOnConfigError(err);
+			return;
+		}
+		configRetryRunning = true;
+		String bad = MihomoConfig.badProxyNameFromError(err, readTextFile(coreConfigFile));
+		if (bad == null || bad.isEmpty() || !rejectedNodes.add(bad)) {
+			configRetryRunning = false;
+			abortOnConfigError(err);
+			return;
+		}
+		configRetry++;
+		appendLog("config: 内核拒绝节点「" + bad + "」（" + err
+			+ "）→ 已排除该节点，重新生成配置并重试（第 " + configRetry + " 次）");
+		try {
+			MihomoConfig.build(this, prefs, rejectedNodes);
+		} catch (Throwable e) {
+			appendLog("config: 重新生成配置失败：" + e);
+			configRetryRunning = false;
+			abortOnConfigError(err);
+			return;
+		}
+		quickSetupCore();
+	}
+
+	/* Whole-file read for the profile we just wrote (small, UTF-8). */
+	private static String readTextFile(File f) {
+		if (f == null || !f.exists())
+		  return null;
+		try {
+			java.io.FileInputStream in = new java.io.FileInputStream(f);
+			java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+			byte[] buf = new byte[8192];
+			int n;
+			while ((n = in.read(buf)) > 0)
+			  bos.write(buf, 0, n);
+			in.close();
+			return new String(bos.toByteArray(), "UTF-8");
+		} catch (Throwable e) {
+			return null;
+		}
 	}
 
 	/* Stop the service with the core's own message. Runs on the main thread

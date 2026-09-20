@@ -94,11 +94,19 @@ public class MihomoConfig {
 	/* Write the final clash config into the app's files dir and return the
 	   file. Throws if no upstream has been configured yet. */
 	public static File build(Context context, Preferences prefs) throws IOException {
+		return build(context, prefs, null);
+	}
+
+	/* Same, minus the node names the core has already refused (see
+	   TProxyService.rejectedNodes): one invalid proxy otherwise makes mihomo
+	   reject the whole profile, so the tunnel never comes up. */
+	public static File build(Context context, Preferences prefs,
+			java.util.Set<String> skip) throws IOException {
 		/* An enabled SOCKS5 server wins; otherwise every subscription is
 		   merged into one node pool. */
 		SocksServer server = prefs.getActiveSocksServer();
 		StringBuilder cfg = new StringBuilder(
-			server != null ? manualSocksConfig(prefs, server) : mergedConfig(prefs));
+			server != null ? manualSocksConfig(prefs, server) : mergedConfig(prefs, skip));
 		if (!cfg.toString().endsWith("\n"))
 		  cfg.append('\n');
 
@@ -295,13 +303,20 @@ public class MihomoConfig {
 	private static boolean isRejectedByCore(String text) {
 		if (text == null || text.isEmpty())
 		  return false;
-		Matcher m = Pattern.compile("(?m)^\\s*short-id\\s*:\\s*[\"']?([^\"'\\s]*)")
+		/* NOT anchored to the line start: half the subscriptions in the wild use
+		   flow style (`- {name: x, server: y, reality-opts: {short-id: zz}}`),
+		   where the key sits inside braces and an anchored pattern misses it -
+		   which is exactly how the bad node still reached the core. */
+		Matcher m = Pattern.compile("short-id\\s*:\\s*[\"']?([^\"'\\s,}\\]{]*)")
 			.matcher(text);
 		if (!m.find())
 		  return false;
 		String id = m.group(1).trim();
 		if (id.isEmpty())
 		  return false;
+		/* mihomo does hex.DecodeString(short-id); anything that is not an even
+		   run of hex digits makes it reject the node (and with it the whole
+		   profile) with "invalid REALITY short ID". */
 		if (id.length() > 16 || (id.length() % 2) != 0)
 		  return true;
 		return !id.matches("(?i)[0-9a-f]+");
@@ -371,6 +386,14 @@ public class MihomoConfig {
 	   filter, and the SAME method feeds the tunnel AND the TUN-less test core -
 	   that is what keeps "测速范围 = 你看到的列表" true with no extra switch. */
 	private static String mergedConfig(Preferences prefs) throws IOException {
+		return mergedConfig(prefs, null);
+	}
+
+	/* Same, minus the node names the core has refused. Because mihomo validates
+	   the whole profile in one go, dropping the one bad node is the difference
+	   between "the tunnel comes up" and "nothing works at all". */
+	private static String mergedConfig(Preferences prefs, java.util.Set<String> skip)
+			throws IOException {
 		List<String> taken = new ArrayList<String>();
 		StringBuilder proxies = new StringBuilder();
 
@@ -406,6 +429,10 @@ public class MihomoConfig {
 				   here instead of handing the core a doomed file. */
 				if (isRejectedByCore(p.text)) {
 					TProxyService.log("配置: 跳过内核无法解析的节点「" + p.name + "」");
+					continue;
+				}
+				if (skip != null && skip.contains(p.name)) {
+					TProxyService.log("配置: 跳过内核已拒绝的节点「" + p.name + "」");
 					continue;
 				}
 				String name = uniqueName(taken, p.name);
