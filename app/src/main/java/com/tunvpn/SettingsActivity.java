@@ -126,15 +126,6 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 					CoreTestHost.reset();
 				}
 			});
-		addSwitchRow(group_subscription, R.drawable.ic_routing, R.string.settings_test_all_nodes,
-			R.string.settings_test_all_nodes_hint, prefs.getTestAllNodes(),
-			new CompoundButton.OnCheckedChangeListener() {
-				@Override
-				public void onCheckedChanged(CompoundButton button, boolean checked) {
-					prefs.setTestAllNodes(checked);
-					CoreTestHost.reset();
-				}
-			});
 		/* Whether the subscribe list also shows unusable / untested nodes. */
 		addSwitchRow(group_subscription, R.drawable.ic_routing, R.string.settings_show_unavailable,
 			R.string.settings_show_unavailable_hint, prefs.getShowUnavailable(),

@@ -218,9 +218,13 @@ public class MihomoConfig {
 	   `external-controller` means no API listener - so this core can never
 	   clash with the tunnel core running in the :native process. Writes
 	   <homeDir>/config.yaml and returns its content (for change detection). */
-	public static String buildTestCoreConfig(Preferences prefs,
-			boolean allNodes, File homeDir) throws IOException {
-		String body = mergedConfig(prefs, allNodes);
+	public static String buildTestCoreConfig(Preferences prefs, File homeDir)
+			throws IOException {
+		/* The SAME pool the list and the tunnel are scoped to: the country
+		   filter is the scope, so "全部" carries every node and a country chip
+		   carries that country's nodes. That is what makes "测速范围 = 你看到的
+		   列表" true without a separate switch. */
+		String body = mergedConfig(prefs);
 		StringBuilder sb = new StringBuilder(body);
 		if (!body.endsWith("\n"))
 		  sb.append('\n');
@@ -281,15 +285,10 @@ public class MihomoConfig {
 	}
 
 	/* Merge every subscription into one node pool and point a single
-	   self-built group at it. */
+	   self-built group at it. The pool honours the subscribe page's country
+	   filter, and the SAME method feeds the tunnel AND the TUN-less test core -
+	   that is what keeps "测速范围 = 你看到的列表" true with no extra switch. */
 	private static String mergedConfig(Preferences prefs) throws IOException {
-		return mergedConfig(prefs, false);
-	}
-
-	/* allNodes=true ignores the country filter: used to build the TUN-less
-	   TEST core so every node in the list can be latency-tested (the tunnel's
-	   own pool stays narrowed to the picked country). */
-	private static String mergedConfig(Preferences prefs, boolean allNodes) throws IOException {
 		List<String> taken = new ArrayList<String>();
 		StringBuilder proxies = new StringBuilder();
 
@@ -297,7 +296,7 @@ public class MihomoConfig {
 		   country's proxies, so "auto fastest" and a manual pick both stay
 		   inside that country. An empty filter means "all countries". */
 		String cc = prefs.getSubCountryFilter();
-		boolean ccSet = !allNodes && (cc != null && !cc.isEmpty());
+		boolean ccSet = (cc != null && !cc.isEmpty());
 
 		for (Subscription sub : prefs.getSubscriptions()) {
 			/* A disabled subscription is kept but not merged into the pool. */

@@ -110,6 +110,16 @@
 				android:layout_marginTop="8dp"
 				android:textAppearance="?attr/textAppearanceBodySmall"
 				android:textColor="?attr/colorOnSurfaceVariant"/>
+			<!-- 批量测速进度：只在测速时出现，平时隐藏 -->
+			<ProgressBar
+				android:id="@+id/sub_progress"
+				style="?android:attr/progressBarStyleHorizontal"
+				android:layout_width="match_parent"
+				android:layout_height="6dp"
+				android:layout_marginTop="6dp"
+				android:max="100"
+				android:progress="0"
+				android:visibility="gone"/>
 		</LinearLayout>
 	</com.google.android.material.card.MaterialCardView>
 	<!-- 列表 + 「测速全部」悬浮按钮 -->

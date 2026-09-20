@@ -116,14 +116,13 @@ public class Preferences
 	   LAN. */
 	public static final String PROXY_PORT = "ProxyPort";
 	public static final String ALLOW_LAN = "AllowLan";
-	/* Latency-test behaviour:
-	   - PRELOAD_CORE: keep a TUN-less core alive in the app process so the
-	     core's REAL forwarding delay can be measured even when the VPN tunnel
-	     is not connected (the core never needs a TUN to test a proxy).
-	   - TEST_ALL_NODES: build that test core from ALL subscription nodes,
-	     ignoring the country filter, so every node in the list is testable. */
+	/* Latency-test behaviour: keep a TUN-less core alive in the app process so
+	   the core's REAL forwarding delay can be measured even when the VPN tunnel
+	   is not connected (a core never needs a TUN to test a proxy). The test core
+	   is built from the SAME pool the list is scoped to: the country filter is
+	   the scope, so "全部" tests every node and a country chip tests that
+	   country's nodes. */
 	public static final String PRELOAD_CORE = "PreloadCore";
-	public static final String TEST_ALL_NODES = "TestAllNodes";
 	/* Show every node in the subscribe list - including the ones a latency
 	   test marked unusable (-2) or never reached (-1). Off (default) lists only
 	   reachable nodes. */
@@ -787,17 +786,7 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Build the test core from ALL subscription nodes (ignore the country
-	   filter) so nodes outside the current pool can still be tested. */
-	public boolean getTestAllNodes() {
-		return prefs.getBoolean(key(TEST_ALL_NODES), true);
-	}
 
-	public void setTestAllNodes(boolean v) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putBoolean(key(TEST_ALL_NODES), v);
-		editor.commit();
-	}
 
 	/* List unusable / untested nodes in the subscribe page too. */
 	public boolean getShowUnavailable() {

@@ -25,6 +25,7 @@ import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ProgressBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -69,6 +70,9 @@ public class SubscribeActivity extends BaseActivity {
 	private ListView listview;
 	private TextView textview_empty;
 	private TextView textview_stats;
+	/* Progress of a "test all" run: a determinate bar in the card, so the user
+	   can see it moving instead of guessing whether the button did anything. */
+	private ProgressBar progress_bar;
 	private SwitchMaterial switch_auto;
 	private TextView textview_auto_hint;
 	/* Country chips: a single row the user swipes sideways; "" = all countries
@@ -167,6 +171,8 @@ public class SubscribeActivity extends BaseActivity {
 
 	/* Latency order by default: fastest first is what people actually want. */
 	private int pendingTests = 0;
+	/* Size of the current pass (progress bar maximum). */
+	private int testTotal = 0;
 	/* Set once per "test" pass: the TUN-less test core has been prepared. */
 	private volatile boolean corePrepared = false;
 	/* Progress of a "test all" run, and the last time the list was fully
@@ -197,6 +203,7 @@ public class SubscribeActivity extends BaseActivity {
 		listview = (ListView) findViewById(R.id.sub_list);
 		textview_empty = (TextView) findViewById(R.id.sub_empty);
 		textview_stats = (TextView) findViewById(R.id.sub_stats);
+		progress_bar = (ProgressBar) findViewById(R.id.sub_progress);
 		switch_auto = (SwitchMaterial) findViewById(R.id.sub_auto);
 		textview_auto_hint = (TextView) findViewById(R.id.sub_auto_hint);
 
@@ -399,9 +406,11 @@ public class SubscribeActivity extends BaseActivity {
 			getString(R.string.sub_stats, ok, bad, nodes.size()));
 		if (shown.size() != nodes.size())
 		  sb.append("  ·  ").append(getString(R.string.sub_visible, shown.size()));
-		if (pendingTests > 0)
-		  sb.append("  ·  ").append(getString(R.string.sub_testing, testsDone,
-			testsDone + pendingTests));
+		if (pendingTests > 0) {
+			int total = Math.max(1, testsDone + pendingTests);
+			int pct = (int) (testsDone * 100L / total);
+			sb.append("  ·  ").append(getString(R.string.sub_testing, testsDone, total, pct));
+		}
 		textview_stats.setText(sb.toString());
 	}
 
@@ -489,9 +498,10 @@ public class SubscribeActivity extends BaseActivity {
 			public void onClick(View v) {
 				filterCountry = code;
 				prefs.setSubCountryFilter(filterCountry);
-				/* With 「测速并入全量节点」 off the test core is rebuilt from the
-				   new pool, so the cached node-name map must be refetched (it
-				   was read off the UI thread, hence the volatile fields). */
+				/* The country IS the test scope now: the test core is rebuilt
+				   from the new pool ("测速范围 = 你看到的列表"), so the cached
+				   node-name map must be refetched (it is read off the UI thread,
+				   hence the volatile fields). */
 				proxyNameCache = null;
 				coreNodeCount = 0;
 				applyView();
@@ -574,6 +584,18 @@ public class SubscribeActivity extends BaseActivity {
 	private void testAll() {
 		if (nodes.isEmpty())
 		  return;
+		/* Test exactly the pool the list is scoped to: 「全部」 tests every node,
+		   a country chip tests that country's nodes. The test core is built from
+		   the same pool, so a node in the list is never "missing from the core" -
+		   that is why the old 「测速并入全量节点」 switch is gone. */
+		List<ClashNode> toTest = new ArrayList<ClashNode>();
+		for (ClashNode n : nodes) {
+			if (!filterCountry.isEmpty() && !matchesCountry(n, filterCountry))
+			  continue;
+			toTest.add(n);
+		}
+		if (toTest.isEmpty())
+		  return;
 		/* The running config may have changed (subscription edited / re-picked);
 		   rebuild the node-name map and re-probe the api host from scratch. */
 		proxyNameCache = null;
@@ -581,7 +603,8 @@ public class SubscribeActivity extends BaseActivity {
 		coreNodeCount = 0;
 		passNotFound.set(0);
 		corePrepared = false;
-		pendingTests = nodes.size();
+		pendingTests = toTest.size();
+		testTotal = toTest.size();
 		testsDone = 0;
 		lastTestUiUpdate = 0;
 		passLogged.clear();
@@ -589,52 +612,56 @@ public class SubscribeActivity extends BaseActivity {
 		/* Pass header: enough context to read a run in which a node flipped
 		   from 可用 to 不可用 (which core answered, how long we waited, at
 		   which URL). */
-		TProxyService.log("=== 测速开始：" + nodes.size() + " 个节点 · VPN="
+		TProxyService.log("=== 测速开始：" + toTest.size() + " 个节点 · VPN="
 			+ (prefs.getEnable() ? "已连接" : "未连接")
 			+ " · 单目标超时 " + prefs.getProxyTestTimeout() + "s · 测速地址 "
 			+ prefs.getAutoTestUrl() + " · 内置目标 " + PROXY_TEST_URLS.length + " 个"
 			+ " · 国家筛选=" + (prefs.getSubCountryFilter().isEmpty()
-				? "全部" : prefs.getSubCountryFilter())
-			+ " · 并入全量节点=" + (prefs.getTestAllNodes() ? "开" : "关") + " ===");
-		for (ClashNode n : nodes)
+				? "全部" : prefs.getSubCountryFilter()) + " ===");
+		for (ClashNode n : toTest)
 		  testNode(n, true);
 	}
 
-	/* The FAB carries no label, so progress goes into the stats line and the
-	   FAB is simply disabled while a run is in flight. */
+	/* Progress: the bar in the card plus the stats line, and the FAB is simply
+	   disabled while a run is in flight (it carries no label of its own). */
 	private void updateTestProgress() {
-		fab_test_all.setEnabled(pendingTests <= 0);
+		boolean running = pendingTests > 0;
+		fab_test_all.setEnabled(!running);
+		if (progress_bar != null) {
+			if (running) {
+				progress_bar.setMax(Math.max(1, testTotal));
+				progress_bar.setProgress(Math.max(0, testTotal - pendingTests));
+				progress_bar.setVisibility(View.VISIBLE);
+			} else {
+				progress_bar.setVisibility(View.GONE);
+			}
+		}
 		updateStats();
 	}
 
-	/* Load/refresh the TUN-less test core when the settings allow it, so the
-	   latency test can use the core's REAL forwarding delay. Returns true when
-	   a test core is available in this process. Runs on a pool thread (loading
-	   the core takes a moment). */
+	/* Load/refresh the TUN-less test core, so the latency test can use the
+	   core's REAL forwarding delay. Returns true when a test core is available
+	   in this process. Runs on a pool thread (loading the core takes a moment).
+	   Always used - connected or not - because it is the only path whose node
+	   pool is rebuilt from the CURRENT country filter: the tunnel core's pool is
+	   baked in at connect time, so after switching country chip it would no
+	   longer match the list. */
 	private boolean prepareTestCore() {
 		try {
-			if (prefs.getEnable()) {
-				/* Connected: a separate all-nodes test core is only built when
-				   the user asked for it ("测速并入全量节点"); otherwise the
-				   tunnel core is used through the embedded REST API. */
-				if (!prefs.getTestAllNodes()) {
-					logOnce("core-path", "测速: 已连接且未开「测速并入全量节点」"
-						+ " → 用隧道内核的 /delay（经控制接口）");
-					return false;
-				}
-				return CoreTestHost.ensureReady(this, prefs);
+			boolean ok = CoreTestHost.ensureReady(this, prefs);
+			if (ok) {
+				logOnce("core-path", "测速: 使用测试内核（跟随当前国家筛选）");
+				return true;
 			}
-			/* Disconnected: a core is the ONLY thing that can measure a node
-			   (the tunnel one is gone), so an explicit tap on 测速 always loads
-			   the TUN-less test core - on demand. The 「未连接时内核测速」 switch
-			   only decides whether it is preloaded ahead of time (see onResume);
-			   gating the load itself made the button look broken: every node
-			   silently came back "未测速" and nothing was ever tested. */
-			if (!prefs.getPreloadCore())
-			  TProxyService.log("测速: 未连接，未开「未连接时内核测速」→ 现在按需加载测试内核");
-			else
-			  TProxyService.log("测速: 未连接 → 使用测试内核（未预加载）");
-			return CoreTestHost.ensureReady(this, prefs);
+			/* Test core unavailable: fall back to the tunnel core over the
+			   control API, which at least covers the pool it was started with. */
+			if (prefs.getEnable()) {
+				logOnce("core-path", "测速: 测试内核不可用 → 回退隧道内核的 /delay（其节点池"
+					+ "为连接时的那一份，换过国家筛选可能不全）");
+				return false;
+			}
+			logOnce("core-path", "测速: 测试内核不可用（未连接 VPN，无回退）→ 本次按未测速处理");
+			return false;
 		} catch (Throwable e) {
 			TProxyService.log("测速: 准备测试内核异常 " + e);
 			return false;
@@ -740,10 +767,14 @@ public class SubscribeActivity extends BaseActivity {
 					public void run() {
 						if (isFinishing() || isDestroyed())
 						  return;
+						/* Progress counts for BOTH a batch and a single re-test, so
+						   the bar always reflects the real pass and always hides
+						   again when the pass ends. */
+						testsDone++;
+						if (pendingTests > 0)
+						  pendingTests--;
+						updateTestProgress();
 						if (batch) {
-							testsDone++;
-							pendingTests--;
-							updateTestProgress();
 							/* Show each result as it lands; a full re-filter (with
 							   sorting) is throttled. */
 							long now = System.currentTimeMillis();
@@ -1134,7 +1165,6 @@ public class SubscribeActivity extends BaseActivity {
 			TProxyService.log("测速: 内核 /proxies 共 " + total + " 项，可测节点 "
 				+ withAddr + " 个（映射 " + map.size() + " 键）· 国家筛选="
 				+ (prefs.getSubCountryFilter().isEmpty() ? "全部" : prefs.getSubCountryFilter())
-				+ " · 并入全量节点=" + (prefs.getTestAllNodes() ? "开" : "关")
 				+ (sample.length() == 0 ? "" : (" · 示例 " + sample)));
 			/* The two shapes worth seeing: a proxy object as the core really
 			   reports it, and the top-level keys it really uses. Together they
@@ -1419,6 +1449,12 @@ public class SubscribeActivity extends BaseActivity {
 					   reason even if the same one was already printed by a
 					   previous "测速全部". */
 					passLogged.clear();
+					/* Show the same progress line/bar (0/1 -> 1/1) so a single
+					   re-test is visibly "running" too. */
+					testsDone = 0;
+					testTotal = 1;
+					pendingTests = 1;
+					updateTestProgress();
 					testNode(n, false);
 				}
 			});

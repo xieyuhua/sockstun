@@ -62,7 +62,7 @@ class CoreTestHost {
 			  home.mkdirs();
 			String cfg;
 			try {
-				cfg = MihomoConfig.buildTestCoreConfig(prefs, prefs.getTestAllNodes(), home);
+				cfg = MihomoConfig.buildTestCoreConfig(prefs, home);
 			} catch (Throwable e) {
 				Log.w(TAG, "build test config failed: " + e);
 				return false;
