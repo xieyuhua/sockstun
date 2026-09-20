@@ -176,40 +176,38 @@ public class SubscribeActivity extends BaseActivity {
 	/* Guards the one-off /proxies fetch (see ensureProxyNameCache). */
 	private final Object nameCacheLock = new Object();
 
-	/* ONE latency pass at a time. A second pass while the first was still
-	   running corrupts the counters (a single re-test resets pendingTests to 1
-	   in the middle of a batch) and piles thousands of extra probes onto an
-	   already busy core - the app froze and then died. A new pass is refused
-	   with a toast until the running one finishes. */
-	private final java.util.concurrent.atomic.AtomicBoolean passRunning =
-		new java.util.concurrent.atomic.AtomicBoolean();
-	/* Wall-clock budget of the running pass. Hundreds of dead nodes cannot be
-	   probed in a useful time even with capped timeouts, so the pass stops
-	   probing when the budget is spent and reports the rest as 未测速: it always
-	   terminates, and it never lies about what it measured. */
-	private volatile long passDeadlineMs = 0;
-	/* True while a "测速全部" pass is in flight (drives the capped batch timeout
-	   and the quieter logging). */
-	private volatile boolean batchPass = false;
+	/* ONE latency pass at a time, tracked PROCESS-WIDE (see TestProgress): a
+	   second pass while the first was still running corrupts the counters and
+	   piles thousands of extra probes onto an already busy core. It is static
+	   state because a pass outlives this page - the user may switch away and
+	   come back, and the Activity may even be recreated - and the progress bar
+	   must still be there when they return. */
 	/* Per-target timeout used for a BATCH. A batch must not inherit a 30s
-	   setting: 4 targets + 2 rescue probes x 30s = 3 minutes for ONE dead node. */
-	private static final int BATCH_PROBE_TIMEOUT_MS = 6000;
-	/* How long a pass may run before the remaining nodes are left alone. */
+	   setting: a handful of probes x 30s is minutes for ONE dead node. */
+	private static final int BATCH_PROBE_TIMEOUT_MS = 4000;
+	/* How long a pass may run before the remaining nodes are left alone (and the
+	   "已达时间上限" toast is shown). It has to be generous: the action bridge is
+	   single-callback, so a pass costs roughly the SUM of the probe times, and a
+	   big subscription legitimately takes many minutes. It still guarantees the
+	   pass ENDS, and whatever is left is reported as 未测速 rather than guessed.
+	   Dead nodes cost more per node, but the batch timeout caps them - if the
+	   budget really runs out, that is the honest answer. */
 	private static long passBudgetMs(int nodeCount) {
-		return Math.min(8 * 60 * 1000L, 45000L + nodeCount * 2000L);
+		return Math.min(20 * 60 * 1000L, Math.max(120000L, nodeCount * 2500L));
 	}
+	/* Save the (shared) node cache every N finished nodes: a pass that is
+	   interrupted by a page switch or a process kill must not lose the work it
+	   already did. */
+	private static final int INCREMENTAL_SAVE_EVERY = 15;
 
-	/* Latency order by default: fastest first is what people actually want. */
-	private int pendingTests = 0;
-	/* Size of the current pass (progress bar maximum). */
-	private int testTotal = 0;
 	/* Set once per "test" pass: the TUN-less test core has been prepared. */
 	private volatile boolean corePrepared = false;
-	/* Progress of a "test all" run, and the last time the list was fully
-	   re-filtered. Sorting hundreds of rows on every single result would cost
-	   more than the wait it saves, so a full refresh is throttled. */
-	private int testsDone = 0;
+	/* Last time the list was fully re-filtered. Sorting hundreds of rows on
+	   every single result would cost more than the wait it saves, so a full
+	   refresh is throttled. */
 	private long lastTestUiUpdate = 0;
+	/* Nodes already persisted by the incremental save (see INCREMENTAL_SAVE_EVERY). */
+	private int lastSavedDone = 0;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -337,9 +335,16 @@ public class SubscribeActivity extends BaseActivity {
 	@Override
 	protected void onResume() {
 		super.onResume();
+		/* A pass keeps running while this page is away (its state is
+		   process-wide), so show the CURRENT progress instead of a fresh 0%.
+		   A pass whose page died without reporting its last node is reaped
+		   here, so a returning page is never locked out of testing. */
+		if (TestProgress.stale())
+		  TestProgress.finish();
 		/* Settings may have changed "显示不可用节点" (or the test-core switches);
 		   re-filter so the list reflects the new choice as soon as we return. */
 		applyView();
+		updateTestProgress();
 		/* Preload the TUN-less test core so the first 测速 is instant. This is
 		   all the 「未连接时内核测速」 switch does: without it the core is still
 		   loaded on demand when 测速 is tapped, just a few seconds later.
@@ -423,23 +428,40 @@ public class SubscribeActivity extends BaseActivity {
 		}
 	};
 
+	/* The nodes the CURRENT filters let through (country + protocol). This is
+	   the scope every number on the page describes - "共 N 个" must mean the
+	   nodes the user selected, not the whole merged pool.
+	   The availability filter is deliberately NOT part of it: the stats have to
+	   be able to say "3 个不可用" even while "显示不可用节点" is off. */
+	private List<ClashNode> filteredNodes() {
+		List<ClashNode> out = new ArrayList<ClashNode>();
+		for (ClashNode n : nodes) {
+			if (!filterCountry.isEmpty() && !matchesCountry(n, filterCountry))
+			  continue;
+			if (!filterProto.isEmpty() && !filterProto.equals(nodeType(n)))
+			  continue;
+			out.add(n);
+		}
+		return out;
+	}
+
 	private void updateStats() {
+		List<ClashNode> scoped = filteredNodes();
 		int ok = 0;
 		int bad = 0;
-		for (ClashNode n : nodes) {
+		for (ClashNode n : scoped) {
 			if (isAvailable(n))
 			  ok++;
 			else if (isBroken(n))
 			  bad++;
 		}
 		StringBuilder sb = new StringBuilder(
-			getString(R.string.sub_stats, ok, bad, nodes.size()));
-		if (shown.size() != nodes.size())
+			getString(R.string.sub_stats, ok, bad, scoped.size()));
+		if (shown.size() != scoped.size())
 		  sb.append("  ·  ").append(getString(R.string.sub_visible, shown.size()));
-		if (pendingTests > 0) {
-			int total = Math.max(1, testsDone + pendingTests);
-			int pct = (int) (testsDone * 100L / total);
-			sb.append("  ·  ").append(getString(R.string.sub_testing, testsDone, total, pct));
+		if (TestProgress.pending() > 0) {
+			sb.append("  ·  ").append(getString(R.string.sub_testing,
+				TestProgress.done(), TestProgress.total(), TestProgress.percent()));
 		}
 		textview_stats.setText(sb.toString());
 	}
@@ -612,35 +634,31 @@ public class SubscribeActivity extends BaseActivity {
 
 
 	private void testAll() {
-		/* Drop the previous pass's progress state FIRST: an early return below
-		   must never leave a stale 0% bar on screen with the FAB disabled. */
-		pendingTests = 0;
-		testsDone = 0;
-		testTotal = 0;
 		if (nodes.isEmpty()) {
 			updateTestProgress();
 			return;
 		}
-		/* Refuse to start while a pass is still running (see passRunning). */
-		if (!passRunning.compareAndSet(false, true)) {
+		/* Reap a pass whose page was destroyed (it can never report its last
+		   node), then refuse to start while a live one is still running. The
+		   state is process-wide, so this works even if a previous pass belongs
+		   to an Activity instance that no longer exists. */
+		if (TestProgress.stale())
+		  TestProgress.finish();
+		if (TestProgress.running()) {
 			updateTestProgress();
 			TProxyService.log("测速: 上一轮还没结束，拒绝开始新的测速");
 			Toast.makeText(this, R.string.sub_test_busy, Toast.LENGTH_SHORT).show();
 			return;
 		}
-		/* Test exactly the pool the list is scoped to: 「全部」 tests every node,
-		   a country chip tests that country's nodes. The test core is built from
-		   the same pool, so a node in the list is never "missing from the core" -
-		   that is why the old 「测速并入全量节点」 switch is gone. */
-		List<ClashNode> toTest = new ArrayList<ClashNode>();
-		for (ClashNode n : nodes) {
-			if (!filterCountry.isEmpty() && !matchesCountry(n, filterCountry))
-			  continue;
-			toTest.add(n);
-		}
+		/* Test exactly the scope the stats describe (see filteredNodes): the
+		   country chip and the protocol spinner. 「全部」 = every node, a country
+		   = that country's nodes, and the test core is built from the same pool -
+		   so what you see is what gets tested, and a node in the list is never
+		   "missing from the core" (which is why the old 「测速并入全量节点」
+		   switch is gone). */
+		List<ClashNode> toTest = filteredNodes();
 		if (toTest.isEmpty()) {
 			/* Staying silent here made the button look dead. */
-			passRunning.set(false);
 			updateTestProgress();
 			TProxyService.log("测速: 当前筛选（"
 				+ (filterCountry.isEmpty() ? "全部" : filterCountry) + "）没有匹配到节点");
@@ -650,8 +668,16 @@ public class SubscribeActivity extends BaseActivity {
 		/* Fastest-known first: with hundreds of nodes the budget WILL run out,
 		   and this way the nodes the user cares about are measured first. */
 		Collections.sort(toTest, latencyComparator);
-		batchPass = true;
-		passDeadlineMs = System.currentTimeMillis() + passBudgetMs(toTest.size());
+		/* Start the process-wide pass. It is ASYNCHRONOUS: leaving this page -
+		   or this Activity being recreated - does not stop it, and the progress
+		   is still there when the user comes back. */
+		final int gen = TestProgress.begin(toTest.size(),
+			System.currentTimeMillis() + passBudgetMs(toTest.size()), true);
+		if (gen < 0) {
+			updateTestProgress();
+			Toast.makeText(this, R.string.sub_test_busy, Toast.LENGTH_SHORT).show();
+			return;
+		}
 		/* The running config may have changed (subscription edited / re-picked);
 		   rebuild the node-name map and re-probe the api host from scratch. */
 		proxyNameCache = null;
@@ -660,10 +686,8 @@ public class SubscribeActivity extends BaseActivity {
 		passNotFound.set(0);
 		passSkipped.set(0);
 		corePrepared = false;
-		pendingTests = toTest.size();
-		testTotal = toTest.size();
-		testsDone = 0;
 		lastTestUiUpdate = 0;
+		lastSavedDone = 0;
 		passLogged.clear();
 		updateTestProgress();
 		/* Pass header: enough context to read a run in which a node flipped
@@ -683,7 +707,7 @@ public class SubscribeActivity extends BaseActivity {
 			+ " · 国家筛选=" + (prefs.getSubCountryFilter().isEmpty()
 				? "全部" : prefs.getSubCountryFilter()) + " ===");
 		for (ClashNode n : toTest)
-		  testNode(n, true);
+		  testNode(n, true, gen);
 		/* Watchdog: a pass that lands NOTHING within a generous window is stuck
 		   (core / bridge / hostname resolution), not merely slow. It also lets
 		   the UI go: a wedged pass must not keep the button dead forever. */
@@ -691,45 +715,35 @@ public class SubscribeActivity extends BaseActivity {
 		ui.postDelayed(new Runnable() {
 			@Override
 			public void run() {
-				if (pendingTests <= 0 || testsDone > 0)
+				if (TestProgress.pending() <= 0 || TestProgress.done() > 0)
 				  return;                       /* finished, or visibly moving */
 				TProxyService.log("测速: 60 秒内没有任何结果（应测 " + expected + "，待完成 "
-					+ pendingTests + "）→ 结束本轮，剩余按未测速处理（详见上面日志）");
+					+ TestProgress.pending() + "）→ 结束本轮，剩余按未测速处理（详见上面日志）");
 				releasePass();
-				pendingTests = 0;
-				testTotal = 0;
 				updateTestProgress();
 			}
 		}, 60000);
 	}
 
-	/* End of a pass: drop the single-flight flag and the budget. Called as soon
-	   as the last node has reported, and by the watchdog. */
+	/* End of a pass: release the process-wide flag and restore normal logging.
+	   Called as soon as the last node has reported, by the watchdog, and by the
+	   next page's onResume when a pass was orphaned. */
 	private void releasePass() {
-		passRunning.set(false);
-		passDeadlineMs = 0;
-		batchPass = false;
+		TestProgress.finish();
 		CoreTestHost.setVerbose(true);
-	}
-
-	/* True when the running pass is out of time (or is no longer the current
-	   one): the node is then reported as 未测速 without any probing. */
-	private boolean passExpired() {
-		if (!passRunning.get())
-		  return true;
-		long d = passDeadlineMs;
-		return d > 0 && System.currentTimeMillis() > d;
 	}
 
 	/* Progress: the bar in the card plus the stats line, and the FAB is simply
 	   disabled while a run is in flight (it carries no label of its own). */
 	private void updateTestProgress() {
-		boolean running = pendingTests > 0;
+		/* Read from the process-wide holder, so a page that was recreated mid
+		   pass shows the real progress instead of a fresh 0%. */
+		boolean running = TestProgress.pending() > 0;
 		fab_test_all.setEnabled(!running);
 		if (progress_bar != null) {
 			if (running) {
-				progress_bar.setMax(Math.max(1, testTotal));
-				progress_bar.setProgress(Math.max(0, testTotal - pendingTests));
+				progress_bar.setMax(Math.max(1, TestProgress.total()));
+				progress_bar.setProgress(TestProgress.done());
 				progress_bar.setVisibility(View.VISIBLE);
 			} else {
 				progress_bar.setVisibility(View.GONE);
@@ -809,9 +823,9 @@ public class SubscribeActivity extends BaseActivity {
 		}
 	}
 
-	/* batch = part of "test all": only refresh + persist once the last one
-	   finishes, otherwise we would rewrite the whole cache per node. */
-	private void testNode(final ClashNode n, final boolean batch) {
+	/* batch = part of "test all"; gen = the pass this node belongs to, so work
+	   left over from an orphaned pass stops by itself. */
+	private void testNode(final ClashNode n, final boolean batch, final int gen) {
 		testPool.execute(new Runnable() {
 			@Override
 			public void run() {
@@ -819,7 +833,7 @@ public class SubscribeActivity extends BaseActivity {
 				   finished it, or a newer pass replaced it): report the node as
 				   untested WITHOUT probing, so the pass drains fast instead of
 				   fighting a core it no longer owns. */
-				final boolean expired = passExpired();
+				final boolean expired = !TestProgress.isCurrent(gen);
 				/* Make sure a core is available for the real-forwarding test:
 			   the TUN-less test core when disconnected (or when the user asked
 			   for all-nodes testing), which also refreshes its node set. Only
@@ -872,14 +886,23 @@ public class SubscribeActivity extends BaseActivity {
 				ui.post(new Runnable() {
 					@Override
 					public void run() {
+						/* Count the node in the PROCESS-WIDE state even when this
+						   page is gone: the pass keeps running (that is the
+						   point), and its progress must be correct for whichever
+						   page shows it next. */
+						TestProgress.nodeDone(gen);
+						/* Keep the shared cache current while the pass runs: a
+						   page switch or a process kill must not throw away
+						   everything measured so far. (Counter-based, not
+						   modulo: four workers finish nodes concurrently, so a
+						   multiple of N can be jumped over.) */
+						int doneNow = TestProgress.done();
+						if (doneNow - lastSavedDone >= INCREMENTAL_SAVE_EVERY) {
+							lastSavedDone = doneNow;
+							saveNodes();
+						}
 						if (isFinishing() || isDestroyed())
-						  return;
-						/* Progress counts for BOTH a batch and a single re-test, so
-						   the bar always reflects the real pass and always hides
-						   again when the pass ends. */
-						testsDone++;
-						if (pendingTests > 0)
-						  pendingTests--;
+						  return;               /* nobody left to repaint */
 						updateTestProgress();
 						if (batch) {
 							/* Show each result as it lands; a full re-filter (with
@@ -892,7 +915,7 @@ public class SubscribeActivity extends BaseActivity {
 								adapter.notifyDataSetChanged();
 								updateStats();
 							}
-							if (pendingTests > 0)
+							if (TestProgress.pending() > 0)
 							  return;
 						}
 						saveNodes();
@@ -907,7 +930,8 @@ public class SubscribeActivity extends BaseActivity {
 							int ok = 0;
 							int bad = 0;
 							int un = 0;
-							for (ClashNode x : nodes) {
+							/* Same scope as the on-screen numbers. */
+							for (ClashNode x : filteredNodes()) {
 								if (x.latency >= 0)
 								  ok++;
 								else if (x.latency == -2)
@@ -942,7 +966,14 @@ public class SubscribeActivity extends BaseActivity {
 				   never freeze the progress. Re-resolved each pass so a mislabeled
 				   flag (a stale "RU" on a US IP) self-heals; a failure yields
 				   UNKNOWN, which is kept out so a good value is never clobbered. */
-				String cc = expired ? null : GeoIp.countryOf(prefs, n.server, true);
+				/* Only resolve when the country is still unknown. `refresh` used
+				   to re-resolve EVERY node on EVERY pass, and an unreachable
+				   resolver costs up to 3s of worker time per host - the workers
+				   then spent more time on DNS than on probing. */
+				boolean needCountry = (n.country == null || n.country.isEmpty()
+					|| GeoIp.UNKNOWN.equals(n.country));
+				String cc = (expired || !needCountry) ? null
+					: GeoIp.countryOf(prefs, n.server, true);
 				if (cc != null && !cc.isEmpty() && !GeoIp.UNKNOWN.equals(cc)
 						&& !cc.equals(n.country)) {
 					n.country = cc;
@@ -955,7 +986,7 @@ public class SubscribeActivity extends BaseActivity {
 							   only once the pass is over, because the tail may
 							   already have saved while this lookup was running. */
 							adapter.notifyDataSetChanged();
-							if (pendingTests <= 0) {
+							if (!TestProgress.running()) {
 								refreshCountryChips();
 								saveNodes();
 							}
@@ -1041,6 +1072,14 @@ public class SubscribeActivity extends BaseActivity {
 		}
 		String name = realNodeName(n);
 		if (name == null) {
+			/* A node the core refused outright (invalid REALITY short-id, ...)
+			   is excluded from its config, so no probe can ever reach it: say so
+			   and move on instead of burning six probes per pass on it. */
+			if (CoreTestHost.isRejected(n.name)) {
+				logOnce("rejected:" + n.name,
+					"测速: 内核拒绝该节点（配置非法，已从内核配置排除）→ 未测速 name=" + n.name);
+				return null;
+			}
 			/* The /proxies map has no entry for this node - but that does NOT
 			   prove the core lacks it: mihomo may report a RESOLVED IP in
 			   `server` (breaking the address key) while the name we generate is
@@ -1082,7 +1121,7 @@ public class SubscribeActivity extends BaseActivity {
 		   rescue probes x 30s is three minutes for ONE dead node, and a
 		   subscription has hundreds. Cap it (logged once). */
 		boolean capped = false;
-		if (batchPass && timeoutMs > BATCH_PROBE_TIMEOUT_MS) {
+		if (TestProgress.batch() && timeoutMs > BATCH_PROBE_TIMEOUT_MS) {
 			timeoutMs = BATCH_PROBE_TIMEOUT_MS;
 			capped = true;
 		}
@@ -1104,30 +1143,33 @@ public class SubscribeActivity extends BaseActivity {
 			if (d != null) {
 				failed = true;
 				hardFails++;
-				/* Two independent hard failures are enough to fall through to
-				   the rescue probe: trying all four only makes a dead node
-				   slower, and the rescue pass (different targets, longer
-				   timeout) is what really protects a slow-but-working node. */
-				if (hardFails >= 2)
+				/* Falling through to the rescue probe early is what keeps a
+				   batch quick: in a batch ONE hard failure is enough, because
+				   the rescue (a different, reliable target with a longer
+				   timeout) is the confirmation. A single node keeps the full
+				   multi-target walk. */
+				if (hardFails >= (TestProgress.batch() ? 1 : 2))
 				  break;
 			}
 		}
 		if (capped)
 		  logOnce("cap", "测速: 批量测速把单目标超时收紧为 "
 			+ (BATCH_PROBE_TIMEOUT_MS / 1000) + "s（设置在 "
-			+ prefs.getProxyTestTimeout() + "s）");
+			+ prefs.getProxyTestTimeout() + "s），并对失败节点提前转入救援探测");
 		if (!failed)
 		  return null;              /* only inconclusive -> untested, NOT 不可用 */
-		/* Rescue pass: one longer-timeout probe on the most reliable targets,
+		/* Rescue pass: a longer-timeout probe on the most reliable target(s),
 		   for slow-but-working nodes that a tight timeout just failed. This is
 		   what the old "real request" fallback used to rescue, without touching
 		   the global selector; it only runs for nodes about to be flagged. */
-		int retryMs = Math.max(timeoutMs, batchPass ? 10000 : 12000);
-		for (String target : RETRY_TEST_URLS) {
+		int retryMs = Math.max(timeoutMs, TestProgress.batch() ? 8000 : 12000);
+		int retryCount = TestProgress.batch() ? 1 : RETRY_TEST_URLS.length;
+		for (int ri = 0; ri < retryCount; ri++) {
+			String target = RETRY_TEST_URLS[ri];
 			Long d = delayProbe(name, target, retryMs);
 			if (d != null && d >= 0) {
 				TProxyService.log("测速: " + name + " 救援探测成功 " + d + "ms @"
-					+ target + "（首轮 " + prefs.getProxyTestTimeout() + "s 超时偏紧）");
+					+ target + "（首轮 " + timeoutMs / 1000 + "s 超时偏紧）");
 				return d;
 			}
 			if (d == null) {
@@ -1136,7 +1178,7 @@ public class SubscribeActivity extends BaseActivity {
 			}
 			TProxyService.log("测速: " + name + " 救援探测失败 @" + target + " -> " + d);
 		}
-		TProxyService.log("测速: " + name + " → 判定不可用（所有目标与救援探测均失败）");
+		TProxyService.log("测速: " + name + " → 判定不可用（目标与救援探测均失败）");
 		return -2L;                   /* genuinely unreachable */
 	}
 
@@ -1606,10 +1648,14 @@ public class SubscribeActivity extends BaseActivity {
 			test.setOnClickListener(new View.OnClickListener() {
 				@Override
 				public void onClick(View v) {
-					/* Same single-flight rule as "测速全部": starting one in the
-					   middle of a pass would reset pendingTests/testTotal and
-					   corrupt the whole batch. */
-					if (!passRunning.compareAndSet(false, true)) {
+					/* Same single-flight rule as "测速全部", from the same
+					   process-wide state: a single re-test during a batch would
+					   otherwise corrupt the whole pass. */
+					if (TestProgress.stale())
+					  TestProgress.finish();
+					int one = TestProgress.begin(1,
+						System.currentTimeMillis() + 120000, false);
+					if (one < 0) {
 						Toast.makeText(SubscribeActivity.this, R.string.sub_test_busy,
 							Toast.LENGTH_SHORT).show();
 						return;
@@ -1621,16 +1667,11 @@ public class SubscribeActivity extends BaseActivity {
 					passLogged.clear();
 					/* A single test keeps the user's own timeout and verbose
 					   logging; only the pass bookkeeping changes. */
-					batchPass = false;
 					CoreTestHost.setVerbose(true);
-					passDeadlineMs = System.currentTimeMillis() + 120000;
 					/* Show the same progress line/bar (0/1 -> 1/1) so a single
 					   re-test is visibly "running" too. */
-					testsDone = 0;
-					testTotal = 1;
-					pendingTests = 1;
 					updateTestProgress();
-					testNode(n, false);
+					testNode(n, false, one);
 				}
 			});
 			return convertView;

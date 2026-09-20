@@ -60,77 +60,134 @@ class CoreTestHost {
 			File home = new File(app.getFilesDir(), "coretest");
 			if (!home.exists())
 			  home.mkdirs();
-			String cfg;
-			try {
-				cfg = MihomoConfig.buildTestCoreConfig(prefs, home);
-			} catch (Throwable e) {
-				Log.w(TAG, "build test config failed: " + e);
-				return false;
-			}
-			/* Direct evidence for "is the generated config carrying the nodes?":
-			   the number of entries in its own `proxies:` section. */
-			if (cfg == null)
-			  return true;
-			boolean same = cfg.equals(lastConfig);
-			int nodeCount = countProxies(cfg);
-			TProxyService.log("测试内核配置：" + nodeCount + " 个代理条目 · "
-				+ cfg.length() + " 字节 · 路径 " + new File(home, "config.yaml").getAbsolutePath()
-				+ (same ? "（与上次相同，跳过重新应用）" : ""));
-			if (same)
-			  return true;
-			String initParams = "{\"home-dir\":\"" + home.getAbsolutePath() + "\"}";
-			String setupParams = "{\"selected-map\":{},\"profile\":\""
-				+ new File(home, "config.yaml").getAbsolutePath() + "\"}";
-			final Object lock = new Object();
-			final boolean[] done = { false };
-			final String[] err = { null };
-			Clash.INSTANCE.quickSetup(initParams, setupParams, new InvokeInterface() {
-				@Override
-				public void onResult(String result) {
-					if (result != null && !result.isEmpty())
-					  err[0] = result;
-					synchronized (lock) { done[0] = true; lock.notifyAll(); }
+			/* Apply - and if the core rejects a SPECIFIC proxy, drop that node
+			   and try again. mihomo validates the whole file at once ("proxy
+			   645: invalid REALITY short ID"), so one broken node in a
+			   600-node subscription otherwise made every single node untestable,
+			   while a small country pool happened to work. */
+			for (int attempt = 0; attempt <= MAX_DROP_RETRIES; attempt++) {
+				String cfg;
+				try {
+					cfg = MihomoConfig.buildTestCoreConfig(prefs, home, badProxies);
+				} catch (Throwable e) {
+					Log.w(TAG, "build test config failed: " + e);
+					TProxyService.log("测试内核配置生成失败：" + e);
+					return false;
 				}
-			});
-			/* The wait scales with the config: parsing a few hundred nodes takes
-			   seconds, and a FIXED 8s window meant a big pool was declared ready
-			   while the core was still loading - every probe then failed and the
-			   whole selection came back 不可用 (single-country worked because its
-			   config is tiny and loads in time). A timeout is a FAILURE, never a
-			   silent success. */
-			synchronized (lock) {
-				long waitMs = Math.min(60000L, 8000L + nodeCount * 30L);
-				long end = System.currentTimeMillis() + waitMs;
-				while (!done[0] && System.currentTimeMillis() < end)
-				  lock.wait(Math.max(1, end - System.currentTimeMillis()));
-				if (!done[0]) {
-					TProxyService.log("测试内核配置加载超时（等待 " + waitMs + "ms · "
-						+ nodeCount + " 个节点）→ 本次不测速，等它加载完再试");
+				/* Direct evidence for "is the generated config carrying the
+				   nodes?": the size of its own `proxies:` section. */
+				if (cfg == null)
+				  return true;
+				boolean same = cfg.equals(lastConfig);
+				int nodeCount = countProxies(cfg);
+				TProxyService.log("测试内核配置：" + nodeCount + " 个代理条目 · "
+					+ cfg.length() + " 字节 · 路径 "
+					+ new File(home, "config.yaml").getAbsolutePath()
+					+ (same ? "（与上次相同，跳过重新应用）" : "")
+					+ (badProxies.isEmpty() ? ""
+						: (" · 已排除 " + badProxies.size() + " 个内核拒绝的节点")));
+				if (same) {
+					applied = true;
+					return true;
+				}
+				Apply res = applyConfig(home, nodeCount);
+				if (res.timeout) {
+					/* Still parsing: NOT ready. Probing now would aim every node
+					   at a half-loaded core. */
 					applied = false;
 					lastConfig = "";
 					return false;
 				}
-			}
-			if (err[0] != null) {
-				Log.w(TAG, "quickSetup: " + err[0]);
-				TProxyService.log("测试内核 quickSetup 失败：" + err[0]);
-				/* This config was NOT applied, so the core is either empty or
-				   still running the PREVIOUS pool. Either way it must not be
-				   treated as ready: probing it would aim every node at a stale
-				   node set and report nonsense. */
+				if (res.err == null) {
+					lastConfig = cfg;
+					applied = true;
+					TProxyService.log("测试内核就绪（无 TUN 实例，节点用于隔离测速）");
+					return true;
+				}
+				String bad = MihomoConfig.badProxyNameFromError(res.err, cfg);
+				if (bad != null && !bad.isEmpty() && badProxies.add(bad)) {
+					TProxyService.log("测试内核: 内核拒绝节点「" + bad + "」（" + res.err
+						+ "）→ 已从测速配置排除并重试（第 " + (attempt + 1) + " 次）");
+					continue;
+				}
+				Log.w(TAG, "quickSetup: " + res.err);
+				TProxyService.log("测试内核 quickSetup 失败：" + res.err);
 				applied = false;
 				lastConfig = "";
 				return false;
 			}
-			lastConfig = cfg;
-			applied = true;
-			TProxyService.log("测试内核就绪（无 TUN 实例，节点用于隔离测速）");
-			return true;
+			TProxyService.log("测试内核: 连续排除 " + MAX_DROP_RETRIES
+				+ " 个节点仍无法加载，放弃本轮（详见上面每行）");
+			applied = false;
+			lastConfig = "";
+			return false;
 		} catch (Throwable e) {
 			Log.w(TAG, "ensureReady failed: " + e);
 			TProxyService.log("测试内核加载失败：" + e);
 			return false;
 		}
+	}
+
+	/* True when the core has already refused this node (badProxies): it can
+	   never be tested, so callers should report it untested instead of burning
+	   probes on it. */
+	static boolean isRejected(String name) {
+		return name != null && badProxies.contains(name);
+	}
+
+	/* Outcome of one quickSetup attempt. */
+	private static final class Apply {
+		String err;        /* the core's error text, or null on success */
+		boolean timeout;   /* no callback within the scaled deadline */
+	}
+
+	/* One quickSetup attempt against the file buildTestCoreConfig just wrote. */
+	private static Apply applyConfig(File home, int nodeCount) {
+		Apply res = new Apply();
+		String initParams = "{\"home-dir\":\"" + home.getAbsolutePath() + "\"}";
+		String setupParams = "{\"selected-map\":{},\"profile\":\""
+			+ new File(home, "config.yaml").getAbsolutePath() + "\"}";
+		final Object lock = new Object();
+		final boolean[] done = { false };
+		final String[] err = { null };
+		Clash.INSTANCE.quickSetup(initParams, setupParams, new InvokeInterface() {
+			@Override
+			public void onResult(String result) {
+				if (result != null && !result.isEmpty())
+				  err[0] = result;
+				synchronized (lock) { done[0] = true; lock.notifyAll(); }
+			}
+		});
+		/* The wait scales with the config: parsing a few hundred nodes takes
+		   seconds, and a FIXED 8s window once declared a big pool "ready" while
+		   the core was still loading - every probe then failed and the whole
+		   selection came back 不可用. A timeout is a FAILURE, never a silent
+		   success. */
+		synchronized (lock) {
+			long waitMs = Math.min(60000L, 8000L + nodeCount * 30L);
+			long end = System.currentTimeMillis() + waitMs;
+			while (!done[0]) {
+				long left = end - System.currentTimeMillis();
+				if (left <= 0)
+				  break;
+				try {
+					lock.wait(left);
+				} catch (InterruptedException ie) {
+					/* Keep the flag and stop waiting: a caller that interrupts us
+					   wants out, and the config is then simply not ready. */
+					Thread.currentThread().interrupt();
+					break;
+				}
+			}
+			if (!done[0]) {
+				TProxyService.log("测试内核配置加载超时（等待 " + waitMs + "ms · " + nodeCount
+					+ " 个节点）→ 本次不测速，等它加载完再试");
+				res.timeout = true;
+				return res;
+			}
+		}
+		res.err = err[0];
+		return res;
 	}
 
 	/* Parameter shapes the "testDelay" action may expect. The library documents
@@ -160,6 +217,16 @@ class CoreTestHost {
 	static void setVerbose(boolean v) {
 		verbose = v;
 	}
+
+	/* Node names the core refused (mihomo validates the whole file at once, so
+	   one bad proxy used to make every node untestable). Kept for the life of
+	   the process: a node the core cannot parse stays unusable. */
+	private static final java.util.Set<String> badProxies =
+		java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+	/* How many rejected nodes to peel off in one ensureReady() call before
+	   giving up. Each retry regenerates + re-applies the config, so this is
+	   deliberately small - the remaining bad nodes are dropped on later calls. */
+	private static final int MAX_DROP_RETRIES = 8;
 
 	/* Body for the testDelay action in shape #shape.index. Shared with
 	   ClashApiServer, which answers the REST /delay route the same way. */

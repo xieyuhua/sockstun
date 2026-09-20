@@ -42,8 +42,14 @@ public class GeoIp {
 	};
 
 	/* server host/ip -> resolved code, for the lifetime of the process. Failed
-	   lookups are NOT cached, so a later retry can succeed. */
+	   lookups are NOT cached as a country, so a later retry can succeed - but
+	   they ARE remembered here for a while, so one unreachable host cannot cost
+	   the DNS deadline again on every single pass (that is what made a
+	   several-hundred-node pass crawl). */
 	private static final Map<String, String> cache = new ConcurrentHashMap<String, String>();
+	private static final Map<String, Long> recentFailures =
+		new ConcurrentHashMap<String, Long>();
+	private static final long FAIL_BACKOFF_MS = 10 * 60 * 1000L;
 
 	/* Lazily opened local mmdb reader; null means unavailable (and we won't
 	   retry until process restart, see MMDB_TRIED). */
@@ -75,12 +81,22 @@ public class GeoIp {
 		String mem = cache.get(server);
 		if (mem != null)
 		  return mem;
+		/* Remember recent failures for a while. A host that just failed is
+		   retried on EVERY pass otherwise, and each attempt can cost the full
+		   DNS deadline (plus the HTTP fallbacks) - with hundreds of nodes that
+		   is what made a pass crawl. */
+		Long failedAt = recentFailures.get(server);
+		if (failedAt != null && System.currentTimeMillis() - failedAt < FAIL_BACKOFF_MS)
+		  return UNKNOWN;
 		String ip = resolve(server);
 		String cc = ip != null ? lookupLocal(prefs, ip) : null;
 		if (cc == null && ip != null)
 		  cc = lookup(ip);
-		if (cc == null || cc.isEmpty())
-		  return UNKNOWN;
+		if (cc == null || cc.isEmpty()) {
+			recentFailures.put(server, System.currentTimeMillis());
+			return UNKNOWN;
+		}
+		recentFailures.remove(server);
 		prefs.setServerCountry(server, cc);
 		cache.put(server, cc);
 		return cc;

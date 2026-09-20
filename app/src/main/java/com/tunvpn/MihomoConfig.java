@@ -220,6 +220,14 @@ public class MihomoConfig {
 	   <homeDir>/config.yaml and returns its content (for change detection). */
 	public static String buildTestCoreConfig(Preferences prefs, File homeDir)
 			throws IOException {
+		return buildTestCoreConfig(prefs, homeDir, null);
+	}
+
+	/* Same, minus the node names the core has already refused (see
+	   CoreTestHost.badProxies): the group must not reference a proxy that is no
+	   longer in the file, so the kept list drives the group too. */
+	public static String buildTestCoreConfig(Preferences prefs, File homeDir,
+			java.util.Set<String> skip) throws IOException {
 		/* Same node pool the list/tunnel is scoped to: the country filter IS the
 		   scope, so "全部" carries every node and a country chip carries that
 		   country's nodes. */
@@ -237,17 +245,27 @@ public class MihomoConfig {
 		   members) was fine. */
 		int cut = body.indexOf("\nproxy-groups:");
 		String proxies = cut > 0 ? body.substring(0, cut + 1) : body;
-		StringBuilder sb = new StringBuilder(proxies);
-		if (!proxies.endsWith("\n"))
-		  sb.append('\n');
-		/* One select group listing every node: enough for the config to be
+		/* Rebuild the section WITHOUT the nodes the core has refused: that is
+		   what lets the retry in CoreTestHost drop one bad node instead of
+		   losing all 600. */
+		List<ClashParser.ProxyDef> kept = new ArrayList<ClashParser.ProxyDef>();
+		StringBuilder sb = new StringBuilder("proxies:\n");
+		for (ClashParser.ProxyDef p : ClashParser.extractProxies(proxies)) {
+			if (skip != null && skip.contains(p.name))
+			  continue;
+			kept.add(p);
+			sb.append(p.text).append('\n');
+		}
+		if (kept.isEmpty())
+		  throw new IOException("no usable proxy after filtering rejected nodes");
+		/* One select group listing every KEPT node: enough for the config to be
 		   well-formed (a group must only reference proxies declared before it,
 		   which they are), with nothing periodic running in the background. */
 		sb.append("proxy-groups:\n");
 		sb.append("  - name: \"").append(GROUP).append("\"\n");
 		sb.append("    type: select\n");
 		sb.append("    proxies:\n");
-		for (ClashParser.ProxyDef p : ClashParser.extractProxies(proxies))
+		for (ClashParser.ProxyDef p : kept)
 		  sb.append("      - \"").append(escapeYaml(p.name)).append("\"\n");
 		sb.append("rules:\n");
 		sb.append("  - MATCH,").append(GROUP).append('\n');
@@ -267,6 +285,47 @@ public class MihomoConfig {
 			fos.write(sb.toString().getBytes("UTF-8"));
 		}
 		return sb.toString();
+	}
+
+	/* Cheap pre-filter for the mistakes the core refuses outright. It validates
+	   the whole file at once, so ONE bad proxy poisons every node.
+	   REALITY `short-id` must be hex with an even length of at most 16 chars;
+	   anything else (odd length, non-hex, too long) makes cloud.flare reject the
+	   node with "invalid REALITY short ID". */
+	private static boolean isRejectedByCore(String text) {
+		if (text == null || text.isEmpty())
+		  return false;
+		Matcher m = Pattern.compile("(?m)^\\s*short-id\\s*:\\s*[\"']?([^\"'\\s]*)")
+			.matcher(text);
+		if (!m.find())
+		  return false;
+		String id = m.group(1).trim();
+		if (id.isEmpty())
+		  return false;
+		if (id.length() > 16 || (id.length() % 2) != 0)
+		  return true;
+		return !id.matches("(?i)[0-9a-f]+");
+	}
+
+	/* mihomo reports a rejected proxy as "proxy <index>: <reason>", where the
+	   index is the position inside the generated `proxies:` list. Map it back to
+	   a node name so it can be excluded and retried (see CoreTestHost). */
+	public static String badProxyNameFromError(String err, String cfg) {
+		if (err == null || cfg == null)
+		  return null;
+		Matcher m = Pattern.compile("proxy\\s+(\\d+)\\s*:").matcher(err);
+		if (!m.find())
+		  return null;
+		int idx;
+		try {
+			idx = Integer.parseInt(m.group(1));
+		} catch (Throwable e) {
+			return null;
+		}
+		List<ClashParser.ProxyDef> list = ClashParser.extractProxies(cfg);
+		if (idx < 0 || idx >= list.size())
+		  return null;
+		return list.get(idx).name;
 	}
 
 	/* One-line summary of what the config contains, for the log: an empty
@@ -338,6 +397,16 @@ public class MihomoConfig {
 					  match = true;
 					if (!match)
 					  continue;
+				}
+				/* mihomo refuses the WHOLE config when a single proxy is
+				   invalid ("proxy 645: invalid REALITY short ID"), which took
+				   down the tunnel AND every latency test - and it is why "全部"
+				   came back 全部不可用 while a single country (whose pool did
+				   not contain the bad node) worked fine. Drop the broken entries
+				   here instead of handing the core a doomed file. */
+				if (isRejectedByCore(p.text)) {
+					TProxyService.log("配置: 跳过内核无法解析的节点「" + p.name + "」");
+					continue;
 				}
 				String name = uniqueName(taken, p.name);
 				taken.add(name);
