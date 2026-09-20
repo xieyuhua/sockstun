@@ -216,14 +216,36 @@ class ClashApiServer {
 		data.put("proxy-name", name);
 		data.put("test-url", url);
 		data.put("timeout", timeout);
-		String r = TProxyService.apiAction("testDelay", data.toString());
-		if (r == null) { write(out, 502, "application/json", "{\"message\":\"bridge error\"}"); return; }
-		int delay = -1;
-		try { delay = Integer.parseInt(r.trim()); } catch (Throwable ignore) { }
-		if (delay > 0)
-		  write(out, 200, "application/json", "{\"delay\":" + delay + "}");
-		else
-		  write(out, 504, "application/json", "{\"message\":\"An error occurred in the delay test\"}");
+		/* The probe may run for `timeout` inside the core, so wait past it -
+		   the default 6s bridge wait cuts a long probe off and loses the
+		   verdict (which then looked like a failed node). */
+		String r = TProxyService.apiAction("testDelay", data.toString(), timeout + 5000L);
+		if (r == null) {
+			/* No answer at all: the bridge/core is the problem, the node is
+			   NOT proven dead. 502 = "test could not run"; the caller must
+			   leave the node untested rather than mark it 不可用. */
+			TProxyService.log("clash-api delay: 无返回 name=" + name + " url=" + url);
+			write(out, 502, "application/json", "{\"message\":\"bridge error\"}");
+			return;
+		}
+		int delay;
+		try {
+			delay = Integer.parseInt(r.trim());
+		} catch (Throwable e) {
+			/* Answered with something that is not a number: malfunction, not
+			   a node verdict. Reporting 504 here used to flip working nodes
+			   to 不可用, so keep it a 502. */
+			TProxyService.log("clash-api delay: 返回非数字 \"" + r + "\" name=" + name);
+			write(out, 502, "application/json", "{\"message\":\"bad delay result\"}");
+			return;
+		}
+		if (delay > 0) {
+			write(out, 200, "application/json", "{\"delay\":" + delay + "}");
+		} else {
+			TProxyService.log("clash-api delay: 内核判定失败(" + delay + ") name="
+				+ name + " url=" + url);
+			write(out, 504, "application/json", "{\"message\":\"An error occurred in the delay test\"}");
+		}
 	}
 
 	private static String param(String query, String key) {

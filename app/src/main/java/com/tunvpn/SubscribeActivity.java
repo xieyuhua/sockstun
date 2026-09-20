@@ -115,6 +115,21 @@ public class SubscribeActivity extends BaseActivity {
 	private NodeAdapter adapter;
 	private final Handler ui = new Handler(Looper.getMainLooper());
 
+	/* Keys already logged during THIS test pass. A whole-pass condition (no
+	   core / no proxy map / dead control API) would otherwise print once per
+	   node and bury the interesting lines. Cleared by testAll(). */
+	private final java.util.Set<String> passLogged =
+		java.util.Collections.newSetFromMap(
+			new java.util.concurrent.ConcurrentHashMap<String, Boolean>());
+
+	/* Log a pass-wide condition at most once per pass. The message is what the
+	   user is asked to send back when a node flips to 不可用, so it carries the
+	   reason and the node that hit it. */
+	private void logOnce(String key, String msg) {
+		if (passLogged.add(key))
+		  TProxyService.log(msg);
+	}
+
 	/* Latency order by default: fastest first is what people actually want. */
 	private int pendingTests = 0;
 	/* Set once per "test" pass: the TUN-less test core has been prepared. */
@@ -514,7 +529,15 @@ public class SubscribeActivity extends BaseActivity {
 		pendingTests = nodes.size();
 		testsDone = 0;
 		lastTestUiUpdate = 0;
+		passLogged.clear();
 		updateTestProgress();
+		/* Pass header: enough context to read a run in which a node flipped
+		   from 可用 to 不可用 (which core answered, how long we waited, at
+		   which URL). */
+		TProxyService.log("=== 测速开始：" + nodes.size() + " 个节点 · VPN="
+			+ (prefs.getEnable() ? "已连接" : "未连接")
+			+ " · 单目标超时 " + prefs.getProxyTestTimeout() + "s · 测速地址 "
+			+ prefs.getAutoTestUrl() + " · 内置目标 " + PROXY_TEST_URLS.length + " 个 ===");
 		for (ClashNode n : nodes)
 		  testNode(n, true);
 	}
@@ -536,15 +559,22 @@ public class SubscribeActivity extends BaseActivity {
 				/* Connected: a separate all-nodes test core is only built when
 				   the user asked for it ("测速并入全量节点"); otherwise the
 				   tunnel core is used through the embedded REST API. */
-				if (!prefs.getTestAllNodes())
-				  return false;
+				if (!prefs.getTestAllNodes()) {
+					logOnce("core-path", "测速: 已连接且未开「测速并入全量节点」"
+						+ " → 用隧道内核的 /delay（经控制接口）");
+					return false;
+				}
 				return CoreTestHost.ensureReady(this, prefs);
 			}
 			/* Disconnected: only if "未连接时内核测速" is on. */
-			if (!prefs.getPreloadCore())
-			  return false;
+			if (!prefs.getPreloadCore()) {
+				logOnce("core-path", "测速: 未连接且未开「未连接时内核测速」"
+					+ " → 本次没有内核可测，全部按未测速处理");
+				return false;
+			}
 			return CoreTestHost.ensureReady(this, prefs);
 		} catch (Throwable e) {
+			TProxyService.log("测速: 准备测试内核异常 " + e);
 			return false;
 		}
 	}
@@ -578,6 +608,16 @@ public class SubscribeActivity extends BaseActivity {
 				  n.latency = real;        // >=0 usable, -2 could not tunnel
 				else
 				  n.latency = -1;          // not verifiable -> unknown, not "available"
+				/* Per-node verdict. "不可用" is logged for every such node
+				   (that is the symptom being chased); "未测速" only once per
+				   pass, because it is normally a pass-wide condition (no core)
+				   and would otherwise print once per node. */
+				if (real != null && real < 0)
+				  TProxyService.log("测速结果: " + n.name + " [" + n.server + ":" + n.port
+					+ " " + (n.type == null ? "?" : n.type) + "] -> 不可用(-2)");
+				else if (real == null)
+				  logOnce("untested", "测速结果: 无判定 → 未测速，例如 " + n.name + " ["
+					+ n.server + ":" + n.port + "]");
 				/* (Re)resolve the node's country on every test pass and overwrite
 				   the cached value, so a mislabeled flag (e.g. a stale "RU" for a
 				   US IP) self-heals instead of being stuck forever. The in-memory
@@ -614,6 +654,21 @@ public class SubscribeActivity extends BaseActivity {
 						refreshProtoFilterSpinner();
 						applyView();
 						updateTestProgress();
+						if (batch) {
+							int ok = 0;
+							int bad = 0;
+							int un = 0;
+							for (ClashNode x : nodes) {
+								if (x.latency >= 0)
+								  ok++;
+								else if (x.latency == -2)
+								  bad++;
+								else
+								  un++;
+							}
+							TProxyService.log("=== 测速结束：可用 " + ok + " / 不可用 "
+								+ bad + " / 未测速 " + un + " · 详见上面每行「测速:」 ===");
+						}
 					}
 				});
 			}
@@ -685,16 +740,29 @@ public class SubscribeActivity extends BaseActivity {
 	private Long proxyDelayMs(ClashNode n) {
 		/* Works while the tunnel is up (tunnel core) OR when a TUN-less test
 		   core has been loaded in this process (CoreTestHost). */
-		if (!prefs.getEnable() && !CoreTestHost.isReady())
-		  return null;
-		if (!ensureProxyNameCache())
-		  return null;
+		if (!prefs.getEnable() && !CoreTestHost.isReady()) {
+			logOnce("no-core", "测速: 没有可用内核（VPN 未连接 / 测试内核未就绪）→ 未测速");
+			return null;
+		}
+		if (!ensureProxyNameCache()) {
+			logOnce("no-proxies", "测速: 取 /proxies 失败，无法把节点映射成内核里的名字 → 未测速");
+			return null;
+		}
 		String name = realNodeName(n);
-		if (name == null)
-		  return null;
+		if (name == null) {
+			/* The node exists in the list but not in the config the core is
+			   actually running (filtered out, or the config is stale): the
+			   probe cannot even be aimed at it, so it is untested. */
+			logOnce("noname:" + n.server + ":" + n.port + ":" + n.type,
+				"测速: 内核配置里没有该节点 → 未测速 [" + n.server + ":" + n.port
+				+ " " + (n.type == null ? "?" : n.type) + "] name=" + n.name);
+			return null;
+		}
 		String host = resolveApiHost();
-		if (host == null)
-		  return null;
+		if (host == null) {
+			logOnce("no-api", "测速: 控制接口不可达（127.0.0.1 探测失败）→ 未测速");
+			return null;
+		}
 		/* User's configured target first, then the built-in fallbacks. */
 		List<String> targets = new ArrayList<String>();
 		String userUrl = prefs.getAutoTestUrl();
@@ -713,6 +781,11 @@ public class SubscribeActivity extends BaseActivity {
 			Long d = delayProbe(name, target, timeoutMs);
 			if (d != null && d >= 0)
 			  return d;
+			/* Only failures/malfunctions are logged here, so a node that just
+			   works produces no noise while a node about to be flagged leaves
+			   a full trace (target + what came back). */
+			TProxyService.log("测速: " + name + " @" + target + " -> "
+				+ (d == null ? "无判定（测试没跑起来）" : "失败(" + d + ")"));
 			if (d != null)
 			  failed = true;
 		}
@@ -725,11 +798,18 @@ public class SubscribeActivity extends BaseActivity {
 		int retryMs = Math.max(timeoutMs, 12000);
 		for (String target : RETRY_TEST_URLS) {
 			Long d = delayProbe(name, target, retryMs);
-			if (d != null && d >= 0)
-			  return d;
-			if (d == null)
-			  return null;           /* malfunction on retry -> untested */
+			if (d != null && d >= 0) {
+				TProxyService.log("测速: " + name + " 救援探测成功 " + d + "ms @"
+					+ target + "（首轮 " + prefs.getProxyTestTimeout() + "s 超时偏紧）");
+				return d;
+			}
+			if (d == null) {
+				TProxyService.log("测速: " + name + " 救援探测无判定 @" + target + " → 未测速");
+				return null;           /* malfunction on retry -> untested */
+			}
+			TProxyService.log("测速: " + name + " 救援探测失败 @" + target + " -> " + d);
 		}
+		TProxyService.log("测速: " + name + " → 判定不可用（所有目标与救援探测均失败）");
 		return -2L;                   /* genuinely unreachable */
 	}
 
@@ -758,19 +838,41 @@ public class SubscribeActivity extends BaseActivity {
 				+ "/delay?timeout=" + timeoutMs + "&url=" + URLEncoder.encode(target, "UTF-8");
 			/* Reach the loopback control API through a VPN-bypassing socket; the
 			   app's own sockets would otherwise be captured by the tunnel. */
+			/* The reply only arrives after the core's own probe finishes, so
+			   the client must wait longer than the probe timeout instead of
+			   the default 6s (which silently capped a 30s setting). */
 			TProxyService.ApiResult r = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
-				MihomoConfig.API_PORT, path, null, prefs.getSecret());
+				MihomoConfig.API_PORT, path, null, prefs.getSecret(), timeoutMs + 6000);
 			if (r.code == 200) {
 				JSONObject o = new JSONObject(r.body == null ? "{}" : r.body);
-				return o.has("delay") ? o.getLong("delay") : 0L;
+				if (!o.has("delay")) {
+					/* A 200 with no "delay" is a malformed reply: reporting it
+					   as a 0 ms success put a dead node at the top of the list. */
+					TProxyService.log("测速: " + name + " REST /delay 200 但没有 delay 字段 -> "
+						+ r.body + " @" + target + "（非节点判定 → 未测速）");
+					return null;
+				}
+				long d = o.getLong("delay");
+				if (d <= 0) {
+					TProxyService.log("测速: " + name + " REST /delay 返回 delay=" + d
+						+ " @" + target + "（非节点判定 → 未测速）");
+					return null;
+				}
+				return d;
 			}
-			if (r.code == 504 || r.code == 408)
-			  return -2L;               /* genuine: node could not complete it */
-			if (r.code == -1)
-			  return null;              /* controller unreachable -> cannot test */
-			android.util.Log.d("SubscribeActivity", "delay " + name
-				+ " -> HTTP " + r.code + (r.error == null ? "" : (" " + r.error))
-				+ " url=" + target);
+			if (r.code == 504 || r.code == 408) {
+				TProxyService.log("测速: " + name + " REST /delay 内核判定失败 HTTP "
+					+ r.code + " @" + target + " timeout=" + timeoutMs + "ms");
+				return -2L;             /* genuine: node could not complete it */
+			}
+			if (r.code == -1) {
+				TProxyService.log("测速: " + name + " REST /delay 控制接口不可达 @"
+					+ target + " → 未测速");
+				return null;            /* controller unreachable -> cannot test */
+			}
+			TProxyService.log("测速: " + name + " REST /delay HTTP " + r.code
+				+ (r.error == null ? "" : (" " + r.error)) + " @" + target
+				+ "（非节点判定 → 未测速）");
 			return null;                /* auth/route/other: not a node verdict */
 		} catch (Exception e) {
 			return null;
@@ -795,6 +897,8 @@ public class SubscribeActivity extends BaseActivity {
 			TProxyService.ApiResult r = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
 				MihomoConfig.API_PORT, "/proxies", null, prefs.getSecret());
 			if (r.code != 200 || r.body == null) {
+				logOnce("proxies-code", "测速: /proxies HTTP " + r.code
+					+ (r.error == null ? "" : (" " + r.error)) + " → 无法建立节点名映射");
 				return false;
 			}
 			String body = r.body;
@@ -1085,6 +1189,10 @@ public class SubscribeActivity extends BaseActivity {
 				@Override
 				public void onClick(View v) {
 					corePrepared = false;
+					/* Fresh pass keys: a single-node re-test must log its own
+					   reason even if the same one was already printed by a
+					   previous "测速全部". */
+					passLogged.clear();
 					testNode(n, false);
 				}
 			});

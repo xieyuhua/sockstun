@@ -171,16 +171,17 @@ public class TProxyService extends VpnService {
 
 	/* Append a line to the log file directly (bypassing the fd-1/2
 	   redirection), so startup diagnostics are always captured even if the
-	   native library fails to load or redirect. */
+	   native library fails to load or redirect. The actual file handling lives
+	   in TestLog, which classes without a Service handle also write through. */
 	private void appendLog(String s) {
-		try {
-			File f = new File(getCacheDir(), "tproxy.log");
-			FileOutputStream fos = new FileOutputStream(f, true);
-			String ts = new SimpleDateFormat("HH:mm:ss").format(new Date()) + " ";
-			fos.write((ts + s + "\n").getBytes("UTF-8"));
-			fos.close();
-		} catch (Exception e) {
-		}
+		TestLog.append(s);
+	}
+
+	/* Log from a static context (e.g. ClashApiServer, which has no Service
+	   reference) into the same file. Safe when nothing is bound yet: lines are
+	   still mirrored to logcat. */
+	static void log(String s) {
+		TestLog.append(s);
 	}
 
 	/* Redirect process stdout/stderr (fd 1/2) to a file so we can capture
@@ -287,7 +288,11 @@ public class TProxyService extends VpnService {
 
 		prefs = new Preferences(this);
 
-		/* Logging */
+		/* Logging. Bind the shared log file first, then start a fresh file for
+		   this session; every later append (including the ones from
+		   ClashApiServer and the Activities) lands in the same file the
+		   日志 page reads. */
+		TestLog.init(this);
 		File tproxy_log = new File(getCacheDir(), "tproxy.log");
 		if (tproxy_log.exists())
 		  tproxy_log.delete();
@@ -1152,6 +1157,15 @@ public class TProxyService extends VpnService {
 	   Content-Length. */
 	static ApiResult localApi(String method, String host, int port, String path,
 			String body, String secret) {
+		return localApi(method, host, port, path, body, secret, 6000);
+	}
+
+	/* Same, with an explicit socket timeout. Some replies legitimately take
+	   longer than the default 6s - GET /proxies/{name}/delay runs the probe
+	   inside the core for as long as its own `timeout` - and cutting it off
+	   leaves a working-but-slow node with no verdict at all. */
+	static ApiResult localApi(String method, String host, int port, String path,
+			String body, String secret, int timeoutMs) {
 		ApiResult r = new ApiResult();
 		long t0 = System.currentTimeMillis();
 		java.net.Socket s = null;
@@ -1159,8 +1173,11 @@ public class TProxyService extends VpnService {
 		try {
 			s = new java.net.Socket();
 			prot = protectLocalSocket(s);
-			s.connect(new java.net.InetSocketAddress(host, port), 6000);
-			s.setSoTimeout(6000);
+			/* Dialing is either quick or hopeless, so keep a short connect
+			   timeout and spend the caller's budget waiting for the reply. */
+			s.connect(new java.net.InetSocketAddress(host, port),
+				Math.min(6000, Math.max(2000, timeoutMs)));
+			s.setSoTimeout(Math.max(2000, timeoutMs));
 			java.io.InputStream is = s.getInputStream();
 			java.io.OutputStream os = s.getOutputStream();
 			byte[] bodyBytes = body == null ? new byte[0]
@@ -1252,8 +1269,17 @@ public class TProxyService extends VpnService {
 	   listener at all, so connections/proxies/traffic are reachable regardless of
 	   9090. We block on the async callback (it fires on a JNI thread, no deadlock). */
 	static String apiAction(String method, String data) {
+		return apiAction(method, data, 6000);
+	}
+
+	/* Same, with an explicit callback wait. Some actions legitimately take
+	   longer than the default 6s - the isolated node delay probe runs for its
+	   own `timeout` (up to 30s) - and giving up early used to lose the answer
+	   entirely (the caller then falls back or reports the node untested), so
+	   such callers must extend the wait past the action's own deadline. */
+	static String apiAction(String method, String data, long waitMs) {
 		if (!Clash.INSTANCE.isLoaded())
-		  return null;
+		  return null;   /* no core here (e.g. the main process) - not an error */
 		/* The native action bridge keeps a SINGLE in-flight callback: two
 		   overlapping invokeAction() calls make the earlier result get
 		   delivered to the wrong waiter, so that waiter never wakes and times
@@ -1264,6 +1290,12 @@ public class TProxyService extends VpnService {
 		synchronized (API_LOCK) {
 			final String[] out = { null };
 			final boolean[] done = { false };
+			/* Kept for the diagnosis log below: "no answer at all" (timeout)
+			   and "the core answered with an error code" are very different
+			   failures, and the return value alone cannot tell them apart
+			   (both are null). */
+			final int[] code = { Integer.MIN_VALUE };
+			final String[] raw = { null };
 			try {
 				JSONObject j = new JSONObject();
 				j.put("id", "");
@@ -1273,10 +1305,12 @@ public class TProxyService extends VpnService {
 				Clash.INSTANCE.invokeAction(j.toString(), new InvokeInterface() {
 					@Override
 					public void onResult(String result) {
+						raw[0] = result;
 						if (result != null) {
 							try {
 								JSONObject r = new JSONObject(result);
-								if (r.optInt("code", -1) == 0) {
+								code[0] = r.optInt("code", -1);
+								if (code[0] == 0) {
 									Object d = r.opt("data");
 									out[0] = (d == null || d == JSONObject.NULL) ? "" : d.toString();
 								}
@@ -1286,15 +1320,31 @@ public class TProxyService extends VpnService {
 					}
 				});
 				synchronized (done) {
-					long end = System.currentTimeMillis() + 6000;
+					long end = System.currentTimeMillis() + Math.max(500, waitMs);
 					while (!done[0] && System.currentTimeMillis() < end)
-					  done.wait(end - System.currentTimeMillis());
+					  done.wait(Math.max(1, end - System.currentTimeMillis()));
+					if (!done[0]) {
+						TestLog.append("bridge: 动作 " + method + " 等待 " + waitMs
+							+ "ms 未收到回调（内核无响应 / 该动作不返回）");
+					} else if (code[0] != 0) {
+						TestLog.append("bridge: 动作 " + method + " 返回 code=" + code[0]
+							+ " raw=" + truncate(raw[0]));
+					}
 				}
 			} catch (Throwable e) {
+				TestLog.append("bridge: 动作 " + method + " 异常 " + e);
 				return null;
 			}
 			return out[0];
 		}
+	}
+
+	/* Short form of a raw bridge reply for the log. */
+	private static String truncate(String s) {
+		if (s == null)
+		  return "null";
+		s = s.replace('\n', ' ');
+		return s.length() > 200 ? s.substring(0, 200) + "…" : s;
 	}
 
 	/* Mirrors localApi()'s signature but routes through the in-process bridge.
@@ -1303,6 +1353,14 @@ public class TProxyService extends VpnService {
 	   to the HTTP listener, leaving behaviour unchanged when 9090 IS up. */
 	static ApiResult bridgeApi(String method, String host, int port, String path,
 			String body, String secret) {
+		return bridgeApi(method, host, port, path, body, secret, 6000);
+	}
+
+	/* Same, with an explicit HTTP timeout for the paths that fall through to
+	   the listener - notably /delay, whose reply arrives only after the core's
+	   own probe finishes. */
+	static ApiResult bridgeApi(String method, String host, int port, String path,
+			String body, String secret, int timeoutMs) {
 		ApiResult r = new ApiResult();
 		r.code = -1;
 		try {
@@ -1324,7 +1382,7 @@ public class TProxyService extends VpnService {
 					&& path.indexOf("/delay") > 0) {
 				/* /delay is async in the core and has no bridge action: always
 				   use the HTTP listener. */
-				return localApi(method, host, port, path, body, secret);
+				return localApi(method, host, port, path, body, secret, timeoutMs);
 			} else if ("GET".equals(method) && path.startsWith("/proxies/")) {
 				String group = path.substring("/proxies/".length());
 				String d = apiAction("getProxies", null);
@@ -1347,7 +1405,7 @@ public class TProxyService extends VpnService {
 		} catch (Throwable e) {
 			r.code = -1;
 		}
-		return localApi(method, host, port, path, body, secret);
+		return localApi(method, host, port, path, body, secret, timeoutMs);
 	}
 
 	/* Core reachable via the in-process bridge (no 9090 needed). Used as the
