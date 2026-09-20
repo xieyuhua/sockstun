@@ -32,6 +32,16 @@ class TestLog {
 	/* Set once per process by TestLog.init(). */
 	private static volatile File file;
 
+	/* One formatter per thread: SimpleDateFormat is not thread-safe and a test
+	   pass writes thousands of lines, so allocating one per line was both slow
+	   and garbage-heavy. */
+	private static final ThreadLocal<SimpleDateFormat> TS =
+		new ThreadLocal<SimpleDateFormat>() {
+			@Override protected SimpleDateFormat initialValue() {
+				return new SimpleDateFormat("HH:mm:ss", Locale.US);
+			}
+		};
+
 	private TestLog() { }
 
 	/* Bind the log file. Called from TProxyService.onCreate (:native) and from
@@ -63,12 +73,13 @@ class TestLog {
 		if (f == null)
 		  return;
 		synchronized (TestLog.class) {
-			try {
-				FileOutputStream fos = new FileOutputStream(f, true);
-				String ts = new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date()) + " ";
+			/* try-with-resources: a write that throws (disk full, cache dir
+			   removed) used to leak the fd every time. */
+			try (FileOutputStream fos = new FileOutputStream(f, true)) {
+				String ts = TS.get().format(new Date()) + " ";
 				fos.write((ts + s + "\n").getBytes("UTF-8"));
-				fos.close();
 			} catch (Throwable ignore) {
+				/* logging must never break a test or the tunnel */
 			}
 		}
 	}

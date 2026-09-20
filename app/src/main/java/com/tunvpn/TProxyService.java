@@ -86,16 +86,22 @@ public class TProxyService extends VpnService {
 	   was being swallowed by httpGet's catch, leaving body null and the proxied
 	   traffic counters stuck at 0 forever - exactly the "stats always 0" report. */
 	private HandlerThread statsThread = null;
-	private Preferences statsPrefs = null;
+	/* Written by statsThread, read by the notification / test / selector threads:
+	   volatile so a reader never sees a half-published value. */
+	private volatile Preferences statsPrefs = null;
 	/* Loopback HTTP control API hosted by the app (libmihomo never binds its
 	   own external-controller). Lives for the lifetime of the tunnel. */
 	private ClashApiServer clashApiServer = null;
 	private Preferences prefs = null;
 	private long lastTx, lastRx, lastTime;
-	private long sessionTx, sessionRx;
+	/* These four groups are written by statsThread and read by OTHER threads
+	   (buildNotification from the test/selector threads, the activity-facing
+	   getters): volatile, so a reader never sees a torn long or a stale value. */
+	private volatile long sessionTx, sessionRx;
 	private long sessionBaseTx, sessionBaseRx; /* core cumulative at session start */
-	private long baseTx, baseRx, totalTx, totalRx;
-	private long txRate, rxRate;
+	private long baseTx, baseRx;
+	private volatile long totalTx, totalRx;
+	private volatile long txRate, rxRate;
 	private boolean trafficPrimed = false; /* first valid sample primes baselines; avoids a 9G/s spike */
 	private String lastNotifyText = null;
 	private int trafficSamples = 0;
@@ -141,14 +147,13 @@ public class TProxyService extends VpnService {
 	/* Consecutive failed /connections polls, so the "stats are stuck at 0"
 	   case is reported instead of being invisible. */
 	private int connFailStreak = 0;
+	/* Consecutive failures while PARSING the snapshot (as opposed to fetching
+	   it): also reported once, because the counters stay 0 either way. */
+	private int proxyParseFails = 0;
 	/* Last exception seen while probing the control API, so a failed probe says
 	   whether nothing is listening (refused) or it is up but not answering. */
 	private volatile String lastControllerError = null;
-	/* Set true once isControllerUp() actually reaches the clash-api. Until then
-	   the /connections poll is skipped silently so the warmup window (core
-	   brings TUN up before binding the API) does not spam "未就绪" - the
-	   verifyController thread still reports a genuine "never ready" after 90s. */
-	private volatile boolean controllerReady = false;
+	/* Host the clash-api actually answers on, resolved by isControllerUp(). */
 	private volatile String controllerHost = "127.0.0.1";
 	private volatile String proxyTestStatus = "";
 	/* Debounce for an automatic config rebuild after a failed selector PUT
@@ -712,14 +717,14 @@ public class TProxyService extends VpnService {
 	private static String readTextFile(File f) {
 		if (f == null || !f.exists())
 		  return null;
-		try {
-			java.io.FileInputStream in = new java.io.FileInputStream(f);
+		/* try-with-resources: a read that throws used to leak the fd, and this
+		   runs on every config retry. */
+		try (java.io.FileInputStream in = new java.io.FileInputStream(f)) {
 			java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
 			byte[] buf = new byte[8192];
 			int n;
 			while ((n = in.read(buf)) > 0)
 			  bos.write(buf, 0, n);
-			in.close();
 			return new String(bos.toByteArray(), "UTF-8");
 		} catch (Throwable e) {
 			return null;
@@ -764,9 +769,10 @@ public class TProxyService extends VpnService {
 	private void ensureControlApi(File configFile, Preferences prefs) {
 		try {
 			byte[] buf = new byte[(int) configFile.length()];
-			java.io.FileInputStream in = new java.io.FileInputStream(configFile);
-			int n = in.read(buf);
-			in.close();
+			int n;
+			try (java.io.FileInputStream in = new java.io.FileInputStream(configFile)) {
+				n = in.read(buf);
+			}
 			String text = new String(buf, 0, n, "UTF-8");
 
 			String ec = topLevelLine(text, "external-controller:");
@@ -830,9 +836,10 @@ public class TProxyService extends VpnService {
 			if (needMp)
 				out.append("mixed-port: ").append(prefs.getProxyPort()).append('\n');
 
-			java.io.FileOutputStream fos = new java.io.FileOutputStream(configFile, false);
-			fos.write(out.toString().getBytes("UTF-8"));
-			fos.close();
+			try (java.io.FileOutputStream fos =
+					new java.io.FileOutputStream(configFile, false)) {
+				fos.write(out.toString().getBytes("UTF-8"));
+			}
 			appendLog("config: 自定义配置已对齐 App 必需项（external-controller=127.0.0.1:"
 				+ MihomoConfig.API_PORT
 				+ (needMp ? ", mixed-port=" + prefs.getProxyPort() : "")
@@ -1303,16 +1310,13 @@ public class TProxyService extends VpnService {
 		   below is only a best-effort fallback that resolves the exact bound host
 		   for external clients; if it never connects we no longer treat that as a
 		   failure, which removes the misleading "9090 NOT ready" dump. */
-		if (isCoreReachable()) {
-			controllerReady = true;
-			return true;
-		}
+		if (isCoreReachable())
+		  return true;
 		for (String h : new String[] { "127.0.0.1", deviceHost(), "::1" }) {
 			if (h == null) continue;
 			if (probeVersion(h)) {
 				controllerHost = h;
 				apiHost = h;
-				controllerReady = true;
 				appendLog("controller: " + h + ":" + MihomoConfig.API_PORT + " ready");
 				return true;
 			}
@@ -1346,8 +1350,8 @@ public class TProxyService extends VpnService {
 		  return;
 		synchronized (sInstance.recentRequests) {
 			sInstance.recentRequests.clear();
+			sInstance.lastRecentFlush = 0;
 		}
-		sInstance.lastRecentFlush = 0;
 		sInstance.flushRecentRequests(android.os.SystemClock.elapsedRealtime());
 	}
 	/* Latest /connections snapshot the stats poll captured, or null when the
@@ -1708,8 +1712,7 @@ public class TProxyService extends VpnService {
 	private static String readLineBytes(java.io.InputStream is) throws java.io.IOException {
 		java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
 		int b;
-		while ((b = is.read()) != -1) {
-			if (b == '\r') {
+		while ((b = is.read()) != -1) {			if (b == '\r') {
 				int c = is.read();
 				if (c == '\n') break;
 				bos.write('\r');
@@ -1720,6 +1723,12 @@ public class TProxyService extends VpnService {
 				bos.write(b);
 			}
 		}
+		/* null = "the stream ended and nothing was read": real EOF, the same
+		   convention ClashApiServer.readLine uses. Returning "" instead made the
+		   callers' null checks dead code and turned "the peer closed without
+		   answering" into an ArrayIndexOutOfBounds on split(" ")[1]. */
+		if (b == -1 && bos.size() == 0)
+		  return null;
 		return new String(bos.toByteArray(), StandardCharsets.UTF_8);
 	}
 
@@ -1772,10 +1781,6 @@ public class TProxyService extends VpnService {
 		return "127.0.0.1";
 	}
 
-	private String apiBase() {
-		return "http://" + controllerHost + ":" + MihomoConfig.API_PORT;
-	}
-
 	/* mihomo's startup/bind lines go to STDOUT (captured in tproxy.log by the
 	   dup2 redirect at startup), NOT to cache/mihomo.log (this build never
 	   creates it) and NOT through setEventListener (which stays silent about
@@ -1787,12 +1792,11 @@ public class TProxyService extends VpnService {
 	private void dumpRawLog() {
 		File f = new File(getCacheDir(), "tproxy.log");
 		if (!f.exists()) return;
-		try {
-			java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f));
+		try (java.io.BufferedReader r =
+				new java.io.BufferedReader(new java.io.FileReader(f))) {
 			java.util.List<String> all = new java.util.ArrayList<String>();
 			String line;
 			while ((line = r.readLine()) != null) all.add(line);
-			r.close();
 			int start = Math.max(0, all.size() - 60);
 			for (int i = start; i < all.size(); i++)
 			  appendLog("rawlog: " + all.get(i));
@@ -1829,8 +1833,8 @@ public class TProxyService extends VpnService {
 	private boolean dumpLog(File f) {
 		if (f == null || !f.exists()) return false;
 		int shown = 0;
-		try {
-			java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f));
+		try (java.io.BufferedReader r =
+				new java.io.BufferedReader(new java.io.FileReader(f))) {
 			String line;
 			while ((line = r.readLine()) != null && shown < 40) {
 				String l = line.toLowerCase();
@@ -1841,7 +1845,6 @@ public class TProxyService extends VpnService {
 					shown++;
 				}
 			}
-			r.close();
 		} catch (Throwable ignore) { }
 		return shown > 0;
 	}
@@ -1855,8 +1858,8 @@ public class TProxyService extends VpnService {
 			appendLog("mihomolog: 未生成（config 未设置 log.file 或核心未写日志）");
 			return;
 		}
-		try {
-			java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(f));
+		try (java.io.BufferedReader r =
+				new java.io.BufferedReader(new java.io.FileReader(f))) {
 			java.util.List<String> all = new java.util.ArrayList<String>();
 			String line;
 			int shown = 0;
@@ -1871,7 +1874,6 @@ public class TProxyService extends VpnService {
 					shown++;
 				}
 			}
-			r.close();
 			/* Always surface the tail verbatim: the filtered view above can be
 			   empty even when the core logged a plain "Started API server" or a
 			   startup line, and that line is the missing clue for why 9090 did
@@ -1988,19 +1990,13 @@ public class TProxyService extends VpnService {
 		return r;
 	}
 
-	/* 读空响应体，避免连接挂起/复用异常。 */
-	private static void drainConn(HttpURLConnection conn, int code) {
-		try { java.io.InputStream is = code < 400 ? conn.getInputStream()
-				: conn.getErrorStream();
-			if (is != null) while (is.read() != -1) ; } catch (Throwable ignore) { }
-	}
+	/* Trailing " (N)" de-duplication suffix the config may have added when two
+	   subscriptions shipped the same node label. Compiled once: resolveMember
+	   compares it against every member of the group. */
+	private static final Pattern DEDUP_SUFFIX = Pattern.compile(" \\(\\d+\\)$");
 
-	/* Like httpGet but returns the body even on a non-2xx status, so a failed
-	   proxy-delay test still surfaces the reason (e.g. the node's connect error)
-	   instead of being swallowed as "no response". */
-	private String httpGetAny(String path) {
-		ApiResult r = bridgeApi("GET", apiHost, MihomoConfig.API_PORT, path, null, prefs.getSecret());
-		return (r.code == -1) ? null : r.body;
+	private static String dedupBase(String name) {
+		return name == null ? "" : DEDUP_SUFFIX.matcher(name).replaceAll("");
 	}
 
 	/* Resolve `wanted` to a real member name of `group`, tolerating the
@@ -2011,7 +2007,7 @@ public class TProxyService extends VpnService {
 		ApiResult r = bridgeApi("GET", apiHost, MihomoConfig.API_PORT,
 			"/proxies/" + encodePath(group), null, prefs.getSecret());
 		if (r.code == -1 || r.body == null) return null;
-		String base = wanted.replaceAll(" \\(\\d+\\)$", "");
+		String base = dedupBase(wanted);
 		String fallback = null;
 		try {
 			JSONObject o = new JSONObject(r.body);
@@ -2021,8 +2017,7 @@ public class TProxyService extends VpnService {
 					String m = all.getString(i);
 					if (m.equals(wanted))
 					  return m;
-					if (fallback == null
-						&& m.replaceAll(" \\(\\d+\\)$", "").equals(base))
+					if (fallback == null && dedupBase(m).equals(base))
 					  fallback = m;
 				}
 			}
@@ -2077,8 +2072,19 @@ public class TProxyService extends VpnService {
 	}
 
 	public void stopService() {
-		if (tunFd == null)
-		  return;
+		if (tunFd == null) {
+			/* Already down, but the service itself was still STARTED (a
+			   DISCONNECT while disconnected, or a revoke after a failed start):
+			   release it here, otherwise it lingers as a live service with
+			   sInstance set and nothing to do. */
+			stopStats();
+			stopEmbeddedApi();
+			new Preferences(this).setEnable(false);
+			stopForeground(true);
+			sInstance = null;
+			stopSelf();
+			return;
+		}
 
 		/* Flush the traffic counters before the tunnel goes away. */
 		stopStats();
@@ -2197,9 +2203,14 @@ public class TProxyService extends VpnService {
 			  appendLog("clash-api: 内嵌控制接口已监听 127.0.0.1:" + MihomoConfig.API_PORT
 				+ "（浏览器打开 http://127.0.0.1:" + MihomoConfig.API_PORT + "/ 可见）");
 			else {
+				/* start() may have failed BEFORE or AFTER binding: stop() closes
+				   the listener and shuts the worker pool in both cases, whereas
+				   dropping the reference (the old code) leaked whichever half
+				   had been created. */
+				clashApiServer.stop();
 				clashApiServer = null;
-				appendLog("clash-api: 端口 " + MihomoConfig.API_PORT
-					+ " 已被占用（内核已自行监听），沿用内核的监听");
+				appendLog("clash-api: 无法监听 127.0.0.1:" + MihomoConfig.API_PORT
+					+ "（原因见上一行）→ 沿用内核自身的监听");
 			}
 		} catch (Throwable e) {
 			clashApiServer = null;
@@ -2364,6 +2375,22 @@ public class TProxyService extends VpnService {
 		  appendLog("traffic: raw=" + raw + " tx=" + tx + " rx=" + rx);
 	}
 
+	/* key -> compiled pattern. jsonBytes runs on the 1s stats heartbeat (2-4
+	   calls per tick) and Pattern.compile is by far the most expensive part of
+	   a regex match, so the compiled form is cached per key instead of being
+	   rebuilt on every sample. */
+	private static final Map<String, Pattern> JSON_PATTERNS =
+		new java.util.concurrent.ConcurrentHashMap<String, Pattern>();
+
+	private static Pattern jsonPattern(String key) {
+		Pattern p = JSON_PATTERNS.get(key);
+		if (p != null)
+		  return p;
+		p = Pattern.compile("\"" + Pattern.quote(key) + "\"\\s*:\\s*(-?\\d+)");
+		JSON_PATTERNS.put(key, p);
+		return p;
+	}
+
 	/* mihomo reports the running totals as uploadTotal/downloadTotal and the
 	   per-second deltas as up/down; accept every spelling seen in the wild. */
 	private static long jsonBytes(String json, String... keys) {
@@ -2371,8 +2398,7 @@ public class TProxyService extends VpnService {
 		  return -1;
 		for (String key : keys) {
 			try {
-				Pattern p = Pattern.compile("\"" + key + "\"\\s*:\\s*(-?\\d+)");
-				Matcher m = p.matcher(json);
+				Matcher m = jsonPattern(key).matcher(json);
 				if (m.find())
 				  return Long.parseLong(m.group(1));
 			} catch (Exception e) {
@@ -2400,7 +2426,6 @@ public class TProxyService extends VpnService {
 				+ lastControllerError + "），仅“代理专属流量/连接数”归零；总流量取自 getTotalTraffic，不受影响");
 			return;
 		}
-		controllerReady = true;
 		if (connFailStreak >= 5)
 		  appendLog("流量统计：/connections 已恢复");
 		connFailStreak = 0;
@@ -2469,14 +2494,18 @@ public class TProxyService extends VpnService {
 						rr.process = info.process;
 						rr.up = info.up;
 						rr.down = info.down;
-						recentRequests.add(0, rr);
+						synchronized (recentRequests) {
+							recentRequests.add(0, rr);
+						}
 						it.remove();
 						changed = true;
 					}
 				}
 				if (changed) {
-					while (recentRequests.size() > MAX_RECENT_REQUESTS)
-					  recentRequests.remove(recentRequests.size() - 1);
+					synchronized (recentRequests) {
+						while (recentRequests.size() > MAX_RECENT_REQUESTS)
+						  recentRequests.remove(recentRequests.size() - 1);
+					}
 					flushRecentRequests(endMs);
 				}
 				}
@@ -2505,6 +2534,13 @@ public class TProxyService extends VpnService {
 				lastProxyRx = proxySessionRx;
 			}
 		} catch (Exception e) {
+			/* A parse failure here silently froze "代理专属流量/连接数" at 0
+			   without a word - the exact shape of the old "stats always 0"
+			   bug. Say it once per streak. */
+			proxyParseFails++;
+			if (proxyParseFails == 5)
+			  appendLog("流量统计：解析连接快照失败 " + e
+				+ "（字段可能变了；代理流量/连接数将保持 0，总流量不受影响）");
 		}
 	}
 
@@ -2608,13 +2644,23 @@ public class TProxyService extends VpnService {
 	/* Serialize the recent-requests history to Preferences, throttled so we are
 	   not writing to disk on every poll. */
 	private void flushRecentRequests(long now) {
-		if (statsPrefs == null)
+		Preferences sp = statsPrefs;
+		if (sp == null)
 		  return;
-		if (now - lastRecentFlush < 2000 && recentRequests.size() < 20)
-		  return;
-		lastRecentFlush = now;
+		/* Snapshot under the lock, serialize OUTSIDE it: the list is also
+		   touched by the UI thread (clearRecentRequests) and a shared iterator
+		   over a plain ArrayList was a ConcurrentModificationException waiting
+		   to happen - while holding the lock across the disk write would block
+		   the UI's 清空 action for the whole write. */
+		List<RecentRequest> snapshot;
+		synchronized (recentRequests) {
+			if (now - lastRecentFlush < 2000 && recentRequests.size() < 20)
+			  return;
+			lastRecentFlush = now;
+			snapshot = new ArrayList<RecentRequest>(recentRequests);
+		}
 		JSONArray arr = new JSONArray();
-		for (RecentRequest rr : recentRequests) {
+		for (RecentRequest rr : snapshot) {
 			JSONObject o = new JSONObject();
 			try {
 				o.put("t", rr.target);
@@ -2629,10 +2675,16 @@ public class TProxyService extends VpnService {
 			} catch (Exception e) {
 			}
 		}
-		statsPrefs.setRecentRequests(arr.toString());
+		/* Use the non-null snapshot taken above: stopStats() may have cleared the
+		   field while this flush was serializing. */
+		sp.setRecentRequests(arr.toString());
 	}
 	private void loadRecentRequests() {
-		recentRequests.clear();
+		/* Called from startStats (main thread) while a previous pass may still
+		   have a flush in flight: same lock as every other access. */
+		synchronized (recentRequests) {
+			recentRequests.clear();
+		}
 		connInfo.clear();
 		if (statsPrefs == null)
 		  return;
@@ -2681,11 +2733,6 @@ public class TProxyService extends VpnService {
 			  return true;
 		}
 		return false;
-	}
-
-	private String httpGet(String path) {
-		ApiResult r = bridgeApi("GET", apiHost, MihomoConfig.API_PORT, path, null, prefs.getSecret());
-		return (r.code >= 200 && r.code < 300) ? r.body : null;
 	}
 
 	private void saveProxyStats() {
@@ -2782,21 +2829,25 @@ public class TProxyService extends VpnService {
 	public static String formatBytes(long bytes) {
 		if (bytes < 1024)
 		  return bytes + " B";
-		String[] units = { "KB", "MB", "GB", "TB" };
 		double value = bytes;
 		/* unit starts at -1 because the FIRST division already turns bytes into
-		   KB, so the result must land on units[0]. Starting from 0 (and
+		   KB, so the result must land on BYTE_UNITS[0]. Starting from 0 (and
 		   incrementing before use) shifted EVERY value one unit up: 100 KB came
 		   out as "100.0 MB", 3.7 MB as "3.7 GB", and so on. */
 		int unit = -1;
-		while (value >= 1024 && unit < units.length - 1) {
+		while (value >= 1024 && unit < BYTE_UNITS.length - 1) {
 			value /= 1024;
 			unit++;
 		}
 		if (unit < 0)
 		  unit = 0;
-		return String.format(Locale.US, value < 10 ? "%.2f %s" : "%.1f %s", value, units[unit]);
+		return String.format(Locale.US, value < 10 ? "%.2f %s" : "%.1f %s", value,
+			BYTE_UNITS[unit]);
 	}
+
+	/* Allocation-free: formatBytes/formatRate are called several times per
+	   second by the notification refresh. */
+	private static final String[] BYTE_UNITS = { "KB", "MB", "GB", "TB" };
 
 	// create NotificationChannel
 	private void initNotificationChannel(String channelName) {

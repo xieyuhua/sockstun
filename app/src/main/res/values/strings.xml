@@ -238,15 +238,19 @@
 	<string name="sub_test_budget_out">本轮测速已达时间上限，剩余 %1$d 个节点未测速（可稍后再测）</string>
 	<string name="sub_help">使用说明</string>
 	<string name="sub_help_title">订阅怎么用？</string>
-	<string name="sub_help_text">1. 可以保存多个订阅（设置 → 订阅配置）。点「拉取订阅」会更新全部订阅，节点合并成一个池，再排序、筛选、测速。\n\n2. 「自动选择最快节点」：打开后由内核定时测速，自动使用延迟最低的那个，测速间隔和测试地址点下方文字修改。关掉即为手动模式，点哪个节点就用哪个。\n\n3. 测速全部：绿色 = 可用，红色 = 不可用，数字是内核经该节点**真实转发**测得的延迟（不是端口连通），只代表链路快慢，不代表实际带宽。测速范围跟随顶部选中的国家/地区：选「全部」就测全部节点，选某个国家就测该国的全部节点。测速要经内核逐个真实转发，而内核一次只处理一个探测，所以总时间≈各节点之和（进度条会显示剩余估算）；每个节点最多花多久、无响应算不算不可用，见 设置 → 订阅 里的「每节点测速上限 / 无响应判为不可用」；是否显示不可用节点、未连接时是否预先加载内核也在那里。\n\n4. 分流由「路由规则」页统一决定（域名 / IP / IP 段 → 代理或直连），未命中的按该页顶部的开关处理；订阅自带的规则不参与。\n\n5. 与「服务器」页的关系：有订阅就用订阅；没有订阅时，「服务器」里启用的 SOCKS5 会作为手动上游生效。</string>
+	<string name="sub_help_text">1. 可以保存多个订阅（设置 → 订阅配置）。点「拉取订阅」会更新全部订阅，节点合并成一个池，再排序、筛选、测速。\n\n2. 「自动选择最快节点」：打开后由内核定时测速，自动使用延迟最低的那个，测速间隔和测试地址点下方文字修改。关掉即为手动模式，点哪个节点就用哪个。\n\n3. 测速全部：绿色 = 可用，红色 = 不可用，数字是内核经该节点**真实转发**测得的延迟（不是端口连通），只代表链路快慢，不代表实际带宽。测速范围跟随顶部选中的国家/地区：选「全部」就测全部节点，选某个国家就测该国的全部节点。测速要经内核逐个真实转发，而内核一次只处理一个探测，所以总时间≈各节点之和（进度条会显示剩余估算）；每个节点最多花多久、无响应算不算不可用，见 设置 → 订阅 里的「每节点测速上限 / 无响应判为不可用」；是否显示不可用节点、未连接时是否预先加载内核也在那里。\n\n3.1 长按列表里的节点，可以把它「添加到服务器列表」或「添加并启用」（启用后将忽略订阅、直接用这个节点）。非 SOCKS5 协议会连同原始 clash 定义一起搬过去，uuid / sni / ws 等参数不会丢；「服务器」页里可查看和删除。\n\n4. 分流由「路由规则」页统一决定（域名 / IP / IP 段 → 代理或直连），未命中的按该页顶部的开关处理；订阅自带的规则不参与。\n\n5. 与「服务器」页的关系：有订阅就用订阅；没有订阅时，「服务器」里启用的 SOCKS5 会作为手动上游生效。</string>
 	<string name="sub_applied_hint">已选择：%s\n下次启动隧道时生效</string>
 	<string name="sub_switched">已选择：%s</string>
 	<string name="sub_switched_restart">已选择：%1$s\n自动选择已关闭，重新连接后固定使用该节点</string>
 	<string name="sub_switched_now">已选择：%1$s\n正在切换到该节点…（若它不在当前配置里会自动重连）</string>
 	<string name="sub_country_filter_applying">已切换国家/地区，正在重新连接以应用（新配置只含该地区节点）</string>
-	<string name="sub_add_to_server">已添加到服务器列表：%s</string>
+	<string name="sub_add_server_only">添加到服务器列表</string>
+	<string name="sub_add_server_enable">添加并启用（忽略订阅）</string>
+	<string name="sub_add_to_server">已添加到服务器列表：%1$s\n可在「服务器」页启用它（启用后会忽略订阅）</string>
+	<string name="sub_add_server_enabled_now">已添加并启用：%1$s\n正在重新连接以应用（将忽略订阅）</string>
+	<string name="sub_add_server_enabled">已添加并启用：%1$s（将忽略订阅，启动隧道后生效）</string>
 	<string name="sub_server_exists">该节点已在服务器列表中</string>
-	<string name="sub_add_to_server_failed">无法获取该节点原始配置，无法添加到服务器列表（可改用「服务器」页手动粘贴节点定义）</string>
+	<string name="sub_add_to_server_failed">无法还原该节点的原始定义（多因订阅内容已更新）→ 请先「拉取订阅」再试，或到「服务器」页手动粘贴节点定义</string>
 	<string name="proxy_state_probing">代理连通：检测中…</string>
 	<string name="proxy_state_ok">代理连通：正常</string>
 	<string name="proxy_state_fail_reason">代理不通（%1$s）</string>

@@ -1,3 +1,6 @@
 .gradle
 app/.externalNativeBuild
 app/build
+# Per-machine SDK path (created by Android Studio or by hand). Never commit it:
+# it hard-codes one developer's SDK location.
+local.properties

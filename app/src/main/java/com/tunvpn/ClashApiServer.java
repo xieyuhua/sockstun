@@ -30,6 +30,10 @@ class ClashApiServer {
 	/* The latency test fires one request per node (up to 16 in parallel), so
 	   the pool must be at least that wide or the tests would serialise. */
 	private static final int WORKERS = 16;
+	/* Largest request body we will buffer. Content-Length comes straight off the
+	   wire, so a bogus (or hostile) value must not size an allocation: only
+	   loopback can reach us, but any local app could send 2 GB. */
+	private static final int MAX_BODY = 1 << 20;
 
 	private final int port;
 	private final Preferences prefs;
@@ -47,8 +51,9 @@ class ClashApiServer {
 	   (e.g. mihomo DID bind it in this environment); the caller just logs and
 	   keeps going, and the core's own listener then serves the API. */
 	boolean start() {
+		ServerSocket ss = null;
 		try {
-			ServerSocket ss = new ServerSocket();
+			ss = new ServerSocket();
 			ss.setReuseAddress(true);
 			ss.bind(new InetSocketAddress("127.0.0.1", port));
 			server = ss;
@@ -60,6 +65,14 @@ class ClashApiServer {
 			acceptThread.start();
 			return true;
 		} catch (Throwable e) {
+			/* A failed bind must not leak the socket (it holds an fd even when
+			   never bound), and its REASON has to reach the log: the caller
+			   always claimed "port already in use", which hid permission and
+			   out-of-fd failures. */
+			if (ss != null) {
+				try { ss.close(); } catch (Throwable ignore) { }
+			}
+			TProxyService.log("clash-api: 监听 127.0.0.1:" + port + " 失败：" + e);
 			return false;
 		}
 	}
@@ -80,6 +93,10 @@ class ClashApiServer {
 				});
 			} catch (Throwable e) {
 				if (!running) return;
+				/* accept() failing while we are supposed to be running means the
+				   listener became unusable (fd exhausted, closed under us). Back
+				   off instead of spinning this thread at 100% CPU forever. */
+				try { Thread.sleep(100); } catch (InterruptedException ie) { return; }
 			}
 		}
 	}
@@ -112,6 +129,10 @@ class ClashApiServer {
 				}
 			}
 			String body = "";
+			if (contentLength > MAX_BODY) {
+				write(out, 413, "application/json", "{\"message\":\"body too large\"}");
+				return;
+			}
 			if (contentLength > 0) {
 				byte[] buf = new byte[contentLength];
 				int got = 0;
@@ -127,7 +148,11 @@ class ClashApiServer {
 			int q = target.indexOf('?');
 			if (q >= 0) { path = target.substring(0, q); query = target.substring(q + 1); }
 			route(method, path, query, body, out);
-		} catch (Throwable ignore) {
+		} catch (Throwable e) {
+			/* Swallowing this made a failing route look like "the core never
+			   answered": the client just saw the connection close and nothing
+			   was written anywhere. Log it; the tunnel itself is unaffected. */
+			TProxyService.log("clash-api: 请求处理失败 " + e);
 		} finally {
 			try { s.close(); } catch (Throwable ignore) { }
 		}
@@ -292,6 +317,7 @@ class ClashApiServer {
 		byte[] bytes = (body == null) ? new byte[0] : body.getBytes(StandardCharsets.UTF_8);
 		String reason = code == 200 ? "OK" : code == 204 ? "No Content"
 			: code == 400 ? "Bad Request" : code == 404 ? "Not Found"
+			: code == 413 ? "Payload Too Large"
 			: code == 502 ? "Bad Gateway" : code == 504 ? "Gateway Timeout" : "";
 		StringBuilder head = new StringBuilder();
 		head.append("HTTP/1.1 ").append(code).append(' ').append(reason).append("\r\n")

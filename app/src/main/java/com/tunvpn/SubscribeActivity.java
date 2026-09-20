@@ -300,15 +300,17 @@ public class SubscribeActivity extends BaseActivity {
 		listview.setAdapter(adapter);
 		listview.setEmptyView(textview_empty);
 
-		/* Long-press a node to copy it into the manual server list, so a
-		   specific node can be pinned/enabled independently of the subscription. */
+		/* Long-press a node: copy it into the manual server list, so a specific
+		   node can be used independently of the subscription. A menu (same
+		   pattern as the server list) makes the two intents explicit instead of
+		   silently doing one of them. */
 		listview.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
 			@Override
 			public boolean onItemLongClick(AdapterView<?> parent, View view,
 					int position, long id) {
 				ClashNode n = adapter.getItem(position);
 				if (n != null)
-				  addNodeToServers(n);
+				  showNodeMenu(n);
 				return true;
 			}
 		});
@@ -345,8 +347,10 @@ public class SubscribeActivity extends BaseActivity {
 	@Override
 	protected void onDestroy() {
 		/* Drop queued tests: they hold this activity and would otherwise keep
-		   running (and posting) after it is gone. */
+		   running (and posting) after it is gone. The country resolver is the
+		   same - its tasks capture this activity through ui.post(). */
 		testPool.shutdownNow();
+		geoPool.shutdownNow();
 		super.onDestroy();
 	}
 
@@ -1137,46 +1141,111 @@ public class SubscribeActivity extends BaseActivity {
 		});
 	}
 
-	/* Long-press: copy a subscription node into the manual server list. SOCKS5
-	   uses the form fields; every other protocol needs the node's original clash
-	   proxy block verbatim (the only way to keep uuid / sni / ws-opts / ...),
-	   which we recover from the subscription's raw body by node name. */
-	private void addNodeToServers(final ClashNode n) {
-		List<SocksServer> list = prefs.getSocksServers();
-		for (SocksServer s : list) {
-			if (n.name.equals(s.name) && n.server.equals(s.addr) && n.port == s.port) {
-				Toast.makeText(this, R.string.sub_server_exists, Toast.LENGTH_SHORT).show();
-				return;
-			}
-		}
-		boolean socks = "socks5".equals(n.type == null ? "" : n.type);
-		String raw = socks ? "" : findRawProxy(n);
-		if (!socks && (raw == null || raw.isEmpty())) {
-			Toast.makeText(this, R.string.sub_add_to_server_failed, Toast.LENGTH_LONG).show();
-			return;
-		}
-		SocksServer s = new SocksServer(SocksServer.newId(), n.name, n.server, n.port,
-			n.username, n.password, socks ? "socks5" : n.type, raw);
-		list.add(s);
-		prefs.setSocksServers(list);
-		Toast.makeText(this, getString(R.string.sub_add_to_server, n.name),
-			Toast.LENGTH_LONG).show();
+	/* Long-press menu for a subscription node: add it to the manual server list,
+	   either just stored or stored + made the active upstream. */
+	private void showNodeMenu(final ClashNode n) {
+		final String[] items = {
+			getString(R.string.sub_add_server_only),
+			getString(R.string.sub_add_server_enable),
+		};
+		new AlertDialog.Builder(this)
+			.setTitle(n.name)
+			.setItems(items, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface dialog, int which) {
+					addNodeToServers(n, which == 1);
+				}
+			})
+			.show();
 	}
 
-	/* Recover a node's original clash proxy block from its subscription's raw
-	   body, matched by name. Returns "" when the subscription body is missing
-	   or the node could not be located (e.g. the subscription changed). */
+	/* Copy a subscription node into the manual server list. SOCKS5 uses the
+	   plain form fields; every other protocol needs the node's original clash
+	   proxy block verbatim (the only way to keep uuid / sni / ws-opts / ...),
+	   which we recover from a subscription's raw body.
+	   enableNow also makes it the active upstream (which IGNORES the
+	   subscription), so a running tunnel is rebuilt right away. */
+	private void addNodeToServers(final ClashNode n, boolean enableNow) {
+		List<SocksServer> list = prefs.getSocksServers();
+		SocksServer existing = null;
+		for (SocksServer s : list) {
+			if (n.name.equals(s.name) && n.server.equals(s.addr) && n.port == s.port) {
+				existing = s;
+				break;
+			}
+		}
+		if (existing == null) {
+			boolean socks = "socks5".equals(n.type == null ? "" : n.type);
+			String raw = socks ? "" : findRawProxy(n);
+			if (!socks && (raw == null || raw.isEmpty())) {
+				Toast.makeText(this, R.string.sub_add_to_server_failed, Toast.LENGTH_LONG).show();
+				return;
+			}
+			existing = new SocksServer(SocksServer.newId(), n.name, n.server, n.port,
+				n.username, n.password, socks ? "socks5" : n.type, raw);
+			list.add(existing);
+			prefs.setSocksServers(list);
+		}
+		if (!enableNow) {
+			Toast.makeText(this, getString(R.string.sub_add_to_server, n.name),
+				Toast.LENGTH_LONG).show();
+			return;
+		}
+		/* Enabling hands the upstream to this server: the subscription is
+		   ignored from now on, so a running tunnel must rebuild its config. */
+		prefs.setActiveSocksId(existing.id);
+		if (prefs.getEnable()) {
+			startService(new Intent(this, TProxyService.class)
+				.setAction(TProxyService.ACTION_RECONNECT));
+			Toast.makeText(this, getString(R.string.sub_add_server_enabled_now, n.name),
+				Toast.LENGTH_LONG).show();
+		} else {
+			Toast.makeText(this, getString(R.string.sub_add_server_enabled, n.name),
+				Toast.LENGTH_LONG).show();
+		}
+	}
+
+	/* Recover a node's original clash proxy block. Tries the node's own
+	   subscription first, then the other ones: a node parsed before its subId
+	   was recorded (or from an older cache) would otherwise fail here for no
+	   good reason. Returns "" when the block cannot be found. */
 	private String findRawProxy(ClashNode n) {
-		if (n.subId == null || n.subId.isEmpty())
-		  return "";
-		String raw = prefs.getSubRaw(n.subId);
+		String raw = findRawProxyIn(prefs.getSubRaw(n.subId), n);
+		if (!raw.isEmpty())
+		  return raw;
+		for (Subscription sub : prefs.getSubscriptions()) {
+			if (sub == null || sub.id == null || sub.id.equals(n.subId))
+			  continue;
+			raw = findRawProxyIn(prefs.getSubRaw(sub.id), n);
+			if (!raw.isEmpty())
+			  return raw;
+		}
+		return "";
+	}
+
+	/* Locate one node's clash proxy block inside a subscription body: by NAME
+	   first (that is what the core registers), then by server:port so a node the
+	   provider renamed is still found. */
+	private String findRawProxyIn(String raw, ClashNode n) {
 		if (raw == null || raw.isEmpty())
 		  return "";
+		String byAddr = "";
 		for (ClashParser.ProxyDef p : ClashParser.extractProxies(raw)) {
 			if (n.name != null && n.name.equals(p.name))
 			  return p.text;
+			if (byAddr.isEmpty() && p.text != null && p.text.contains(":")) {
+				/* Loose address match: tolerant of quotes, of the multi-line
+				   block style and of the single-line flow style. */
+				String quoted = java.util.regex.Pattern.quote(n.server == null ? "" : n.server);
+				if (n.server != null && !n.server.isEmpty()
+						&& java.util.regex.Pattern.compile("server\\s*:\\s*[\"']?" + quoted)
+							.matcher(p.text).find()
+						&& java.util.regex.Pattern.compile("port\\s*:\\s*[\"']?" + n.port
+								+ "(?![0-9])").matcher(p.text).find())
+				  byAddr = p.text;
+			}
 		}
-		return "";
+		return byAddr;
 	}
 
 	/* Candidate targets for the real delay test. A node that answers ANY of
