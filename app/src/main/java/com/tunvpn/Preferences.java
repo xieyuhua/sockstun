@@ -100,6 +100,15 @@ public class Preferences
 	public static final int DEFAULT_PROXY_TEST_TIMEOUT = 5;
 	public static final int MIN_PROXY_TEST_TIMEOUT = 1;
 	public static final int MAX_PROXY_TEST_TIMEOUT = 30;
+	/* Per-NODE wall-clock limit for one latency test (seconds), separate from
+	   the per-target timeout above. ONE node may burn several probes (the
+	   configured URL, the built-in fallbacks, a rescue probe); without a cap a
+	   node whose probes never answer cost ~36s, so a pass crawled and looked
+	   frozen. With it, a pass is bounded by nodeCount x limit. */
+	public static final String NODE_TEST_LIMIT = "NodeTestLimit";
+	public static final int DEFAULT_NODE_TEST_LIMIT = 15;
+	public static final int MIN_NODE_TEST_LIMIT = 5;
+	public static final int MAX_NODE_TEST_LIMIT = 120;
 	/* clash-api bearer token. Generated once and persisted so the secret baked
 	   into the generated config and every client request stay in sync across
 	   restarts. */
@@ -614,6 +623,19 @@ public class Preferences
 		int t = Math.max(MIN_PROXY_TEST_TIMEOUT, Math.min(MAX_PROXY_TEST_TIMEOUT, seconds));
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putInt(key(PROXY_TEST_TIMEOUT), t);
+		editor.commit();
+	}
+
+	/* How long ONE node may take in total (seconds). Clamped 5..120. */
+	public int getNodeTestLimit() {
+		int t = prefs.getInt(key(NODE_TEST_LIMIT), DEFAULT_NODE_TEST_LIMIT);
+		return Math.max(MIN_NODE_TEST_LIMIT, Math.min(MAX_NODE_TEST_LIMIT, t));
+	}
+
+	public void setNodeTestLimit(int seconds) {
+		int t = Math.max(MIN_NODE_TEST_LIMIT, Math.min(MAX_NODE_TEST_LIMIT, seconds));
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putInt(key(NODE_TEST_LIMIT), t);
 		editor.commit();
 	}
 

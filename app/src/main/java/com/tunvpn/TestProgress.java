@@ -29,6 +29,7 @@ class TestProgress {
 	private static final AtomicInteger DONE = new AtomicInteger();
 	private static volatile long deadlineMs = 0;
 	private static volatile boolean batch = false;
+	private static volatile long startedAtMs = 0;
 
 	/* Begin a pass. Returns its generation number, or -1 when a pass is already
 	   running (the caller then refuses to start another one). */
@@ -40,7 +41,24 @@ class TestProgress {
 		DONE.set(0);
 		deadlineMs = deadline;
 		batch = isBatch;
+		startedAtMs = System.currentTimeMillis();
 		return gen;
+	}
+
+	/* How long the current (or last) pass has been running. */
+	static long elapsedMs() {
+		long t = startedAtMs;
+		return t <= 0 ? 0 : Math.max(0, System.currentTimeMillis() - t);
+	}
+
+	/* Rough "time left" from the rate observed so far; 0 when it cannot be told
+	   yet. Because the action bridge serialises, this is the honest number to
+	   show - a pass costs the SUM of the probes, not the slowest one. */
+	static long etaMs() {
+		int d = DONE.get();
+		if (d <= 0)
+		  return 0;
+		return elapsedMs() * pending() / d;
 	}
 
 	/* One node of pass `gen` finished (measured or given up on). Ignored when

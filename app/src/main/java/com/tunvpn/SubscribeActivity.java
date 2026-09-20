@@ -103,6 +103,29 @@ public class SubscribeActivity extends BaseActivity {
 	   Four is plenty to keep the core fed and keeps a huge subscription from
 	   piling up work it cannot retire. */
 	private final ExecutorService testPool = Executors.newFixedThreadPool(4);
+	/* Country resolution runs on its OWN thread. It is cosmetic (flag + chips)
+	   but can cost seconds per host (3s DNS cap plus two HTTP fallbacks), and
+	   doing it inline made a probe worker wait for it before starting the next
+	   node - with hundreds of nodes that alone stretched a pass by minutes. */
+	private final ExecutorService geoPool = Executors.newSingleThreadExecutor(
+		new java.util.concurrent.ThreadFactory() {
+			@Override
+			public Thread newThread(Runnable r) {
+				Thread t = new Thread(r, "geoip-resolve");
+				t.setDaemon(true);
+				return t;
+			}
+		});
+	/* Where the time of the current pass went (summary log): the bridge is
+	   single-callback, so a pass costs the SUM of the probes - which is exactly
+	   what these counters show. */
+	private final java.util.concurrent.atomic.AtomicLong probeMsTotal =
+		new java.util.concurrent.atomic.AtomicLong();
+	private final java.util.concurrent.atomic.AtomicInteger probeCount =
+		new java.util.concurrent.atomic.AtomicInteger();
+	private final java.util.concurrent.atomic.AtomicLong slowestMs =
+		new java.util.concurrent.atomic.AtomicLong();
+	private volatile String slowestName = null;
 
 	/* Resolved mihomo proxy names for the current test pass: "server|port|type"
 	   -> the real (de-dup'd) proxy name in the running config. Filled lazily
@@ -126,6 +149,12 @@ public class SubscribeActivity extends BaseActivity {
 	   loopback the external-controller is bound to) and keep the device IP as a
 	   fallback in case the loopback is ever captured by the TUN. */
 	private String apiHost = null;
+
+	/* True once the controller was probed and did NOT answer. Without this the
+	   probe ran again for EVERY node (a bridge call each - up to its full wait
+	   when the core is silent), which alone could turn a pass into a crawl.
+	   One attempt per test pass. */
+	private volatile boolean apiHostChecked = false;
 
 	/* nodes = everything we parsed (source of truth, persisted)
 	   shown = what the list displays after filtering + sorting */
@@ -175,6 +204,8 @@ public class SubscribeActivity extends BaseActivity {
 
 	/* Guards the one-off /proxies fetch (see ensureProxyNameCache). */
 	private final Object nameCacheLock = new Object();
+	/* The fetch already failed this pass: don't repeat it per node. */
+	private volatile boolean nameCacheFailed = false;
 
 	/* ONE latency pass at a time, tracked PROCESS-WIDE (see TestProgress): a
 	   second pass while the first was still running corrupts the counters and
@@ -192,8 +223,12 @@ public class SubscribeActivity extends BaseActivity {
 	   pass ENDS, and whatever is left is reported as 未测速 rather than guessed.
 	   Dead nodes cost more per node, but the batch timeout caps them - if the
 	   budget really runs out, that is the honest answer. */
-	private static long passBudgetMs(int nodeCount) {
-		return Math.min(20 * 60 * 1000L, Math.max(120000L, nodeCount * 2500L));
+	private static long passBudgetMs(int nodeCount, int nodeLimitSec) {
+		/* With a per-node cap of L the worst case is nodeCount x L, and the
+		   bridge being single-callback means that really is the cost. Allow it
+		   (plus slack), but keep a hard ceiling so a wedged pass still ends. */
+		long want = nodeCount * (nodeLimitSec + 3L) * 1000L;
+		return Math.min(20 * 60 * 1000L, Math.max(180000L, want));
 	}
 	/* Save the (shared) node cache every N finished nodes: a pass that is
 	   interrupted by a page switch or a process kill must not lose the work it
@@ -462,6 +497,12 @@ public class SubscribeActivity extends BaseActivity {
 		if (TestProgress.pending() > 0) {
 			sb.append("  ·  ").append(getString(R.string.sub_testing,
 				TestProgress.done(), TestProgress.total(), TestProgress.percent()));
+			/* The bridge carries one probe at a time, so a pass costs the sum
+			   of the probes; showing the measured rate tells the user what to
+			   expect instead of leaving them with a bar that barely moves. */
+			long eta = TestProgress.etaMs();
+			if (eta >= 1000)
+			  sb.append("  ·  ").append(getString(R.string.sub_testing_eta, eta / 1000));
 		}
 		textview_stats.setText(sb.toString());
 	}
@@ -555,6 +596,7 @@ public class SubscribeActivity extends BaseActivity {
 				   node-name map must be refetched (it is read off the UI thread,
 				   hence the volatile fields). */
 				proxyNameCache = null;
+				nameCacheFailed = false;
 				coreNodeCount = 0;
 				applyView();
 				refreshProtoFilterSpinner();
@@ -672,7 +714,8 @@ public class SubscribeActivity extends BaseActivity {
 		   or this Activity being recreated - does not stop it, and the progress
 		   is still there when the user comes back. */
 		final int gen = TestProgress.begin(toTest.size(),
-			System.currentTimeMillis() + passBudgetMs(toTest.size()), true);
+			System.currentTimeMillis() + passBudgetMs(toTest.size(), prefs.getNodeTestLimit()),
+			true);
 		if (gen < 0) {
 			updateTestProgress();
 			Toast.makeText(this, R.string.sub_test_busy, Toast.LENGTH_SHORT).show();
@@ -681,13 +724,19 @@ public class SubscribeActivity extends BaseActivity {
 		/* The running config may have changed (subscription edited / re-picked);
 		   rebuild the node-name map and re-probe the api host from scratch. */
 		proxyNameCache = null;
+		nameCacheFailed = false;
 		apiHost = null;
+		apiHostChecked = false;
 		coreNodeCount = 0;
 		passNotFound.set(0);
 		passSkipped.set(0);
 		corePrepared = false;
 		lastTestUiUpdate = 0;
 		lastSavedDone = 0;
+		probeMsTotal.set(0);
+		probeCount.set(0);
+		slowestMs.set(0);
+		slowestName = null;
 		passLogged.clear();
 		updateTestProgress();
 		/* Pass header: enough context to read a run in which a node flipped
@@ -702,27 +751,54 @@ public class SubscribeActivity extends BaseActivity {
 			+ (prefs.getEnable() ? "已连接" : "未连接")
 			+ " · 单目标超时 " + capSec + "s" + (capSec != prefs.getProxyTestTimeout()
 				? ("（设置 " + prefs.getProxyTestTimeout() + "s，批量已收紧）") : "")
-			+ " · 时间预算 " + (passBudgetMs(toTest.size()) / 1000) + "s · 测速地址 "
+			+ " · 单节点上限 " + prefs.getNodeTestLimit() + "s"
+			+ " · 时间预算 "
+			+ (passBudgetMs(toTest.size(), prefs.getNodeTestLimit()) / 1000) + "s · 测速地址 "
 			+ prefs.getAutoTestUrl() + " · 内置目标 " + PROXY_TEST_URLS.length + " 个"
 			+ " · 国家筛选=" + (prefs.getSubCountryFilter().isEmpty()
 				? "全部" : prefs.getSubCountryFilter()) + " ===");
 		for (ClashNode n : toTest)
 		  testNode(n, true, gen);
-		/* Watchdog: a pass that lands NOTHING within a generous window is stuck
-		   (core / bridge / hostname resolution), not merely slow. It also lets
-		   the UI go: a wedged pass must not keep the button dead forever. */
-		final int expected = toTest.size();
+		/* Stall watchdog. The old one was a single 60s check that only fired when
+		   NOTHING had landed, so a pass that wedged after a few results (the
+		   "stuck at 7%" report) sat there forever with a dead button. This one
+		   watches the DONE counter: no new result for `stallMs` means stuck,
+		   however far the pass got. */
+		armStallWatchdog(gen);
+	}
+
+	/* Re-arms itself every 15s while the pass runs. `stallMs` is derived from
+	   the per-node limit, so a legitimately slow node (up to the limit) can
+	   never be mistaken for a stall. Fields are only touched on the UI thread. */
+	private long watchdogDone = -1;
+	private long watchdogAt = 0;
+
+	private void armStallWatchdog(final int gen) {
+		final long stallMs = Math.max(60000L, prefs.getNodeTestLimit() * 1000L + 15000L);
 		ui.postDelayed(new Runnable() {
 			@Override
 			public void run() {
-				if (TestProgress.pending() <= 0 || TestProgress.done() > 0)
-				  return;                       /* finished, or visibly moving */
-				TProxyService.log("测速: 60 秒内没有任何结果（应测 " + expected + "，待完成 "
-					+ TestProgress.pending() + "）→ 结束本轮，剩余按未测速处理（详见上面日志）");
-				releasePass();
-				updateTestProgress();
+				if (!TestProgress.running() || TestProgress.pending() <= 0)
+				  return;                     /* pass is over */
+				if (!TestProgress.isCurrent(gen))
+				  return;                     /* this pass was replaced / expired */
+				if (TestProgress.done() != watchdogDone) {
+					watchdogDone = TestProgress.done();
+					watchdogAt = System.currentTimeMillis();
+				} else if (System.currentTimeMillis() - watchdogAt >= stallMs) {
+					TProxyService.log("测速: " + (stallMs / 1000L)
+						+ " 秒没有新结果（已完成 " + TestProgress.done() + "/"
+						+ TestProgress.total() + "）→ 判定卡住，结束本轮，剩余按未测速处理"
+						+ "（看上面的 bridge/delay 行：内核或桥没有回应）");
+					releasePass();
+					updateTestProgress();
+					Toast.makeText(SubscribeActivity.this, R.string.sub_test_stalled,
+						Toast.LENGTH_LONG).show();
+					return;
+				}
+				armStallWatchdog(gen);
 			}
-		}, 60000);
+		}, 15000);
 	}
 
 	/* End of a pass: release the process-wide flag and restore normal logging.
@@ -841,15 +917,21 @@ public class SubscribeActivity extends BaseActivity {
 				if (!expired && !corePrepared) {
 					synchronized (SubscribeActivity.this) {
 						if (!corePrepared) {
+							long t0 = System.currentTimeMillis();
 							boolean coreOk = prepareTestCore();
 							/* Settle the bridge's payload container, the delay
 							   action's parameter shape and the node-name map on
-							   ONE thread BEFORE the 16-worker pool fans out.
-							   All three are shared one-shot latches, and racing
-							   them is what made "测速全部" fail while a single
-							   test was fine. */
+							   ONE thread BEFORE the worker pool fans out. All
+							   three are shared one-shot latches, and racing them
+							   is what made "测速全部" fail while a single test
+							   was fine. */
 							delaySelfTest(coreOk);
 							corePrepared = true;
+							/* Logged because it is dead time the user sees as
+							   "nothing happens": loading + applying the profile
+							   (hundreds of nodes) plus the self probe. */
+							TProxyService.log("测速: 内核准备耗时 "
+								+ (System.currentTimeMillis() - t0) + "ms");
 						}
 					}
 				}
@@ -859,7 +941,22 @@ public class SubscribeActivity extends BaseActivity {
 				   enough, so the socket probe was removed. When the real test
 				   cannot run (no core, or the node is absent from the loaded
 				   config) we leave the node unverified (-1), not "unavailable". */
+				long probeT0 = System.currentTimeMillis();
 				Long real = expired ? null : proxyDelayMs(n);
+				long probeCost = System.currentTimeMillis() - probeT0;
+				if (!expired) {
+					probeCount.incrementAndGet();
+					probeMsTotal.addAndGet(probeCost);
+					if (probeCost > slowestMs.get()) {
+						slowestMs.set(probeCost);
+						slowestName = n.name;
+					}
+					/* Only the outliers are logged, so this stays readable but
+					   still answers "why is it slow" for a specific node. */
+					if (probeCost >= 2000)
+					  TProxyService.log("测速: " + n.name + " 探测耗时 " + probeCost
+						+ "ms（含多目标尝试与救援）");
+				}
 				if (real != null)
 				  n.latency = real;        // >=0 usable, -2 could not tunnel
 				else
@@ -944,6 +1041,16 @@ public class SubscribeActivity extends BaseActivity {
 								+ bad + " / 未测速 " + un + (skipped > 0
 									? ("（其中 " + skipped + " 个超出时间预算未测）") : "")
 								+ " · 详见上面每行「测速:」 ===");
+							/* Where the time went. The action bridge carries ONE
+							   in-flight call, so a pass costs the SUM of the
+							   probes - this line is the evidence for that. */
+							int cnt = probeCount.get();
+							TProxyService.log("测速耗时: 本轮共 "
+								+ (TestProgress.elapsedMs() / 1000) + "s · 实际探测 " + cnt
+								+ " 次/共 " + (probeMsTotal.get() / 1000) + "s · 平均 "
+								+ (cnt > 0 ? (probeMsTotal.get() / cnt) : 0) + "ms/节点 · 最慢 "
+								+ (slowestName == null ? "-" : slowestName) + " "
+								+ slowestMs.get() + "ms（桥为单回调，整轮≈各探测之和）");
 							/* Nothing was measured at all: say so out loud
 							   instead of leaving the user with an unchanged
 							   list and no reason. */
@@ -962,37 +1069,46 @@ public class SubscribeActivity extends BaseActivity {
 						}
 					}
 				});
-				/* Country LAST (see above): it needs DNS, and a slow resolver must
-				   never freeze the progress. Re-resolved each pass so a mislabeled
-				   flag (a stale "RU" on a US IP) self-heals; a failure yields
-				   UNKNOWN, which is kept out so a good value is never clobbered. */
-				/* Only resolve when the country is still unknown. `refresh` used
-				   to re-resolve EVERY node on EVERY pass, and an unreachable
-				   resolver costs up to 3s of worker time per host - the workers
-				   then spent more time on DNS than on probing. */
-				boolean needCountry = (n.country == null || n.country.isEmpty()
-					|| GeoIp.UNKNOWN.equals(n.country));
-				String cc = (expired || !needCountry) ? null
-					: GeoIp.countryOf(prefs, n.server, true);
-				if (cc != null && !cc.isEmpty() && !GeoIp.UNKNOWN.equals(cc)
-						&& !cc.equals(n.country)) {
-					n.country = cc;
-					ui.post(new Runnable() {
-						@Override
-						public void run() {
-							if (isFinishing() || isDestroyed())
-							  return;
-							/* Repaint the row's flag; persist + refresh the chips
-							   only once the pass is over, because the tail may
-							   already have saved while this lookup was running. */
-							adapter.notifyDataSetChanged();
-							if (!TestProgress.running()) {
-								refreshCountryChips();
-								saveNodes();
-							}
+				/* Country LAST, and on its OWN thread: it is cosmetic (flag +
+				   chips) but can cost seconds per host (3s DNS cap plus two
+				   HTTP fallbacks). Doing it on this worker meant the NEXT node
+				   waited for it, and with hundreds of nodes that alone
+				   stretched a pass by minutes. Only resolved when it is still
+				   unknown; repeated failures are backed off inside GeoIp. */
+				if (!expired && (n.country == null || n.country.isEmpty()
+						|| GeoIp.UNKNOWN.equals(n.country)))
+				  resolveCountryAsync(n);
+			}
+		});
+	}
+
+	/* Resolve one node's country on the dedicated resolver thread and repaint
+	   when it lands, so the worker that just measured the node moves straight
+	   on to the next one. */
+	private void resolveCountryAsync(final ClashNode n) {
+		geoPool.execute(new Runnable() {
+			@Override
+			public void run() {
+				final String cc = GeoIp.countryOf(prefs, n.server, true);
+				if (cc == null || cc.isEmpty() || GeoIp.UNKNOWN.equals(cc)
+						|| cc.equals(n.country))
+				  return;
+				ui.post(new Runnable() {
+					@Override
+					public void run() {
+						if (isFinishing() || isDestroyed())
+						  return;
+						n.country = cc;
+						/* Repaint the row's flag; persist + refresh the chips
+						   only once the pass is over, because the tail may
+						   already have saved while this lookup was running. */
+						adapter.notifyDataSetChanged();
+						if (!TestProgress.running()) {
+							refreshCountryChips();
+							saveNodes();
 						}
-					});
-				}
+					}
+				});
 			}
 		});
 	}
@@ -1129,9 +1245,22 @@ public class SubscribeActivity extends BaseActivity {
 		   available. A genuine failure (504/408: the core really could not
 		   complete the probe) is remembered; a malfunction (401/404/...) is not
 		   a verdict, so it only ever leaves the node untested. */
+		/* Per-NODE wall-clock cap (设置 → 订阅 → 每节点测速上限). One node may
+		   burn several probes (configured URL + fallbacks + rescue); without a
+		   cap, a node whose probes never answered cost ~36s and hundreds of
+		   them made the pass look frozen. Never shorter than the first probe's
+		   own timeout: cutting a probe off mid-flight yields no verdict and
+		   only wastes the work already done. */
+		int nodeLimitMs = Math.max(prefs.getNodeTestLimit() * 1000, timeoutMs + 1000);
+		final long nodeDeadline = System.currentTimeMillis() + nodeLimitMs;
 		boolean failed = false;
 		int hardFails = 0;
 		for (String target : targets) {
+			if (!TestProgress.running() || System.currentTimeMillis() >= nodeDeadline) {
+				logOnce("nodelimit:" + name, "测速: " + name + " 已达单节点上限 "
+					+ (nodeLimitMs / 1000) + "s（或本轮已结束）→ 停止尝试，按未测速处理");
+				return null;
+			}
 			Long d = delayProbe(name, target, timeoutMs);
 			if (d != null && d >= 0)
 			  return d;
@@ -1140,17 +1269,23 @@ public class SubscribeActivity extends BaseActivity {
 			   a full trace (target + what came back). */
 			TProxyService.log("测速: " + name + " @" + target + " -> "
 				+ (d == null ? "无判定（测试没跑起来）" : "失败(" + d + ")"));
-			if (d != null) {
-				failed = true;
-				hardFails++;
-				/* Falling through to the rescue probe early is what keeps a
-				   batch quick: in a batch ONE hard failure is enough, because
-				   the rescue (a different, reliable target with a longer
-				   timeout) is the confirmation. A single node keeps the full
-				   multi-target walk. */
-				if (hardFails >= (TestProgress.batch() ? 1 : 2))
-				  break;
+			if (d == null) {
+				/* NO verdict at all means the plumbing is the problem (bridge
+				   silent, controller unreachable, unreadable reply) - not this
+				   target. Walking the remaining targets would just repeat the
+				   same silence at 9s each, which is exactly how a broken
+				   bridge turned one node into ~36s of dead time. */
+				return null;
 			}
+			failed = true;
+			hardFails++;
+			/* Falling through to the rescue probe early is what keeps a
+			   batch quick: in a batch ONE hard failure is enough, because the
+			   rescue (a different, reliable target with a longer timeout) is
+			   the confirmation. A single node keeps the full multi-target
+			   walk. */
+			if (hardFails >= (TestProgress.batch() ? 1 : 2))
+			  break;
 		}
 		if (capped)
 		  logOnce("cap", "测速: 批量测速把单目标超时收紧为 "
@@ -1162,7 +1297,17 @@ public class SubscribeActivity extends BaseActivity {
 		   for slow-but-working nodes that a tight timeout just failed. This is
 		   what the old "real request" fallback used to rescue, without touching
 		   the global selector; it only runs for nodes about to be flagged. */
-		int retryMs = Math.max(timeoutMs, TestProgress.batch() ? 8000 : 12000);
+		long leftMs = nodeDeadline - System.currentTimeMillis();
+		if (leftMs < 1000 || !TestProgress.running()) {
+			/* A hard failure was seen, but this node's budget is spent. Without
+			   the rescue probe to confirm it, the honest verdict is 未测速
+			   rather than 不可用 - the cap was chosen by the user. */
+			logOnce("nodelimit-r:" + name, "测速: " + name
+				+ " 单节点上限（" + (nodeLimitMs / 1000) + "s）已用尽，跳过救援探测 → 未测速");
+			return null;
+		}
+		int retryMs = (int) Math.min(
+			Math.max(timeoutMs, TestProgress.batch() ? 8000 : 12000), leftMs);
 		int retryCount = TestProgress.batch() ? 1 : RETRY_TEST_URLS.length;
 		for (int ri = 0; ri < retryCount; ri++) {
 			String target = RETRY_TEST_URLS[ri];
@@ -1266,13 +1411,22 @@ public class SubscribeActivity extends BaseActivity {
 	private boolean ensureProxyNameCache() {
 		if (proxyNameCache != null)
 		  return true;
-		/* One fetch per pass: the 16 test threads all reach here at once and
-		   every fetch goes through the single-callback bridge, so 16
-		   overlapping copies would only slow the pass down and log 16 times. */
+		if (nameCacheFailed)
+		  return false;      /* already tried this pass and it failed */
+		/* One fetch per pass: the workers all reach here at once and every
+		   fetch goes through the single-callback bridge, so overlapping copies
+		   would only slow the pass down and log many times. */
 		synchronized (nameCacheLock) {
 			if (proxyNameCache != null)
 			  return true;
-			return fetchProxyNameCache();
+			if (nameCacheFailed)
+			  return false;
+			boolean ok = fetchProxyNameCache();
+			/* A failed fetch must not be repeated for every node: without this
+			   each node paid another /proxies round trip through the bridge. */
+			if (!ok)
+			  nameCacheFailed = true;
+			return ok;
 		}
 	}
 
@@ -1416,6 +1570,9 @@ public class SubscribeActivity extends BaseActivity {
 	private String resolveApiHost() {
 		if (apiHost != null)
 		  return apiHost;
+		if (apiHostChecked)
+		  return null;      /* already probed this pass and it did not answer */
+		apiHostChecked = true;
 		if (probeApi("127.0.0.1")) {
 			apiHost = "127.0.0.1";
 			return apiHost;

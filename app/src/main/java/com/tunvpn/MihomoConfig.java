@@ -91,6 +91,13 @@ public class MihomoConfig {
 	private static final int MIN_INTERVAL = 30;
 	private static final int MAX_INTERVAL = 86400;
 
+	/* Compiled once: the proxy validation runs for every node of every config
+	   rebuild (hundreds of nodes, several rebuilds per launch). */
+	private static final Pattern SHORT_ID =
+		Pattern.compile("short-id\\s*:\\s*[\"']?([^\"'\\s,}\\]{]*)");
+	/* mihomo names a rejected proxy as "proxy <index>: <reason>". */
+	private static final Pattern PROXY_INDEX = Pattern.compile("proxy\\s+(\\d+)\\s*:");
+
 	/* Write the final clash config into the app's files dir and return the
 	   file. Throws if no upstream has been configured yet. */
 	public static File build(Context context, Preferences prefs) throws IOException {
@@ -306,9 +313,9 @@ public class MihomoConfig {
 		/* NOT anchored to the line start: half the subscriptions in the wild use
 		   flow style (`- {name: x, server: y, reality-opts: {short-id: zz}}`),
 		   where the key sits inside braces and an anchored pattern misses it -
-		   which is exactly how the bad node still reached the core. */
-		Matcher m = Pattern.compile("short-id\\s*:\\s*[\"']?([^\"'\\s,}\\]{]*)")
-			.matcher(text);
+		   which is exactly how the bad node still reached the core.
+		   Compiled once: this runs for every proxy of every rebuild. */
+		Matcher m = SHORT_ID.matcher(text);
 		if (!m.find())
 		  return false;
 		String id = m.group(1).trim();
@@ -328,7 +335,7 @@ public class MihomoConfig {
 	public static String badProxyNameFromError(String err, String cfg) {
 		if (err == null || cfg == null)
 		  return null;
-		Matcher m = Pattern.compile("proxy\\s+(\\d+)\\s*:").matcher(err);
+		Matcher m = PROXY_INDEX.matcher(err);
 		if (!m.find())
 		  return null;
 		int idx;

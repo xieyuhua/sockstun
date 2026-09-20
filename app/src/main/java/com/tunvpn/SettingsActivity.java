@@ -112,6 +112,12 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			getString(R.string.sub_test_url, prefs.getAutoTestUrl()), R.id.settings_test_url);
 		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_test_timeout,
 			getString(R.string.sub_test_timeout, prefs.getProxyTestTimeout()), R.id.settings_test_timeout);
+		/* Hard cap on the time ONE node may take (all its probes together).
+		   Without it a node whose probes never answer can burn ~36s, which is
+		   what made a "test all" pass crawl and look stuck. */
+		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_node_limit,
+			getString(R.string.sub_test_node_limit, prefs.getNodeTestLimit()),
+			R.id.settings_node_limit);
 		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_autosel_interval,
 			autoSelectIntervalSubtitle(), R.id.settings_autosel_interval);
 		/* Latency-test behaviour: whether a TUN-less core is kept alive so the
@@ -528,6 +534,50 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			null);
 	}
 
+	/* Per-NODE time limit for one latency test (seconds, 5-120). This is the
+	   knob that decides how long a "test all" may spend on a single node: the
+	   node's probes are tried within this window and whatever is not measured
+	   by then is reported as 未测速 instead of being guessed. */
+	private void editNodeTestLimit() {
+		final int cur = prefs.getNodeTestLimit();
+		showInputDialog(R.string.settings_node_limit,
+			getString(R.string.settings_node_limit),
+			getString(R.string.sub_test_node_limit_hint),
+			InputType.TYPE_CLASS_NUMBER,
+			Integer.toString(cur),
+			new InputValidator() {
+				@Override public String validate(String v) {
+					if (v.isEmpty())
+					  return getString(R.string.sub_test_node_limit_invalid);
+					int s;
+					try {
+						s = Integer.parseInt(v);
+					} catch (NumberFormatException e) {
+						return getString(R.string.sub_test_node_limit_invalid);
+					}
+					if (s < Preferences.MIN_NODE_TEST_LIMIT
+							|| s > Preferences.MAX_NODE_TEST_LIMIT)
+					  return getString(R.string.sub_test_node_limit_invalid);
+					return null;
+				}
+			},
+			new OnValue() {
+				@Override public void onReceiveValue(String v) {
+					int s;
+					try {
+						s = Integer.parseInt(v);
+					} catch (NumberFormatException e) {
+						s = cur;
+					}
+					int clamped = Math.max(Preferences.MIN_NODE_TEST_LIMIT,
+						Math.min(Preferences.MAX_NODE_TEST_LIMIT, s));
+					prefs.setNodeTestLimit(clamped);
+					buildList();
+				}
+			},
+			null);
+	}
+
 	@Override
 	public void onClick(View view) {
 		int id = view.getId();
@@ -545,6 +595,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  editTestUrl();
 		else if (id == R.id.settings_test_timeout)
 		  editTestTimeout();
+		else if (id == R.id.settings_node_limit)
+		  editNodeTestLimit();
 		else if (id == R.id.settings_proxy_port)
 		  editPort();
 		else if (id == R.id.settings_log)
