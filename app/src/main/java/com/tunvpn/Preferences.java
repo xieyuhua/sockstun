@@ -561,7 +561,7 @@ public class Preferences
 	public String getCurrentNode() {
 		SocksServer s = getActiveSocksServer();
 		if (s != null)
-		  return socks5Label(s);
+		  return manualUpstreamLabel(s);
 		String actual = getActiveNode();
 		if (getEnable() && actual != null && !actual.isEmpty())
 		  return actual;
@@ -571,11 +571,21 @@ public class Preferences
 		return "";
 	}
 
-	private String socks5Label(SocksServer s) {
+	/* **手动上游**在首页 / 通知栏 / 连接信息 里的显示名。协议必须取这台服务器自己的
+	   type：以前这里无条件拼 "socks5://"，于是从订阅里长按加入的 vmess / vless /
+	   hysteria2 节点在界面上统统显示成 "socks5://host:port" —— 看着像协议被换掉了，
+	   其实配置里发的就是它自己的协议（见 SocksServer.type 与 MihomoConfig.manualSocksConfig）。
+	   有名字就显示"协议 · 名字"（两者都不丢，与订阅页"协议标签 + 节点名"的读法一致）；
+	   粘贴式节点常常没有可用的地址端口，那就只显示协议名。 */
+	private String manualUpstreamLabel(SocksServer s) {
+		String type = (s.type == null || s.type.isEmpty()) ? "socks5" : s.type;
+		String name = s.name == null ? "" : s.name.trim();
+		if (!name.isEmpty())
+		  return type + " · " + name;
 		String addr = s.addr == null ? "" : s.addr.trim();
 		if (addr.isEmpty())
-		  return "";
-		return "socks5://" + addr + ":" + s.port;
+		  return type;
+		return type + "://" + addr + ":" + s.port;
 	}
 
 	/* 当前启用订阅的原始 clash.yml 文本（如果机场是用 base64 下发的，这里已经是

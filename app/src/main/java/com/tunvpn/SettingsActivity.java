@@ -634,9 +634,15 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  node = getString(prefs.hasSubscription() ? R.string.node_default : R.string.node_none);
 
 		SocksServer server = prefs.getActiveSocksServer();
-		String serverText = server != null
-			? server.addr + ":" + server.port
-			: getString(R.string.connection_server_sub);
+		/* 粘贴式节点（vmess / vless / …）没有可用的地址端口，直接拼 addr:port 会显示
+		   ":0"；那种情况退成协议名 —— "节点"那一行已经写了它的名字。 */
+		String serverText = getString(R.string.connection_server_sub);
+		if (server != null) {
+			String addr = server.addr == null ? "" : server.addr.trim();
+			serverText = addr.isEmpty()
+				? ((server.type == null || server.type.isEmpty()) ? "socks5" : server.type)
+				: (addr + ":" + server.port);
+		}
 
 		StringBuilder sb = new StringBuilder();
 		sb.append(getString(R.string.connection_state)).append(": ").append(state);
