@@ -20,6 +20,12 @@ import java.util.Map;
 
 public class ClashParser {
 
+	/* Line splitter, compiled once: extractProxies() re-splits the ORIGINAL
+	   block of every proxy (hundreds of them, several builds per launch), and
+	   String.split() recompiles its pattern on every single call. */
+	private static final java.util.regex.Pattern LINE_BREAK =
+		java.util.regex.Pattern.compile("\\r?\\n");
+
 	/* Decode a subscription body to clash YAML. Providers may ship the YAML as
 	   a base64 blob; return the decoded form, or the original if it already
 	   looks like clash config. */
@@ -65,7 +71,7 @@ public class ClashParser {
 		if (text == null || !containsProxies(text))
 		  return out;
 
-		String[] lines = text.split("\\r?\\n", -1);
+		String[] lines = LINE_BREAK.split(text, -1);
 		int start = -1;
 		for (int i = 0; i < lines.length; i++) {
 			if (leadingSpaces(lines[i]) != 0)
@@ -114,7 +120,7 @@ public class ClashParser {
 			/* Re-read the block with the same key/value helpers parseAll()
 			   uses, so the name/type line up with the node list. */
 			Map<String, String> m = new HashMap<String, String>();
-			String[] blockLines = block.toString().split("\\r?\\n");
+			String[] blockLines = LINE_BREAK.split(block.toString());
 			String head = blockLines[0].trim().substring(2);
 			if (head.trim().startsWith("{"))
 			  parseFlowMap(m, head);
@@ -143,7 +149,7 @@ public class ClashParser {
 			  text = dec;
 		}
 
-		String[] lines = text.split("\\r?\\n");
+		String[] lines = LINE_BREAK.split(text);
 		int start = -1;
 		for (int i = 0; i < lines.length; i++) {
 			if (leadingSpaces(lines[i]) != 0)
@@ -295,10 +301,27 @@ public class ClashParser {
 		return s != null && s.contains("proxies:");
 	}
 
+	/* True when the body looks like base64 (letters/digits/+/= and whitespace
+	   only). A manual scan instead of String.matches(): that compiled its
+	   pattern on EVERY call, and these bodies are hundreds of KB. It also
+	   returns on the first ':' or other YAML character, so a real clash.yml is
+	   rejected almost immediately. */
+	private static boolean isBase64ish(String s) {
+		for (int i = 0; i < s.length(); i++) {
+			char c = s.charAt(i);
+			boolean ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+				|| (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '='
+				|| c == '\n' || c == '\r' || c == '\t' || c == ' ';
+			if (!ok)
+			  return false;
+		}
+		return true;
+	}
+
 	private static String tryBase64(String s) {
 		try {
 			String t = s.trim();
-			if (t.matches("[A-Za-z0-9+/=\\s]+") && t.length() > 20)
+			if (t.length() > 20 && isBase64ish(t))
 			  return new String(Base64.decode(t, Base64.DEFAULT));
 		} catch (Exception e) {
 		}

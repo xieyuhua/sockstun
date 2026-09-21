@@ -268,6 +268,12 @@ public class TProxyService extends VpnService {
 	/* Set once a startup abort has been handled, so the asynchronous
 	   quickSetup callback and the synchronous check cannot both fire it. */
 	private volatile boolean startupAborted = false;
+	/* Set while the tunnel is being torn down. The helper threads that can
+	   otherwise run for MINUTES (selector retry loop, controller verification,
+	   the reachability probe, the delayed clash-api kick) check it, so a
+	   disconnect stops them instead of leaving them working - and holding this
+	   Service - long after the VPN is gone. */
+	private volatile boolean tunnelStopping = false;
 
 	@Override
 	public int onStartCommand(Intent intent, int flags, int startId) {
@@ -302,6 +308,7 @@ public class TProxyService extends VpnService {
 
 	@Override
 	public void onDestroy() {
+		tunnelStopping = true;
 		/* The system can tear the service down without a disconnect command,
 		   so make sure the stats poller does not outlive it. stopStats() is
 		   idempotent, so this is harmless after a normal stop. */
@@ -321,6 +328,8 @@ public class TProxyService extends VpnService {
 	public void startService() {
 		if (tunFd != null)
 		  return;
+		/* Fresh tunnel: let the helper threads run again after a previous stop. */
+		tunnelStopping = false;
 
 		prefs = new Preferences(this);
 
@@ -587,6 +596,8 @@ public class TProxyService extends VpnService {
 		   external-controller via the UpdateConfig action to (re)start it. */
 		new Thread(() -> {
 			try { Thread.sleep(3000); } catch (InterruptedException e) { return; }
+			if (tunnelStopping)
+			  return;              /* the tunnel was torn down meanwhile */
 			kickClashApi();
 		}).start();
 		/* FlClash-style real reachability: actually push a request through the
@@ -944,7 +955,7 @@ public class TProxyService extends VpnService {
 			   tunnel is torn down), instead of giving up after one short window
 			   and silently dropping the user's pick. */
 			for (int attempt = 1; attempt <= 120; attempt++) {
-				if (startupAborted)
+				if (startupAborted || tunnelStopping)
 				  return;
 				if (waitForController()) {
 					applySelector(group, proxy);
@@ -1122,12 +1133,16 @@ public class TProxyService extends VpnService {
 			for (int i = 0; i < 90; i++) {
 				if (isControllerUp())
 				  { ok = true; break; }
+				if (tunnelStopping)
+				  return;           /* a disconnect must end this poll, not the user */
 				try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
 			}
 			if (ok) {
 				appendLog("controller: " + controllerHost + ":" + MihomoConfig.API_PORT + " ready");
 				return;
 			}
+			if (tunnelStopping)
+			  return;
 			/* The core brought mixed-port up but skipped the external-controller
 			   listener. Try to force it via the UpdateConfig action, then re-poll;
 			   if that brings it up we skip the alarming "never ready" dump. */
@@ -1135,6 +1150,8 @@ public class TProxyService extends VpnService {
 			boolean recovered = false;
 			for (int i = 0; i < 30; i++) {
 				if (isControllerUp()) { recovered = true; break; }
+				if (tunnelStopping)
+				  return;
 				try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
 			}
 			if (recovered) {
@@ -1901,7 +1918,7 @@ public class TProxyService extends VpnService {
 		final int port = prefs.getProxyPort();
 		new Thread(() -> {
 			for (int i = 0; i < 40; i++) {
-				if (startupAborted)
+				if (startupAborted || tunnelStopping)
 				  return;
 				int[] res = proxyTestOnce(port);
 				if (res[0] > 0) { // 拿到 HTTP 响应 => 节点管线通
@@ -2072,6 +2089,11 @@ public class TProxyService extends VpnService {
 	}
 
 	public void stopService() {
+		/* Tell every long-running helper thread to wind down (selector retries,
+		   controller polls, the reachability probe, the delayed clash-api kick):
+		   they otherwise keep working - and keep this Service alive - for up to
+		   minutes after the tunnel is gone. */
+		tunnelStopping = true;
 		if (tunFd == null) {
 			/* Already down, but the service itself was still STARTED (a
 			   DISCONNECT while disconnected, or a revoke after a failed start):
@@ -2251,8 +2273,8 @@ public class TProxyService extends VpnService {
 		connSeen.clear();
 		loadRecentRequests();
 
-		prefs.setStats(totalTx, totalRx, 0, 0, 0, 0);
-		prefs.setProxyStats(proxyBaseTx, proxyBaseRx, 0, 0, 0, 0);
+		prefs.setAllStats(totalTx, totalRx, 0, 0, 0, 0,
+			proxyBaseTx, proxyBaseRx, 0, 0, 0, 0);
 		prefs.setAppStats(snapshotApps(this, prefs), prefs.getAppTotal());
 
 		/* Run the sampler on a dedicated background thread: it performs a
@@ -2348,8 +2370,7 @@ public class TProxyService extends VpnService {
 
 		accumulateProxy();
 
-		saveStats();
-		saveProxyStats();
+		saveAllStats();
 
 		/* Re-read which node the core is really using every ~30s: in auto mode
 		   the core's own health check moves the selector by itself, so the
@@ -2735,13 +2756,6 @@ public class TProxyService extends VpnService {
 		return false;
 	}
 
-	private void saveProxyStats() {
-		if (statsPrefs != null)
-		  statsPrefs.setProxyStats(proxyBaseTx + proxySessionTx,
-			proxyBaseRx + proxySessionRx, proxySessionTx, proxySessionRx,
-			proxyRateTx, proxyRateRx);
-	}
-
 	/* Only re-post the notification when the shown text really changed. */
 	private void updateNotification() {
 		String line = statsLine(R.string.stats_realtime,
@@ -2754,9 +2768,15 @@ public class TProxyService extends VpnService {
 		  nm.notify(NOTIFY_ID, buildNotification());
 	}
 
-	private void saveStats() {
-		if (statsPrefs != null)
-		  statsPrefs.setStats(totalTx, totalRx, sessionTx, sessionRx, txRate, rxRate);
+	/* Publish BOTH counter sets in one preferences write (they are displayed
+	   side by side, and this runs every second - two commits meant two full
+	   file writes per tick). */
+	private void saveAllStats() {
+		Preferences sp = statsPrefs;
+		if (sp != null)
+		  sp.setAllStats(totalTx, totalRx, sessionTx, sessionRx, txRate, rxRate,
+			proxyBaseTx + proxySessionTx, proxyBaseRx + proxySessionRx,
+			proxySessionTx, proxySessionRx, proxyRateTx, proxyRateRx);
 	}
 
 	private void stopStats() {
@@ -2770,7 +2790,7 @@ public class TProxyService extends VpnService {
 			statsThread = null;
 		}
 		if (statsPrefs != null) {
-			saveStats();
+			saveAllStats();
 			flushRecentRequests(SystemClock.elapsedRealtime());
 			accumulateApps(this, statsPrefs);
 			statsPrefs = null;

@@ -27,9 +27,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 class ClashApiServer {
-	/* The latency test fires one request per node (up to 16 in parallel), so
-	   the pool must be at least that wide or the tests would serialise. */
-	private static final int WORKERS = 16;
+	/* Worker threads. More than this buys NOTHING: every route ends in
+	   TProxyService.apiAction(), which serialises on the single in-flight
+	   callback the native bridge supports, so extra workers would just park on
+	   that lock (16 of them cost ~16 MB of stacks for zero throughput). The
+	   app's own probe pool runs 4 at a time, which is what this matches; an
+	   external dashboard simply queues behind the same lock. */
+	private static final int WORKERS = 4;
 	/* Largest request body we will buffer. Content-Length comes straight off the
 	   wire, so a bogus (or hostile) value must not size an allocation: only
 	   loopback can reach us, but any local app could send 2 GB. */

@@ -1,11 +1,11 @@
 /*
  ============================================================================
- Name        : QSTileService.java
- Author      : hev <r@hev.cc>
- Copyright   : Copyright (c) 2024 xyz
- Description : Quick Settings Tile Service
+ 文件名  : QSTileService.java
+ 作者    : hev <r@hev.cc>
+ 版权    : Copyright (c) 2024 xyz
+ 说明    : 快捷设置磁贴（下拉通知栏的方块开关）。
  ============================================================================
- */
+*/
 
 package com.tunvpn;
 
@@ -31,7 +31,7 @@ public class QSTileService extends TileService {
 
 		Preferences prefs = new Preferences(this);
 		if (prefs.getEnable()) {
-			/* Stop the tunnel */
+			/* 已连接 → 断开隧道。 */
 			prefs.setEnable(false);
 			Intent intent = new Intent(this, TProxyService.class);
 			startService(intent.setAction(TProxyService.ACTION_DISCONNECT));
@@ -39,11 +39,10 @@ public class QSTileService extends TileService {
 			return;
 		}
 
-		/* Start the tunnel */
+		/* 未连接 → 启动隧道。 */
 		Intent prepare = VpnService.prepare(this);
 		if (prepare != null) {
-			/* VPN permission has not been granted yet: let MainActivity
-			   request it and start the tunnel afterwards. */
+			/* 还没授予 VPN 权限：交给 MainActivity 去申请，授权后再启动隧道。 */
 			prefs.setEnable(true);
 			Intent intent = new Intent(this, MainActivity.class);
 			intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -77,8 +76,7 @@ public class QSTileService extends TileService {
 		tile.updateTile();
 	}
 
-	/* Ask the system to refresh the tile so it reflects the current state
-	   even when it was toggled from somewhere else. */
+	/* 请求系统刷新磁贴，使它在别处被切换后也能反映当前状态。 */
 	public static void requestUpdate(Context context) {
 		TileService.requestListeningState(context,
 			new ComponentName(context, QSTileService.class));

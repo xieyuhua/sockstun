@@ -1,11 +1,10 @@
 /*
  ============================================================================
- Name        : SocksServer.java
- Description : One manually configured SOCKS5 upstream server. Servers are
-               kept as a list; enabling one makes it the upstream (and the
-               subscription is then ignored).
+ 文件名  : SocksServer.java
+ 说明    : 手动配置的一条上游服务器。可以存多条；启用其中一条后它就成为上游
+           （此时订阅被忽略）。
  ============================================================================
- */
+*/
 
 package com.tunvpn;
 
@@ -23,16 +22,14 @@ public class SocksServer {
 	public int port;
 	public String user;
 	public String pass;
-	/* Proxy protocol. "socks5" keeps the original behaviour (the app's own
-	   upstream is a SOCKS5 server). Any other value means the user supplied a
-	   raw clash proxy definition in `raw` (hysteria2 / vmess / vless / trojan
-	   / ss / ...), which MihomoConfig emits verbatim as the upstream node. */
+	/* 代理协议。"socks5" 保持原有行为（App 自己起一个 SOCKS5 上游）。其它值表示用户
+	   在 raw 里粘贴了完整的 clash 节点定义（hysteria2 / vmess / vless / trojan / ss …），
+	   MihomoConfig 会把它**原样**发射成上游节点。 */
 	public String type = "socks5";
 	public String raw = "";
-	/* Runtime latency probe result, mirroring ClashNode.latency semantics:
-	   -1 = never tested, -2 = unreachable, >=0 = latency in ms. Deliberately
-	   omitted from encode()/decode() below, so it is recomputed each session
-	   and never persisted. */
+	/* 运行期连通性探测结果，语义与 ClashNode.latency 一致：
+	   -1 = 从未测过，-2 = 不可达，>=0 = 延迟毫秒数。故意不参与下面的
+	   encode()/decode()，所以每次会话重新计算、永不持久化。 */
 	public long latency = -1;
 
 	public SocksServer(String id, String name, String addr, int port,
@@ -64,8 +61,8 @@ public class SocksServer {
 		return addr + ":" + port;
 	}
 
-	/* One-line summary for the server list: the socket for SOCKS5, otherwise
-	   just the protocol so a raw-pasted node still shows something useful. */
+	/* 服务器列表用的一行摘要：SOCKS5 显示地址端口，其它协议只显示协议名
+	   （粘贴式节点没有可用的地址端口可显示）。 */
 	public String summary() {
 		if (isSocks())
 		  return (addr == null ? "" : addr) + ":" + port;

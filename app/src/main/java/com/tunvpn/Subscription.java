@@ -1,10 +1,10 @@
 /*
  ============================================================================
- Name        : Subscription.java
- Description : One clash.yml subscription address. Several can be stored; the
-               enabled one is what the subscribe page fetches and uses.
+ 文件名  : Subscription.java
+ 说明    : 一条 clash.yml 订阅地址。可以保存多条；**启用**的那些会被订阅页拉取并
+           合并进节点池（当前实现是"全部启用的都合并"，不再有"默认订阅"的概念）。
  ============================================================================
- */
+*/
 
 package com.tunvpn;
 
@@ -19,8 +19,7 @@ public class Subscription {
 	public String id;
 	public String name;
 	public String url;
-	/* Whether this subscription is merged into the tunnel config. A disabled
-	   one keeps its cached nodes but contributes nothing to the proxy pool. */
+	/* 是否合并进隧道配置。禁用后仍保留已缓存的节点，但不贡献任何代理。 */
 	public boolean enabled;
 
 	public Subscription(String id, String name, String url) {
@@ -68,8 +67,8 @@ public class Subscription {
 			JSONArray arr = new JSONArray(json);
 			for (int i = 0; i < arr.length(); i++) {
 				JSONObject o = arr.getJSONObject(i);
-				/* Default true so subscriptions saved before this field existed
-				   stay enabled (no silent opt-out on upgrade). */
+				/* 默认 true：这个字段出现之前保存的订阅升级后保持启用
+				   （不能悄悄把用户订阅关掉）。 */
 				out.add(new Subscription(
 					o.optString("id"),
 					o.optString("name"),

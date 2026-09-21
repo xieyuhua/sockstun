@@ -1,18 +1,16 @@
 /*
  ============================================================================
- Name        : TestLog.java
- Description : The app's runtime log file (cache/tproxy.log) - the very file
-               the 日志 page tails and copies. It lives in its own class so
-               code that holds no Service/Activity reference can still record
-               what the latency test did:
+ 文件名  : TestLog.java
+ 说明    : App 的运行时日志文件（cache/tproxy.log）—— 就是「日志」页滚动显示 / 复制
+           的那份文件。单独成类，是为了让没有 Service/Activity 句柄的代码也能记录
+           测速过程：
 
-                 * ClashApiServer  runs inside the :native process
-                 * CoreTestHost    runs inside the app process
-                 * TProxyService.appendLog() delegates here as well
+             * ClashApiServer  运行在 :native 进程
+             * CoreTestHost    运行在 App 进程
+             * TProxyService.appendLog() 也委托到这里
 
-               Both processes resolve the same cache dir, so everything lands
-               in one file the user can copy out. Every write is best-effort:
-               logging must never break a test or the tunnel.
+           两个进程解析出的 cache 目录相同，所以所有内容都落在同一个文件里，用户可
+           直接复制出来。每次写入都是"尽力而为"：写日志绝不能影响测速或隧道本身。
  ============================================================================
 */
 
@@ -29,12 +27,11 @@ import java.util.Locale;
 
 class TestLog {
 	private static final String TAG = "tunvpn";
-	/* Set once per process by TestLog.init(). */
+	/* 每个进程由 TestLog.init() 设置一次。 */
 	private static volatile File file;
 
-	/* One formatter per thread: SimpleDateFormat is not thread-safe and a test
-	   pass writes thousands of lines, so allocating one per line was both slow
-	   and garbage-heavy. */
+	/* 每个线程一个格式化器：SimpleDateFormat 不是线程安全的，而一轮测速要写几千行，
+	   原来每行都 new 一个既慢又产生大量垃圾。 */
 	private static final ThreadLocal<SimpleDateFormat> TS =
 		new ThreadLocal<SimpleDateFormat>() {
 			@Override protected SimpleDateFormat initialValue() {
@@ -44,10 +41,9 @@ class TestLog {
 
 	private TestLog() { }
 
-	/* Bind the log file. Called from TProxyService.onCreate (:native) and from
-	   the Activities (app process); whichever runs first wins, and both
-	   processes resolve the same path. The first call is expected BEFORE any
-	   TProxyService.appendLog(), so removing a stale file still works. */
+	/* 绑定日志文件。由 TProxyService.onCreate（:native）与各 Activity（App 进程）调用；
+	   谁先执行谁生效，两个进程解析出的路径相同。首次调用要早于任何
+	   TProxyService.appendLog()，这样"删除上一轮的旧文件"才有效。 */
 	static void init(Context ctx) {
 		if (file != null || ctx == null)
 		  return;
@@ -57,14 +53,14 @@ class TestLog {
 		}
 	}
 
-	/* The bound log file, or null before init(). */
+	/* 已绑定的日志文件，init() 之前为 null。 */
 	static File file() {
 		return file;
 	}
 
-	/* Append one timestamped line ("HH:mm:ss msg"), same shape as the tunnel's
-	   own log lines so the two read as one stream. Also mirrored to logcat
-	   under the "tunvpn" tag, which makes `adb logcat` usable for diagnosis. */
+	/* 追加一行带时间戳的记录（"HH:mm:ss 内容"），格式与隧道自身的日志行一致，
+	   这样两者读起来像一条流。同时镜像到 logcat（tag "tunvpn"），便于 `adb logcat`
+	   排查。 */
 	static void append(String s) {
 		if (s == null)
 		  return;
@@ -73,13 +69,13 @@ class TestLog {
 		if (f == null)
 		  return;
 		synchronized (TestLog.class) {
-			/* try-with-resources: a write that throws (disk full, cache dir
-			   removed) used to leak the fd every time. */
+			/* try-with-resources：写入抛异常时（磁盘满、cache 目录被清）原来每次都会
+			   泄漏一个文件描述符。 */
 			try (FileOutputStream fos = new FileOutputStream(f, true)) {
 				String ts = TS.get().format(new Date()) + " ";
 				fos.write((ts + s + "\n").getBytes("UTF-8"));
 			} catch (Throwable ignore) {
-				/* logging must never break a test or the tunnel */
+				/* 写日志绝不能影响测速或隧道 */
 			}
 		}
 	}

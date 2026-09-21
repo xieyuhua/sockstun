@@ -1,9 +1,9 @@
 /*
  ============================================================================
- Name        : ThemeManager.java
- Description : Runtime theme selection (multiple palettes).
+ 文件名  : ThemeManager.java
+ 说明    : 运行时主题（多套配色）选择。
  ============================================================================
- */
+*/
 
 package com.tunvpn;
 
@@ -19,11 +19,11 @@ public final class ThemeManager {
 	public static final int LIGHT = 4;
 
 	private static final int[] STYLES = {
-		R.style.Theme_TunVPN,        /* Neon Green */
-		R.style.Theme_TunVPN_Cyan,   /* Cyber Cyan */
-		R.style.Theme_TunVPN_Purple, /* Midnight Purple */
-		R.style.Theme_TunVPN_Amber,  /* Amber */
-		R.style.Theme_TunVPN_Light,  /* Paper Light */
+		R.style.Theme_TunVPN,        /* 霓虹绿 Neon Green */
+		R.style.Theme_TunVPN_Cyan,   /* 赛博青 Cyber Cyan */
+		R.style.Theme_TunVPN_Purple, /* 午夜紫 Midnight Purple */
+		R.style.Theme_TunVPN_Amber,  /* 琥珀 Amber */
+		R.style.Theme_TunVPN_Light,  /* 纸白 Paper Light */
 	};
 
 	private ThemeManager() {}
@@ -54,7 +54,7 @@ public final class ThemeManager {
 		}
 	}
 
-	/* Applied in every activity's onCreate, before super.onCreate(). */
+	/* 在每个 Activity 的 onCreate 里、super.onCreate() 之前调用。 */
 	public static void applyTheme(Activity activity) {
 		int id = Preferences.getTheme(activity);
 		activity.setTheme(styleRes(id));

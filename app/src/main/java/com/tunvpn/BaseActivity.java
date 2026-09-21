@@ -1,9 +1,9 @@
 /*
  ============================================================================
- Name        : BaseActivity.java
- Description : Applies the selected theme before every activity is created.
+ 文件名  : BaseActivity.java
+ 说明    : 所有 Activity 的基类：在 super.onCreate() 之前套用所选主题。
  ============================================================================
- */
+*/
 
 package com.tunvpn;
 
@@ -16,10 +16,9 @@ public abstract class BaseActivity extends AppCompatActivity {
 	protected void onCreate(Bundle savedInstanceState) {
 		ThemeManager.applyTheme(this);
 		super.onCreate(savedInstanceState);
-		/* Bind the shared log file (cache/tproxy.log) for this process so code
-		   without a Service handle - CoreTestHost and the latency test running
-		   in the app process - can write into the same log the 日志 page shows.
-		   TProxyService does the same in :native. */
+		/* 为当前进程绑定共享日志文件（cache/tproxy.log）：这样没有 Service 句柄的代码
+		   —— CoreTestHost、以及跑在 App 进程里的测速 —— 也能写进「日志」页读的那份文件。
+		   :native 进程里的 TProxyService 做同样的事。 */
 		TestLog.init(this);
 	}
 }

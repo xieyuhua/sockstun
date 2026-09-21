@@ -1,11 +1,11 @@
 /*
  ============================================================================
- Name        : ServiceReceiver.java
- Author      : hev <r@hev.cc>
- Copyright   : Copyright (c) 2023 xyz
- Description : ServiceReceiver
+ 文件名  : ServiceReceiver.java
+ 作者    : hev <r@hev.cc>
+ 版权    : Copyright (c) 2023 xyz
+ 说明    : 开机自启广播接收器。
  ============================================================================
- */
+*/
 
 package com.tunvpn;
 
@@ -18,12 +18,12 @@ import android.os.Build;
 public class ServiceReceiver extends BroadcastReceiver {
 	@Override
 	public void onReceive(Context context, Intent intent) {
-		/* A broadcast intent may carry no action, so compare the other way
-		   round instead of dereferencing getAction() unguarded. */
+		/* 广播的 action 可能为空，所以反向比较（常量.equals(getAction())），
+		   不要直接对 intent.getAction() 取值。 */
 		if (intent != null && Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
 			Preferences prefs = new Preferences(context);
 
-			/* Auto-start */
+			/* 上次是连接状态 → 开机后自动恢复隧道。 */
 			if (prefs.getEnable()) {
 				Intent i = VpnService.prepare(context);
 				if (i != null) {

@@ -1,9 +1,9 @@
 /*
  ============================================================================
- Name        : ClashNode.java
- Description : One parsed SOCKS5 proxy node from a clash.yml subscription.
+ 文件名  : ClashNode.java
+ 说明    : 从 clash.yml 订阅里解析出的一个代理节点。
  ============================================================================
- */
+*/
 
 package com.tunvpn;
 
@@ -15,8 +15,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ClashNode {
-	/* -1 = never tested, -2 = unreachable, >=0 = latency in ms.
-	   Written from the latency-test pool thread, read from the UI thread. */
+	/* -1 = 从未测过，-2 = 不可达，>=0 = 延迟毫秒数。
+	   由测速线程池写入、UI 线程读取，所以是 volatile。 */
 	public volatile long latency = -1;
 	public String name;
 	public String type;
@@ -24,12 +24,11 @@ public class ClashNode {
 	public int port;
 	public String username;
 	public String password;
-	/* ISO-3166 alpha-2 country code of the node's server, resolved via GeoIp.
-	   "" means not yet probed (shown as "unknown"). */
+	/* 节点服务器的 ISO-3166 两位国家码，由 GeoIp 解析。"": 还没探测过
+	   （界面显示为"未知"）。 */
 	public String country = "";
-	/* Id of the subscription this node was parsed from. Needed because the
-	   subscribe page shows one merged list but each node's latency has to be
-	   written back to the subscription it belongs to. */
+	/* 该节点解析自哪个订阅。订阅页展示的是一个合并列表，但每个节点的延迟要写回它
+	   所属的那个订阅，所以要记住来源。 */
 	public String subId;
 
 	public ClashNode(String name, String type, String server, int port,
@@ -42,7 +41,7 @@ public class ClashNode {
 		this.password = password;
 	}
 
-	/* Serialize the node list as JSON so names/special chars survive safely. */
+	/* 序列化成 JSON，避免节点名里的特殊字符在分隔符方案下被破坏。 */
 	public static String encode(List<ClashNode> nodes) {
 		JSONArray arr = new JSONArray();
 		try {

@@ -783,33 +783,91 @@ public class Preferences
 	/* Country of a proxy's server, resolved earlier by GeoIp. "" means not yet
 	   known (treated as "OTHER" at config build time). */
 	public String getServerCountry(String server) {
-		JSONObject map = loadCountryMap();
-		return map.optString(server == null ? "" : server, "");
+		synchronized (COUNTRY_MAP_LOCK) {
+			JSONObject map = loadCountryMap();
+			return map.optString(server == null ? "" : server, "");
+		}
 	}
 
+	/* Merge one resolution into the map. The write is COALESCED: GeoIp resolves
+	   a whole subscription node by node, and rewriting (and fsync-ing) the full
+	   preferences file per node was O(n^2) IO. The map itself stays complete in
+	   memory - flushCountryMap() pushes it out at the end of a pass. */
 	public void setServerCountry(String server, String cc) {
 		if (server == null || server.isEmpty() || cc == null || cc.isEmpty())
 		  return;
-		JSONObject map = loadCountryMap();
-		try {
-			map.put(server, cc);
-		} catch (JSONException e) {
-			return;
+		synchronized (COUNTRY_MAP_LOCK) {
+			JSONObject map = loadCountryMap();
+			try {
+				if (cc.equals(map.optString(server, "")))
+				  return;               /* nothing changed */
+				map.put(server, cc);
+			} catch (JSONException e) {
+				return;
+			}
+			countryMapDirty = true;
+			long now = System.currentTimeMillis();
+			if (now - countryMapLastWrite < COUNTRY_MAP_WRITE_MS)
+			  return;
+			writeCountryMap(map);
 		}
+	}
+
+	/* Persist anything the coalescing above left pending. Called when a latency
+	   pass ends, so the country grouping is complete for the next config build. */
+	public void flushCountryMap() {
+		synchronized (COUNTRY_MAP_LOCK) {
+			if (countryMapDirty && countryMapCache != null)
+			  writeCountryMap(countryMapCache);
+		}
+	}
+
+	/* Caller must hold COUNTRY_MAP_LOCK. */
+	private void writeCountryMap(JSONObject map) {
+		String s = map.toString();
+		/* Keep the cache in step with what we wrote, so the next loadCountryMap()
+		   does not treat our own write as an external change and re-parse. */
+		countryMapRaw = s;
+		countryMapCache = map;
+		countryMapDirty = false;
+		countryMapLastWrite = System.currentTimeMillis();
 		SharedPreferences.Editor editor = prefs.edit();
-		editor.putString(key(SERVER_COUNTRY_MAP), map.toString());
+		editor.putString(key(SERVER_COUNTRY_MAP), s);
 		editor.commit();
 	}
 
+	/* Parsed copy of SERVER_COUNTRY_MAP. It is read once per proxy at EVERY
+	   config build (hundreds of nodes, several builds per launch), so parsing
+	   the JSON each time was O(n^2). The raw string is re-read on every call
+	   (SharedPreferences serves it from memory) and compared first: a write from
+	   the other process is still noticed, and nothing is re-parsed when it has
+	   not changed. */
+	private String countryMapRaw = null;
+	private JSONObject countryMapCache = null;
+	private boolean countryMapDirty = false;
+	private long countryMapLastWrite = 0;
+	private static final Object COUNTRY_MAP_LOCK = new Object();
+	private static final long COUNTRY_MAP_WRITE_MS = 2000;
+
 	private JSONObject loadCountryMap() {
 		String s = prefs.getString(key(SERVER_COUNTRY_MAP), "");
-		if (s == null || s.isEmpty())
-		  return new JSONObject();
-		try {
-			return new JSONObject(s);
-		} catch (JSONException e) {
-			return new JSONObject();
+		if (s == null)
+		  s = "";
+		if (countryMapCache != null && s.equals(countryMapRaw))
+		  return countryMapCache;
+		JSONObject o;
+		if (s.isEmpty()) {
+			o = new JSONObject();
+		} else {
+			try {
+				o = new JSONObject(s);
+			} catch (JSONException e) {
+				o = new JSONObject();
+			}
 		}
+		countryMapRaw = s;
+		countryMapCache = o;
+		return o;
 	}
 
 	/* The core's local HTTP/SOCKS port. Out of range means "never set". */
@@ -1128,6 +1186,30 @@ public class Preferences
 		editor.putLong(STATS_SESSION_RX, sessionRx);
 		editor.putLong(STATS_RATE_TX, rateTx);
 		editor.putLong(STATS_RATE_RX, rateRx);
+		editor.commit();
+	}
+
+	/* Both counter sets in ONE editor/commit. The sampler publishes them
+	   together every second; two commits meant two full preferences writes per
+	   tick, plus a window where the UI could read the tunnel totals but not the
+	   proxy ones (they are shown side by side). */
+	public void setAllStats(long totalTx, long totalRx, long sessionTx, long sessionRx,
+			long rateTx, long rateRx,
+			long pTotalTx, long pTotalRx, long pSessionTx, long pSessionRx,
+			long pRateTx, long pRateRx) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putLong(STATS_TOTAL_TX, totalTx);
+		editor.putLong(STATS_TOTAL_RX, totalRx);
+		editor.putLong(STATS_SESSION_TX, sessionTx);
+		editor.putLong(STATS_SESSION_RX, sessionRx);
+		editor.putLong(STATS_RATE_TX, rateTx);
+		editor.putLong(STATS_RATE_RX, rateRx);
+		editor.putLong(PROXY_TOTAL_TX, pTotalTx);
+		editor.putLong(PROXY_TOTAL_RX, pTotalRx);
+		editor.putLong(PROXY_SESSION_TX, pSessionTx);
+		editor.putLong(PROXY_SESSION_RX, pSessionRx);
+		editor.putLong(PROXY_RATE_TX, pRateTx);
+		editor.putLong(PROXY_RATE_RX, pRateRx);
 		editor.commit();
 	}
 

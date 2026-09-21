@@ -327,8 +327,8 @@ public class SubscribeActivity extends BaseActivity {
 				testAll();
 			}
 		});
-		/* Subscription management and the usage guide live in the toolbar
-		   menu, so the page itself only shows the current subscription. */
+		/* 工具栏菜单只放「使用说明」；订阅地址的增删改查已经移到 设置 → 订阅配置
+		   （本页只负责展示合并后的节点与测速）。 */
 		toolbar.inflateMenu(R.menu.subscribe_menu);
 		toolbar.setOnMenuItemClickListener(new MaterialToolbar.OnMenuItemClickListener() {
 			@Override
@@ -1134,6 +1134,11 @@ public class SubscribeActivity extends BaseActivity {
 						if (!TestProgress.running()) {
 							refreshCountryChips();
 							saveNodes();
+							/* Country writes are coalesced (one preferences
+							   write per ~2s); push the tail out now that the
+							   pass is over, so the next config build groups
+							   every node correctly. */
+							prefs.flushCountryMap();
 						}
 					}
 				});
