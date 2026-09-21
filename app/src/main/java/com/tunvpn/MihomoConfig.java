@@ -36,6 +36,24 @@ public class MihomoConfig {
 	public static String countryGroup(String cc) {
 		return GROUP + "-" + cc;
 	}
+
+	/* "分组快测"用的分组名与每组规模。测试内核里除了那个 select 组，再按每
+	   TEST_GROUP_SIZE 个节点建若干个 url-test 组（**lazy: true**，加载时不会自动拨测，
+	   只有显式触发才跑）。触发一次组健康检查时，mihomo 会**在核内并发**拨测组内所有
+	   成员，一次动作调用就能拿回整组延迟；而逐节点探测受"桥只允许一个在途回调"的限制
+	   天然串行，一轮耗时≈各节点之和 —— 几百个节点时这是数量级的差距。 */
+	public static final String TEST_GROUP_PREFIX = "tunvpn-t";
+	public static final int TEST_GROUP_SIZE = 48;
+
+	public static int testGroupCount(int nodeCount) {
+		if (nodeCount <= 0)
+		  return 0;
+		return (nodeCount + TEST_GROUP_SIZE - 1) / TEST_GROUP_SIZE;
+	}
+
+	public static String testGroupName(int index) {
+		return TEST_GROUP_PREFIX + index;
+	}
 	/* mihomo 的 RESTful 控制接口端口。**绑回环 127.0.0.1**：在本构建上绑
 	   0.0.0.0（所有接口）会**静默绑定失败**（症状是"9090 从没监听"，而绑 "*" 的
 	   mixed-port 却正常），所以配置里一律写成 127.0.0.1。仍然设置 `secret` 鉴权。
@@ -260,6 +278,27 @@ public class MihomoConfig {
 		sb.append("    proxies:\n");
 		for (ClashParser.ProxyDef p : kept)
 		  sb.append("      - \"").append(escapeYaml(p.name)).append("\"\n");
+		/* 分组快测用的 url-test 组（见 TEST_GROUP_SIZE）。**lazy: true** 是关键：
+		   内核加载时**不会**自动拨测，所以不会重演当初那波"一加载就并发打出几十个探测、
+		   把我们自己的逐节点探测挤到超时"的风暴；只有显式触发才跑，而且是组内并发。
+		   interval 给一个大值（正常不会被自动用到），url 用用户配置的测速地址。 */
+		int fastGroups = testGroupCount(kept.size());
+		String fastUrl = prefs.getAutoTestUrl();
+		if (fastUrl == null || fastUrl.isEmpty())
+		  fastUrl = Preferences.DEFAULT_TEST_URL;
+		for (int g = 0; g < fastGroups; g++) {
+			int from = g * TEST_GROUP_SIZE;
+			int to = Math.min(kept.size(), from + TEST_GROUP_SIZE);
+			sb.append("  - name: \"").append(testGroupName(g)).append("\"\n");
+			sb.append("    type: url-test\n");
+			sb.append("    url: \"").append(escapeYaml(fastUrl)).append("\"\n");
+			sb.append("    interval: 3600\n");
+			sb.append("    lazy: true\n");
+			sb.append("    tolerance: 50\n");
+			sb.append("    proxies:\n");
+			for (int i = from; i < to; i++)
+			  sb.append("      - \"").append(escapeYaml(kept.get(i).name)).append("\"\n");
+		}
 		sb.append("rules:\n");
 		sb.append("  - MATCH,").append(GROUP).append('\n');
 		sb.append("mode: rule\n");

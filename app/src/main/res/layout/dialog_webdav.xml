@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- WebDAV 配置弹窗：把地址 / 账号 / 密码 / 目录收进一页；底部「测试连接」可先验证。
+     字段的 hint 直接复用设置里的同名文案，保持口径一致。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:app="http://schemas.android.com/apk/res-auto"
+	android:orientation="vertical"
+	android:layout_width="match_parent"
+	android:layout_height="wrap_content"
+	android:paddingLeft="16dp"
+	android:paddingRight="16dp"
+	android:paddingTop="8dp"
+	android:paddingBottom="4dp">
+
+	<com.google.android.material.textfield.TextInputLayout
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:hint="@string/settings_webdav_url">
+
+		<com.google.android.material.textfield.TextInputEditText
+			android:id="@+id/webdav_url"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:inputType="textUri"
+			android:singleLine="true"/>
+	</com.google.android.material.textfield.TextInputLayout>
+
+	<com.google.android.material.textfield.TextInputLayout
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:hint="@string/settings_webdav_user">
+
+		<com.google.android.material.textfield.TextInputEditText
+			android:id="@+id/webdav_user"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:inputType="text"
+			android:singleLine="true"/>
+	</com.google.android.material.textfield.TextInputLayout>
+
+	<com.google.android.material.textfield.TextInputLayout
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:hint="@string/settings_webdav_pass">
+
+		<com.google.android.material.textfield.TextInputEditText
+			android:id="@+id/webdav_pass"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:inputType="textPassword"
+			android:singleLine="true"/>
+	</com.google.android.material.textfield.TextInputLayout>
+
+	<com.google.android.material.textfield.TextInputLayout
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:hint="@string/settings_webdav_dir">
+
+		<com.google.android.material.textfield.TextInputEditText
+			android:id="@+id/webdav_dir"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:inputType="textUri"
+			android:singleLine="true"/>
+	</com.google.android.material.textfield.TextInputLayout>
+
+	<TextView
+		android:id="@+id/webdav_help"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_marginTop="4dp"
+		android:layout_marginBottom="8dp"
+		android:textSize="12sp"
+		android:textColor="?attr/colorOnSurfaceVariant"
+		android:text="@string/settings_webdav_config_hint"/>
+
+	<Button
+		android:id="@+id/webdav_test"
+		style="?attr/materialButtonOutlinedStyle"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:text="@string/settings_webdav_test"/>
+</LinearLayout>

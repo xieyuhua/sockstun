@@ -140,10 +140,37 @@
 								android:maxLines="12"
 								android:scrollHorizontally="false"/>
 							</com.google.android.material.textfield.TextInputLayout>
+							<LinearLayout
+								android:id="@+id/server_raw_actions"
+								android:orientation="horizontal"
+								android:layout_width="match_parent"
+								android:layout_height="wrap_content"
+								android:layout_marginTop="4dp"
+								android:gravity="end"
+								android:visibility="gone">
+								<com.google.android.material.button.MaterialButton
+									android:id="@+id/server_copy_json"
+									style="@style/Widget.Material3.Button.TextButton"
+									android:layout_width="wrap_content"
+									android:layout_height="wrap_content"
+									android:text="@string/server_copy_json"/>
+								<com.google.android.material.button.MaterialButton
+									android:id="@+id/server_copy_clash"
+									style="@style/Widget.Material3.Button.TextButton"
+									android:layout_width="wrap_content"
+									android:layout_height="wrap_content"
+									android:text="@string/server_copy_clash"/>
+								<com.google.android.material.button.MaterialButton
+									android:id="@+id/server_paste"
+									style="@style/Widget.Material3.Button.TextButton"
+									android:layout_width="wrap_content"
+									android:layout_height="wrap_content"
+									android:text="@string/server_paste"/>
+							</LinearLayout>
 							</LinearLayout>
 							</com.google.android.material.card.MaterialCardView>
 			</LinearLayout>
-	</ScrollView>
+		</ScrollView>
 	<com.google.android.material.button.MaterialButton
 		android:id="@+id/save"
 		android:layout_width="match_parent"

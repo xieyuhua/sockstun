@@ -93,6 +93,14 @@ public class Preferences
 	public static final String AUTO_SELECT = "AutoSelect";
 	public static final String AUTO_SELECT_INTERVAL = "AutoSelectInterval";
 	public static final String AUTO_TEST_URL = "AutoTestUrl";
+	/* WebDAV 远程备份（见 WebDav 与 SubscribeActivity 的"备份可用节点"）：
+	   **启用且填了地址**时备份传到远端；否则备份落成本地订阅（原行为）。
+	   地址/目录都按"用户可能带或不带尾斜杠"来归一化，所以这里原样存。 */
+	public static final String WEBDAV_ENABLED = "WebdavEnabled";
+	public static final String WEBDAV_URL = "WebdavUrl";
+	public static final String WEBDAV_USER = "WebdavUser";
+	public static final String WEBDAV_PASS = "WebdavPass";
+	public static final String WEBDAV_DIR = "WebdavDir";
 	/* 单次探测的超时秒数（走 clash-api 的 /delay 接口测一个节点）。内核量的是**真实
 	   转发**的一次请求，所以超时调大能容下"慢但可用"的节点。 */
 	public static final String PROXY_TEST_TIMEOUT = "ProxyTestTimeout";
@@ -680,6 +688,68 @@ public class Preferences
 		if (url == null || url.trim().isEmpty())
 		  return DEFAULT_TEST_URL;
 		return url.trim();
+	}
+
+	/* ===== WebDAV 远程备份 ===== */
+
+	public boolean getWebdavEnabled() {
+		return prefs.getBoolean(key(WEBDAV_ENABLED), false);
+	}
+
+	public void setWebdavEnabled(boolean enabled) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putBoolean(key(WEBDAV_ENABLED), enabled);
+		editor.commit();
+	}
+
+	public String getWebdavUrl() {
+		return trim(prefs.getString(key(WEBDAV_URL), ""));
+	}
+
+	public void setWebdavUrl(String url) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(WEBDAV_URL), url == null ? "" : url.trim());
+		editor.commit();
+	}
+
+	public String getWebdavUser() {
+		return trim(prefs.getString(key(WEBDAV_USER), ""));
+	}
+
+	public void setWebdavUser(String user) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(WEBDAV_USER), user == null ? "" : user.trim());
+		editor.commit();
+	}
+
+	public String getWebdavPass() {
+		return trim(prefs.getString(key(WEBDAV_PASS), ""));
+	}
+
+	public void setWebdavPass(String pass) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(WEBDAV_PASS), pass == null ? "" : pass);
+		editor.commit();
+	}
+
+	public String getWebdavDir() {
+		return trim(prefs.getString(key(WEBDAV_DIR), ""));
+	}
+
+	public void setWebdavDir(String dir) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(WEBDAV_DIR), dir == null ? "" : dir.trim());
+		editor.commit();
+	}
+
+	/* "启用**且**填了地址"才算配好：只打开开关却没有地址，属于没配好 —— 这时备份
+	   仍然落成本地订阅，而不是变成一次注定失败的请求。 */
+	public boolean webdavReady() {
+		return getWebdavEnabled() && !getWebdavUrl().isEmpty();
+	}
+
+	private static String trim(String s) {
+		return s == null ? "" : s.trim();
 	}
 
 	public void setAutoTestUrl(String url) {

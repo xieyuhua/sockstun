@@ -74,6 +74,9 @@ class CoreTestHost {
 				  return true;
 				boolean same = cfg.equals(lastConfig);
 				int nodeCount = countProxies(cfg);
+				/* 配置里建了几个"快测组"（见 MihomoConfig.TEST_GROUP_SIZE）：分组快测要按
+				   这个数量逐组触发；0 表示这份配置没有快测组（那一步会自动跳过）。 */
+				roundGroupCount = MihomoConfig.testGroupCount(nodeCount);
 				TProxyService.log("测试内核配置：" + nodeCount + " 个代理条目 · "
 					+ cfg.length() + " 字节 · 路径 "
 					+ new File(home, "config.yaml").getAbsolutePath()
@@ -200,6 +203,11 @@ class CoreTestHost {
 	private static volatile int delayShape = -1;
 	/* 串行化这个"只决定一次"的过程（见 testDelay）。 */
 	private static final Object SHAPE_LOCK = new Object();
+	/* "分组快测"是否可用的一次性闩锁：-1 未知、1 支持、0 不支持（只探一次，
+	   免得每个分组都白花一次桥调用）。 */
+	private static volatile int groupMode = -1;
+	/* 测试内核当前配置里建了几个快测组（ensureReady 应用配置时记下）。 */
+	private static volatile int roundGroupCount = 0;
 	/* 逐个探测的成功日志，在**单节点**测速时有用；但一轮上千个节点时纯粹是 I/O 噪音
 	   （每写一行都要开关一次日志文件）。 */
 	private static volatile boolean verbose = true;
@@ -300,6 +308,96 @@ class CoreTestHost {
 		if (p.answered)
 		  return Long.valueOf(-2L);
 		return null;
+	}
+
+	/* ===== 分组快测 =========================================================
+	   逐节点探测受"桥只允许一个在途回调"的限制，天然串行：一轮的耗时≈各节点耗时之**和**。
+	   而 mihomo 的 url-test 组是**在核内并发**拨测所有成员的（这正是当初它一加载就打出
+	   一波并发探测、把逐节点探测挤到超时的原因）。测试内核因此为节点池建了若干个
+	   **lazy** 的 url-test 组（不会自动拨测，见 MihomoConfig.TEST_GROUP_SIZE）；这里
+	   按组触发一次健康检查，一次调用就拿回整组延迟。
+
+	   返回 `{内核里的节点名: 延迟ms}`，**只含成功的成员**（延迟 > 0）。
+	   返回 null 表示这颗内核不支持按组测速（把组名当成单个节点、或干脆没回包），
+	   调用方必须原样回退到逐节点探测 —— 判定口径完全不受影响：这里只**补充"可用"
+	   结论**，失败与未命中的节点仍旧走原来的逐节点流程。 */
+	static java.util.Map<String, Long> testGroups(String url, int timeoutMs, int gen) {
+		int groups = roundGroupCount;
+		if (groups <= 0 || groupMode == 0 || !isReady())
+		  return null;
+		int shape = delayShape;
+		if (shape < 0) {
+			/* 参数形状还没定型：先用第 0 组把它定下来。这里**不能**看返回值下结论 ——
+			   组被当成单个节点时会得到一个单值。 */
+			Long one = testDelay(MihomoConfig.testGroupName(0), url, timeoutMs);
+			shape = delayShape;
+			if (shape < 0 || one != null) {
+				groupMode = 0;
+				TProxyService.log("测速: 内核对分组测速不可用（"
+					+ (one != null ? "组名被当成单个节点，只回了单值" : "参数形状未定型")
+					+ "）→ 回退逐节点探测");
+				return null;
+			}
+		}
+		/* 组内并发，所以要等得比"单个探测"久：等最慢的那个成员。 */
+		final long waitMs = timeoutMs + 15000L;
+		java.util.Map<String, Long> out = new java.util.LinkedHashMap<String, Long>();
+		for (int g = 0; g < groups; g++) {
+			if (!TestProgress.isCurrent(gen)) {
+				TProxyService.log("测速: 分组快测在第 " + (g + 1) + "/" + groups
+					+ " 组前停止（本轮已结束/超预算）");
+				break;
+			}
+			String group = MihomoConfig.testGroupName(g);
+			String params = delayData(shape, group, url, timeoutMs);
+			String raw = TProxyService.apiActionRaw("testDelay", params, waitMs);
+			java.util.Map<String, Long> m = parseDelayMap(raw);
+			if (m == null) {
+				if (g == 0) {
+					groupMode = 0;
+					TProxyService.log("测速: 分组快测第 1 组没有返回 {名字: 延迟} 映射（回包 "
+						+ truncate(raw) + "）→ 回退逐节点探测");
+					return out.isEmpty() ? null : out;
+				}
+				continue;   /* 某一组失败（例如组里节点全坏）：跳过它，其余照旧 */
+			}
+			groupMode = 1;
+			for (java.util.Map.Entry<String, Long> e : m.entrySet()) {
+				if (e.getValue() != null && e.getValue() > 0)
+				  out.put(e.getKey(), e.getValue());
+			}
+			TProxyService.log("测速: 分组快测 " + (g + 1) + "/" + groups + " · " + group
+				+ " → 本组 " + m.size() + " 个成员有结果（累计可用 " + out.size() + "）");
+		}
+		return out;
+	}
+
+	/* 解析 `{"节点名": 延迟, ...}`。不是这个形状就返回 null：
+	   · 组名被当成单个节点时回包是 `{"delay":123}`（只有 delay 这一个键）；
+	   · code != 0、data 不是对象、解析失败 → 同样按"拿不到结论"处理。 */
+	private static java.util.Map<String, Long> parseDelayMap(String raw) {
+		if (raw == null)
+		  return null;
+		try {
+			JSONObject o = new JSONObject(raw);
+			if (o.optInt("code", -1) != 0)
+			  return null;
+			Object data = o.opt("data");
+			if (!(data instanceof JSONObject))
+			  return null;
+			JSONObject d = (JSONObject) data;
+			java.util.Map<String, Long> out = new java.util.LinkedHashMap<String, Long>();
+			java.util.Iterator<String> it = d.keys();
+			while (it.hasNext()) {
+				String k = it.next();
+				if ("delay".equals(k))
+				  continue;                     /* 单值形状：不是分组结果 */
+				out.put(k, Long.valueOf(d.optLong(k, 0)));
+			}
+			return out.isEmpty() ? null : out;
+		} catch (Throwable e) {
+			return null;
+		}
 	}
 
 	/* 逐个形状试，直到内核不再抱怨参数。**只在单线程上跑**。

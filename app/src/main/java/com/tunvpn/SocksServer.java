@@ -28,8 +28,9 @@ public class SocksServer {
 	public String type = "socks5";
 	public String raw = "";
 	/* 运行期连通性探测结果，语义与 ClashNode.latency 一致：
-	   -1 = 从未测过，-2 = 不可达，>=0 = 延迟毫秒数。故意不参与下面的
-	   encode()/decode()，所以每次会话重新计算、永不持久化。 */
+	   -1 = 从未测过，-2 = 不可达，>=0 = 延迟毫秒数。会随节点一起持久化
+	   （见 encode()/decode() 的 "latency" 字段），所以服务器列表里测过的
+	   延迟下次进来还显示，不必重测。 */
 	public long latency = -1;
 
 	public SocksServer(String id, String name, String addr, int port,
@@ -86,6 +87,7 @@ public class SocksServer {
 				o.put("pass", s.pass);
 				o.put("type", s.type);
 				o.put("raw", s.raw);
+				o.put("latency", s.latency);
 				arr.put(o);
 			}
 		} catch (JSONException e) {
@@ -101,7 +103,7 @@ public class SocksServer {
 			JSONArray arr = new JSONArray(json);
 			for (int i = 0; i < arr.length(); i++) {
 				JSONObject o = arr.getJSONObject(i);
-				out.add(new SocksServer(
+				SocksServer s = new SocksServer(
 					o.optString("id"),
 					o.optString("name"),
 					o.optString("addr"),
@@ -109,7 +111,10 @@ public class SocksServer {
 					o.optString("user"),
 					o.optString("pass"),
 					o.optString("type", "socks5"),
-					o.optString("raw", "")));
+					o.optString("raw", ""));
+				/* 测速结果一并持久化，下次进列表直接显示，不必重测。 */
+				s.latency = o.optLong("latency", -1);
+				out.add(s);
 			}
 		} catch (JSONException e) {
 		}

@@ -3,4 +3,8 @@
 	<item
 		android:id="@+id/action_help"
 		android:title="@string/sub_help"/>
+	<!-- 把当前**可用**的节点固化成本地备份订阅，机场地址失效时仍能用（见 backupAvailableNodes）。 -->
+	<item
+		android:id="@+id/action_backup"
+		android:title="@string/backup_nodes"/>
 </menu>

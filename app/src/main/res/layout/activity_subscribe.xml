@@ -62,20 +62,14 @@
 					android:spinnerMode="dropdown"/>
 			</LinearLayout>
 
-			<!-- ① 自动选择：最快节点 / 按国家挑最快 -->
-			<TextView
-				android:layout_width="match_parent"
-				android:layout_height="wrap_content"
-				android:layout_marginTop="14dp"
-				android:text="@string/sub_section_auto"
-				android:textAppearance="?attr/textAppearanceTitleSmall"
-				android:textColor="?attr/colorPrimary"
-				android:textStyle="bold"/>
+			<!-- 自动选择最快节点。"在哪挑最快"由国家/地区标签决定，所以这里只剩这一个开关，
+			     不再单独占一行小标题（原来那行「自动选择」已被移除）。上边距补成原来
+			     小标题的 14dp，保持节奏不变。 -->
 			<LinearLayout
 				android:orientation="horizontal"
 				android:layout_width="match_parent"
 				android:layout_height="wrap_content"
-				android:layout_marginTop="6dp"
+				android:layout_marginTop="14dp"
 				android:gravity="center_vertical">
 				<LinearLayout
 					android:orientation="vertical"

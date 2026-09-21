@@ -21,16 +21,25 @@ public class Subscription {
 	public String url;
 	/* 是否合并进隧道配置。禁用后仍保留已缓存的节点，但不贡献任何代理。 */
 	public boolean enabled;
+	/* **本地内容**（备份 / 导入）：节点不来自网络，而是直接存在本地的这份内容
+	   （`SubRaw.<id>`）。所以"拉取订阅"会跳过它、编辑时也没有地址可填 —— 它的用途是
+	   "把当前可用的节点固化下来"，机场地址失效或订阅被清空时仍能直接启用。 */
+	public boolean local;
 
 	public Subscription(String id, String name, String url) {
 		this(id, name, url, true);
 	}
 
 	public Subscription(String id, String name, String url, boolean enabled) {
+		this(id, name, url, enabled, false);
+	}
+
+	public Subscription(String id, String name, String url, boolean enabled, boolean local) {
 		this.id = id;
 		this.name = name;
 		this.url = url;
 		this.enabled = enabled;
+		this.local = local;
 	}
 
 	public String label() {
@@ -52,6 +61,7 @@ public class Subscription {
 				o.put("name", s.name);
 				o.put("url", s.url);
 				o.put("enabled", s.enabled);
+				o.put("local", s.local);
 				arr.put(o);
 			}
 		} catch (JSONException e) {
@@ -73,7 +83,8 @@ public class Subscription {
 					o.optString("id"),
 					o.optString("name"),
 					o.optString("url"),
-					o.optBoolean("enabled", true)));
+					o.optBoolean("enabled", true),
+					o.optBoolean("local", false)));
 			}
 		} catch (JSONException e) {
 		}

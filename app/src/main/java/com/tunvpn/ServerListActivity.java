@@ -136,6 +136,18 @@ public class ServerListActivity extends BaseActivity {
 		removeServer(prefs, id);
 	}
 
+	/* 只把某台服务器的测速结果写回存储（不改动其它字段）。 */
+	private void persistLatency(String id, long latency) {
+		List<SocksServer> list = prefs.getSocksServers();
+		for (SocksServer x : list) {
+			if (id.equals(x.id)) {
+				x.latency = latency;
+				break;
+			}
+		}
+		prefs.setSocksServers(list);
+	}
+
 	private class ServerAdapter extends ArrayAdapter<SocksServer> {
 		private final android.view.LayoutInflater inflater;
 		private final int colorOk;
@@ -261,6 +273,8 @@ public class ServerListActivity extends BaseActivity {
 					@Override
 					public void run() {
 						s.latency = latency;
+						/* 测速结果持久化，下次进列表不必重测。 */
+						persistLatency(s.id, latency);
 						adapter.notifyDataSetChanged();
 					}
 				});

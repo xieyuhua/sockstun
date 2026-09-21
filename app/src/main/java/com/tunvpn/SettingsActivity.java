@@ -13,6 +13,7 @@ import android.content.ClipboardManager;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
+import android.app.ProgressDialog;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.Editable;
@@ -23,6 +24,7 @@ import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -35,6 +37,7 @@ import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.Set;
 
 public class SettingsActivity extends BaseActivity implements View.OnClickListener {
@@ -42,6 +45,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 	private LinearLayout group_connection;
 	private LinearLayout group_lan;
 	private LinearLayout group_subscription;
+	private LinearLayout group_latency;
+	private LinearLayout group_backup;
 	private LinearLayout group_general;
 	private LinearLayout group_about;
 
@@ -63,6 +68,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		group_connection = (LinearLayout) findViewById(R.id.settings_group_connection);
 		group_lan = (LinearLayout) findViewById(R.id.settings_group_lan);
 		group_subscription = (LinearLayout) findViewById(R.id.settings_group_subscription);
+		group_latency = (LinearLayout) findViewById(R.id.settings_group_latency);
+		group_backup = (LinearLayout) findViewById(R.id.settings_group_backup);
 		group_general = (LinearLayout) findViewById(R.id.settings_group_general);
 		group_about = (LinearLayout) findViewById(R.id.settings_group_about);
 	}
@@ -80,6 +87,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		group_connection.removeAllViews();
 		group_lan.removeAllViews();
 		group_subscription.removeAllViews();
+		group_latency.removeAllViews();
+		group_backup.removeAllViews();
 		group_general.removeAllViews();
 		group_about.removeAllViews();
 
@@ -105,20 +114,34 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			});
 		addRow(group_lan, R.drawable.ic_dns, R.string.settings_lan_port,
 			Integer.toString(prefs.getProxyPort()), R.id.settings_proxy_port);
+		/* 订阅管理：进入订阅配置页管理地址 / 启用；以及是否在列表里显示不可用节点。 */
 		addRow(group_subscription, R.drawable.ic_subscribe, R.string.subs_config,
 			subsSubtitle(), R.id.settings_subscription);
-		addRow(group_subscription, R.drawable.ic_routing, R.string.sub_test_url_title,
+		addSwitchRow(group_subscription, R.drawable.ic_routing,
+			R.string.settings_show_unavailable,
+			R.string.settings_show_unavailable_hint, prefs.getShowUnavailable(),
+			new CompoundButton.OnCheckedChangeListener() {
+				@Override
+				public void onCheckedChanged(CompoundButton button, boolean checked) {
+					prefs.setShowUnavailable(checked);
+				}
+			});
+
+		/* ===== 延迟测试配置 =====
+		   测速地址 / 超时 / 节点上限 / 探测超时判定 / 自动重测间隔 / 预加载测速内核，
+		   这些只影响"怎么测延迟"，与订阅本身无关，单独归到一类更清楚。 */
+		addRow(group_latency, R.drawable.ic_routing, R.string.sub_test_url_title,
 			getString(R.string.sub_test_url, prefs.getAutoTestUrl()), R.id.settings_test_url);
-		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_test_timeout,
+		addRow(group_latency, R.drawable.ic_routing, R.string.settings_test_timeout,
 			getString(R.string.sub_test_timeout, prefs.getProxyTestTimeout()), R.id.settings_test_timeout);
 		/* 单个节点（含它所有探测）的**硬性**时间上限。没有它时，一个从不回应的节点
 		   能烧掉约 36 秒，一轮"测速全部"就会慢到看起来卡死。 */
-		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_node_limit,
+		addRow(group_latency, R.drawable.ic_routing, R.string.settings_node_limit,
 			getString(R.string.sub_test_node_limit, prefs.getNodeTestLimit()),
 			R.id.settings_node_limit);
 		/* 探测**完全没有回应**时该怎么算：不可用（默认）还是未测速。做成开关，是因为
 		   否则"所有节点都变不可用"与"内核/桥坏了"这两种情况很难区分。 */
-		addSwitchRow(group_subscription, R.drawable.ic_routing,
+		addSwitchRow(group_latency, R.drawable.ic_routing,
 			R.string.settings_probe_timeout_fail,
 			R.string.settings_probe_timeout_fail_hint, prefs.getProbeTimeoutAsFail(),
 			new CompoundButton.OnCheckedChangeListener() {
@@ -127,11 +150,11 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 					prefs.setProbeTimeoutAsFail(checked);
 				}
 			});
-		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_autosel_interval,
+		addRow(group_latency, R.drawable.ic_routing, R.string.settings_autosel_interval,
 			autoSelectIntervalSubtitle(), R.id.settings_autosel_interval);
-		/* 测速相关开关：未连接时是否预加载无 TUN 的测速内核（以便测真实转发延迟），
+		/* 未连接时是否预加载无 TUN 的测速内核（以便测真实转发延迟），
 		   以及该内核是否携带**全部**节点（忽略国家/地区筛选）。 */
-		addSwitchRow(group_subscription, R.drawable.ic_routing, R.string.settings_preload_core,
+		addSwitchRow(group_latency, R.drawable.ic_routing, R.string.settings_preload_core,
 			R.string.settings_preload_core_hint, prefs.getPreloadCore(),
 			new CompoundButton.OnCheckedChangeListener() {
 				@Override
@@ -140,15 +163,21 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 					CoreTestHost.reset();
 				}
 			});
-		/* 订阅列表是否同时列出"不可用 / 未测速"的节点。 */
-		addSwitchRow(group_subscription, R.drawable.ic_routing, R.string.settings_show_unavailable,
-			R.string.settings_show_unavailable_hint, prefs.getShowUnavailable(),
+
+		/* ===== 备份分组：WebDAV 远程备份 =====
+		   总开关开启**且**填了地址时，"备份可用节点"会传到远端；否则落成本地订阅
+		   （原行为，见 SubscribeActivity.backupAvailableNodes）。 */
+		addSwitchRow(group_backup, R.drawable.ic_subscribe, R.string.settings_webdav,
+			R.string.settings_webdav_hint, prefs.getWebdavEnabled(),
 			new CompoundButton.OnCheckedChangeListener() {
 				@Override
 				public void onCheckedChanged(CompoundButton button, boolean checked) {
-					prefs.setShowUnavailable(checked);
+					prefs.setWebdavEnabled(checked);
+					buildList();
 				}
 			});
+		addRow(group_backup, R.drawable.ic_routing, R.string.settings_webdav_config,
+			webdavConfigSubtitle(), R.id.settings_webdav_config);
 		addRow(group_general, R.drawable.ic_log, R.string.log,
 			logSubtitle(), R.id.settings_log);
 		addRow(group_general, R.drawable.ic_rules, R.string.settings_config,
@@ -611,6 +640,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  editAutoSelectInterval();
 		else if (id == R.id.settings_secret)
 		  showSecretDialog();
+		else if (id == R.id.settings_webdav_config)
+		  showWebdavConfig();
 	}
 
 	/* 运行中隧道的实时快照：真实状态（含启动失败）、所在节点/服务器、以及当前计数器。
@@ -731,6 +762,97 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		if (n <= 8)
 		  return s;
 		return s.substring(0, 4) + "••••••••" + s.substring(n - 4);
+	}
+
+	/* WebDAV 配置弹窗：把地址 / 账号 / 密码 / 目录收进一个页面，并可在存盘前先"测试连接"
+	   （用当前填的值，不必先存盘）。这样设置列表里只占一行（开关 + 配置入口）。 */
+	private void showWebdavConfig() {
+		final View v = getLayoutInflater().inflate(R.layout.dialog_webdav, null);
+		final EditText url = (EditText) v.findViewById(R.id.webdav_url);
+		final EditText user = (EditText) v.findViewById(R.id.webdav_user);
+		final EditText pass = (EditText) v.findViewById(R.id.webdav_pass);
+		final EditText dir = (EditText) v.findViewById(R.id.webdav_dir);
+		final Button testBtn = (Button) v.findViewById(R.id.webdav_test);
+		url.setText(prefs.getWebdavUrl());
+		user.setText(prefs.getWebdavUser());
+		pass.setText(prefs.getWebdavPass());
+		dir.setText(prefs.getWebdavDir());
+
+		final ProgressDialog[] pd = new ProgressDialog[1];
+		testBtn.setOnClickListener(new View.OnClickListener() {
+			@Override public void onClick(View b) {
+				final String u = url.getText().toString().trim();
+				if (u.isEmpty()) {
+					Toast.makeText(SettingsActivity.this, R.string.settings_webdav_need_url,
+						Toast.LENGTH_SHORT).show();
+					return;
+				}
+				if (!isHttpUrl(u)) {
+					Toast.makeText(SettingsActivity.this, R.string.settings_webdav_url_invalid,
+						Toast.LENGTH_SHORT).show();
+					return;
+				}
+				final String us = user.getText().toString().trim();
+				final String pa = pass.getText().toString();
+				final String di = dir.getText().toString().trim();
+				pd[0] = ProgressDialog.show(SettingsActivity.this, null,
+					getString(R.string.settings_webdav_testing), true, false);
+				new Thread(new Runnable() {
+					@Override public void run() {
+						try {
+							final String where = WebDav.test(u, us, pa, di);
+							runOnUiThread(new Runnable() {
+								@Override public void run() {
+									if (pd[0] != null && pd[0].isShowing()) pd[0].dismiss();
+									Toast.makeText(SettingsActivity.this,
+										getString(R.string.settings_webdav_ok, where),
+										Toast.LENGTH_LONG).show();
+								}
+							});
+						} catch (final IOException e) {
+							runOnUiThread(new Runnable() {
+								@Override public void run() {
+									if (pd[0] != null && pd[0].isShowing()) pd[0].dismiss();
+									Toast.makeText(SettingsActivity.this,
+										getString(R.string.settings_webdav_fail, e.getMessage()),
+										Toast.LENGTH_LONG).show();
+								}
+							});
+						}
+					}
+				}).start();
+			}
+		});
+
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.settings_webdav_config)
+			.setView(v)
+			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
+				@Override public void onClick(DialogInterface d, int w) {
+					String u = url.getText().toString().trim();
+					if (!u.isEmpty() && !isHttpUrl(u)) {
+						Toast.makeText(SettingsActivity.this, R.string.settings_webdav_url_invalid,
+							Toast.LENGTH_SHORT).show();
+						return;
+					}
+					prefs.setWebdavUrl(u);
+					prefs.setWebdavUser(user.getText().toString().trim());
+					prefs.setWebdavPass(pass.getText().toString());
+					prefs.setWebdavDir(dir.getText().toString().trim());
+					buildList();
+				}
+			})
+			.setNegativeButton(android.R.string.cancel, null)
+			.show();
+	}
+
+	/* 配置入口那一行下面的副标题：一眼看出开关状态 + 是否已填地址。 */
+	private String webdavConfigSubtitle() {
+		if (!prefs.getWebdavEnabled())
+		  return getString(R.string.settings_webdav_off);
+		if (prefs.getWebdavUrl().isEmpty())
+		  return getString(R.string.settings_webdav_unset);
+		return getString(R.string.settings_webdav_on, prefs.getWebdavUrl());
 	}
 
 	/* clash-api 令牌查看器：只读（可选中手动复制），另有"复制"与"重置"。重置会重新

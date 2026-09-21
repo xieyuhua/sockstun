@@ -18,6 +18,10 @@ public class ClashNode {
 	/* -1 = 从未测过，-2 = 不可达，>=0 = 延迟毫秒数。
 	   由测速线程池写入、UI 线程读取，所以是 volatile。 */
 	public volatile long latency = -1;
+	/* 这个结果属于**哪一轮**测速（TestProgress 的 generation）。只用于"分组快测"去重：
+	   内核已经把这一组并发量过了，那逐个探测那一步直接采用结果，不再占桥一次串行探测。
+	   纯进程内状态，**不参与序列化**。 */
+	public volatile int testedGen = -1;
 	public String name;
 	public String type;
 	public String server;

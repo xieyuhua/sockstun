@@ -49,6 +49,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
@@ -219,6 +220,9 @@ public class SubscribeActivity extends BaseActivity {
 
 	/* 每轮测速只置一次：那个无 TUN 的测速内核已经准备好了。 */
 	private volatile boolean corePrepared = false;
+	/* 本轮要测的范围（"测速全部"开始时定下）。分组快测要把结果回填到这些节点上，
+	   所以留一份给工作线程用；单节点测速时为 null。 */
+	private volatile List<ClashNode> roundScope = null;
 	/* 上一次完整重筛列表的时间。每收到一个结果就把几百行重排一遍，代价比它省下的
 	   等待还大，所以完整刷新做了节流。 */
 	private long lastTestUiUpdate = 0;
@@ -310,6 +314,8 @@ public class SubscribeActivity extends BaseActivity {
 				int id = item.getItemId();
 				if (id == R.id.action_help)
 				  showHelp();
+				else if (id == R.id.action_backup)
+				  backupAvailableNodes();
 				return true;
 			}
 		});
@@ -368,7 +374,14 @@ public class SubscribeActivity extends BaseActivity {
 			new Thread(new Runnable() {
 				@Override
 				public void run() {
-					CoreTestHost.ensureReady(app, prefs);
+					try {
+						CoreTestHost.ensureReady(app, prefs);
+					} catch (Throwable e) {
+						/* 预加载只是"让第一次测速快一点"：任何异常都不能从裸线程里逃出去
+						   —— 工作线程的未捕获异常会直接杀掉进程。按需加载那条路仍在，
+						   点「测速」时会重新尝试。 */
+						TProxyService.log("测速: 预加载测试内核失败 " + e);
+					}
 				}
 			}, "test-core-preload").start();
 		}
@@ -685,6 +698,8 @@ public class SubscribeActivity extends BaseActivity {
 		/* 已知最快的先测：节点有几百个时预算**一定**会用完，这样用户关心的节点能先
 		   拿到结果。 */
 		Collections.sort(toTest, latencyComparator);
+		/* 分组快测要把结果回填到节点上，所以把这轮的范围留给工作线程。 */
+		roundScope = toTest;
 		/* 启动这个**进程级**的测速轮次。它是**异步**的：离开本页、甚至本 Activity 被
 		   重建，都不会让它停下；用户回来时进度仍在。 */
 		final int gen = TestProgress.begin(toTest.size(),
@@ -801,10 +816,8 @@ public class SubscribeActivity extends BaseActivity {
 
 	/* 加载/刷新那个无 TUN 的测速内核，好让延迟测试用上内核的**真实转发**延迟。
 	   本进程里有可用的测速内核时返回 true。跑在线程池的线程上（加载内核要花点时间）。
-	   Always used - connected or not - because it is the only path whose node
-	   pool is rebuilt from the CURRENT country filter: the tunnel core's pool is
-	   baked in at connect time, so after switching country chip it would no
-	   longer match the list. */
+	   **连不连 VPN 都走它**：只有它的节点池是按**当前**国家筛选重建的；隧道内核的池是
+	   连接那一刻烘焙进去的，换过国家标签之后就和列表对不上了。 */
 	private boolean prepareTestCore() {
 		try {
 			boolean ok = CoreTestHost.ensureReady(this, prefs);
@@ -866,9 +879,58 @@ public class SubscribeActivity extends BaseActivity {
 		}
 	}
 
+	/* 分组快测（见 CoreTestHost.testGroups）：让内核**并发**拨测整池 —— 一次调用拿回
+	   一整组的延迟。桥只允许一个在途回调，所以逐节点探测天然串行（一轮≈各节点之和）；
+	   这一步能把"大多数活着的节点"用几秒到几十秒一次量完，剩下的（失败 / 未命中 /
+	   内核不支持分组）仍旧走原来的逐节点流程。
+
+	   关键：这里**只补充"可用"结论** —— 不写任何"不可用"，所以判定口径与结果语义
+	   跟以前完全一致，只是省掉了大部分串行探测。 */
+	private void fastGroupPhase(int gen, boolean coreOk) {
+		List<ClashNode> scope = roundScope;
+		if (!coreOk || scope == null || scope.isEmpty())
+		  return;
+		/* 快测组只存在于**测试内核**里；走隧道内核（REST）时没有它们。 */
+		int probeMs = Math.min(prefs.getProxyTestTimeout() * 1000, 5000);
+		long t0 = System.currentTimeMillis();
+		java.util.Map<String, Long> hits =
+			CoreTestHost.testGroups(prefs.getAutoTestUrl(), probeMs, gen);
+		if (hits == null || hits.isEmpty()) {
+			TProxyService.log("测速: 分组快测没拿到结果 → 全部走逐个探测");
+			return;
+		}
+		int matched = 0;
+		int coreFailed = 0;
+		for (ClashNode n : scope) {
+			if (!TestProgress.isCurrent(gen))
+			  break;
+			/* 组里的成员名是内核配置里的名字（可能被去重成 "name (2)"），所以先用
+			   现有的映射把它换出来；换不到再按原名试一次。 */
+			String key = realNodeName(n);
+			Long d = hits.get(key == null ? n.name : key);
+			if (d == null)
+			  d = hits.get(n.name);
+			if (d == null)
+			  continue;
+			if (d <= 0) {
+				/* 内核自己判为失败（0 = 该成员的组健康检查没过）。**不**据此写结论 ——
+				   组的期望状态码与 testDelay 的口径不完全一致，这里只统计个数，让下面的
+				   日志能说清"剩下的串行尾巴有多长"。 */
+				coreFailed++;
+				continue;
+			}
+			n.latency = d;
+			n.testedGen = gen;
+			matched++;
+		}
+		TProxyService.log("测速: 分组快测命中 " + matched + "/" + scope.size() + " 个节点 · 耗时 "
+			+ (System.currentTimeMillis() - t0) + "ms · 内核判为失败待复核 " + coreFailed
+			+ " 个（它们仍会逐个探测；判定口径不变）");
+	}
+
 	/* batch = 属于"测速全部"；gen = 这个节点所属的轮次，这样失联轮次残留的活儿会自己停下。 */
 	private void testNode(final ClashNode n, final boolean batch, final int gen) {
-		testPool.execute(new Runnable() {
+		Runnable task = new Runnable() {
 			@Override
 			public void run() {
 				/* 这一轮可能已经结束了（预算耗尽、看门狗收尾，或被新的一轮替换掉）：
@@ -888,6 +950,11 @@ public class SubscribeActivity extends BaseActivity {
 							   一次性闩锁，抢跑它们正是"单节点测速好好的、测速全部全废"
 							   的原因。 */
 							delaySelfTest(coreOk);
+							/* 内核就绪后先做一次**分组快测**：让内核并发把整池量一遍
+							   （一次调用一组），比逐节点串行探测快一个数量级。它只补充
+							   "可用"结论，失败/未命中的节点照旧走逐个探测。 */
+							if (batch)
+							  fastGroupPhase(gen, coreOk);
 							corePrepared = true;
 							/* 要记一行，因为这是用户眼中"什么都没发生"的**死时间**：
 							   加载 + 应用配置（几百个节点）再加上自检探测。 */
@@ -902,7 +969,11 @@ public class SubscribeActivity extends BaseActivity {
 				   或该节点不在已加载的配置里），就让它保持"未验证"（-1），而不是
 				   "不可用"。 */
 				long probeT0 = System.currentTimeMillis();
-				Long real = expired ? null : proxyDelayMs(n);
+				/* 分组快测（见 fastGroupPhase）已经量过这个节点就直接采用它的结果 ——
+				   同样是内核自己测出的真实转发延迟，只是由内核并发完成，不占桥的串行槽位。 */
+				Long real = (n.testedGen == gen && n.latency >= 0)
+					? Long.valueOf(n.latency)
+					: (expired ? null : proxyDelayMs(n));
 				long probeCost = System.currentTimeMillis() - probeT0;
 				if (!expired) {
 					probeCount.incrementAndGet();
@@ -950,29 +1021,36 @@ public class SubscribeActivity extends BaseActivity {
 							lastSavedDone = doneNow;
 							saveNodes();
 						}
-						if (isFinishing() || isDestroyed())
-						  return;               /* 已经没有页面需要重绘了 */
-						updateTestProgress();
-						if (batch) {
-							/* 每出一个结果就显示一个；而完整重筛（含排序）做了节流。 */
-							long now = System.currentTimeMillis();
-							if (now - lastTestUiUpdate >= 400) {
-								lastTestUiUpdate = now;
-								applyView();
-							} else {
-								adapter.notifyDataSetChanged();
-								updateStats();
+						/* 页面可能已经销毁（切页时这一轮还在跑）：**进程级**收尾不能因此
+						   跳过，见下面 releasePass() 的说明。 */
+						final boolean pageGone = isFinishing() || isDestroyed();
+						if (!pageGone) {
+							updateTestProgress();
+							if (batch) {
+								/* 每出一个结果就显示一个；而完整重筛（含排序）做了节流。 */
+								long now = System.currentTimeMillis();
+								if (now - lastTestUiUpdate >= 400) {
+									lastTestUiUpdate = now;
+									applyView();
+								} else {
+									adapter.notifyDataSetChanged();
+									updateStats();
+								}
 							}
-							if (TestProgress.pending() > 0)
-							  return;
 						}
+						if (TestProgress.pending() > 0)
+						  return;               /* 还有节点没报完 */
+						/* 最后一个节点已上报：**不管页面还在不在**都要把这一轮收干净 ——
+						   releasePass() 会恢复 CoreTestHost 的日志级别并清掉进程级的 RUNNING
+						   标记；少了它，下次进页面会被"上一轮还没结束"挡住，而且之后的测速
+						   也不再写逐节点日志（那是排查问题的唯一线索）。 */
 						saveNodes();
+						releasePass();
+						if (pageGone)
+						  return;               /* 页面没了：下面全是重绘与提示 */
 						refreshCountryChips();
 						refreshProtoFilterSpinner();
 						applyView();
-						/* 最后一个节点已上报：这一轮结束了，放开让下一轮可以开始
-						   （并恢复正常日志级别）。 */
-						releasePass();
 						updateTestProgress();
 						if (batch) {
 							int ok = 0;
@@ -1012,19 +1090,24 @@ public class SubscribeActivity extends BaseActivity {
 									+ "「无响应」（按设置判为不可用）——整轮无一节点有过响应，"
 									+ "通常是内核/桥异常，而不是所有节点都死了；"
 									+ "看上面的 bridge/delay 行确认");
-								Toast.makeText(SubscribeActivity.this,
+								if (!pageGone)
+								  Toast.makeText(SubscribeActivity.this,
 									R.string.sub_test_all_timeout, Toast.LENGTH_LONG).show();
-							} else if (ok == 0 && bad == 0 && un > 0)
-							  Toast.makeText(SubscribeActivity.this,
-								R.string.sub_test_no_core, Toast.LENGTH_LONG).show();
-							else if (missing > 0)
-							  Toast.makeText(SubscribeActivity.this,
-								getString(R.string.sub_test_missing_nodes, missing),
-								Toast.LENGTH_LONG).show();
-							else if (skipped > 0)
-							  Toast.makeText(SubscribeActivity.this,
-								getString(R.string.sub_test_budget_out, skipped),
-								Toast.LENGTH_LONG).show();
+							} else if (ok == 0 && bad == 0 && un > 0) {
+								if (!pageGone)
+								  Toast.makeText(SubscribeActivity.this,
+									R.string.sub_test_no_core, Toast.LENGTH_LONG).show();
+							} else if (missing > 0) {
+								if (!pageGone)
+								  Toast.makeText(SubscribeActivity.this,
+									getString(R.string.sub_test_missing_nodes, missing),
+									Toast.LENGTH_LONG).show();
+							} else if (skipped > 0) {
+								if (!pageGone)
+								  Toast.makeText(SubscribeActivity.this,
+									getString(R.string.sub_test_budget_out, skipped),
+									Toast.LENGTH_LONG).show();
+							}
 						}
 					}
 				});
@@ -1036,16 +1119,37 @@ public class SubscribeActivity extends BaseActivity {
 						|| GeoIp.UNKNOWN.equals(n.country)))
 				  resolveCountryAsync(n);
 			}
-		});
+		};
+		/* 提交必须防一手：页面销毁时 onDestroy() 会 shutdownNow() 掉这个池，而**正在
+		   跑的**任务仍会走到这里（以及 resolveCountryAsync 里的 geoPool）。往已关闭的池
+		   提交会抛 RejectedExecutionException —— 它是 RuntimeException，无论从主线程还是
+		   从工作线程逃出去都是**进程级未捕获异常**，直接闪退。这正是"测速全部时切到别的
+		   页面就闪退"的原因，所以这里必须接住。 */
+		try {
+			testPool.execute(task);
+		} catch (Throwable e) {
+			TProxyService.log("测速: 任务被拒（线程池已关闭，页面已销毁）→ 跳过节点 "
+				+ n.name + " · " + e);
+		}
 	}
 
 	/* 在专用的解析线程上解析一个节点的国别，得到结果后再重绘，
 	   这样刚测完这个节点的工作线程能立刻去测下一个。 */
 	private void resolveCountryAsync(final ClashNode n) {
-		geoPool.execute(new Runnable() {
+		Runnable task = new Runnable() {
 			@Override
 			public void run() {
-				final String cc = GeoIp.countryOf(prefs, n.server, true);
+				String resolved;
+				try {
+					resolved = GeoIp.countryOf(prefs, n.server, true);
+				} catch (Throwable e) {
+					/* 解析线程被 shutdownNow() 中断、或 DNS / HTTP 层抛出意外异常：
+					   国别只是装饰（国旗 + 标签），绝不该让工作线程的未捕获异常把整个
+					   进程带走。 */
+					TProxyService.log("测速: 国别解析异常 " + e + " host=" + n.server);
+					return;
+				}
+				final String cc = resolved;
 				if (cc == null || cc.isEmpty() || GeoIp.UNKNOWN.equals(cc)
 						|| cc.equals(n.country))
 				  return;
@@ -1069,7 +1173,145 @@ public class SubscribeActivity extends BaseActivity {
 					}
 				});
 			}
-		});
+		};
+		try {
+			geoPool.execute(task);
+		} catch (Throwable e) {
+			/* geoPool 已被 onDestroy 关闭：丢掉这次解析即可 —— 国别下次进页面会重新解析
+			   或用缓存，没有任何损失，但让异常逃出去就是一次闪退。 */
+		}
+	}
+
+	/* 把所有可用节点（延迟 >= 0，跨全部订阅）备份。目的地分两种：
+	   - WebDAV 已配置（开关开**且**填了地址）→ 上传到远端（见 WebDav.uploadBackup）；
+	     远端失败则回退到本地订阅，免得数据丢了。
+	   - 否则 → 落一条本地订阅（原行为）：节点各自的原始 clash 块，不依赖机场地址，
+	     默认停用以免和来源订阅合并后节点翻倍。 */
+	private void backupAvailableNodes() {
+		List<ClashNode> available = new ArrayList<ClashNode>();
+		for (ClashNode n : nodes)
+		  if (n.latency >= 0)
+			available.add(n);
+		if (available.isEmpty()) {
+			Toast.makeText(this, R.string.backup_empty, Toast.LENGTH_LONG).show();
+			return;
+		}
+		StringBuilder sb = new StringBuilder("proxies:\n");
+		List<ClashNode> kept = new ArrayList<ClashNode>();
+		int missed = 0;
+		for (ClashNode n : available) {
+			String raw = findRawProxy(n);
+			if (raw == null || raw.isEmpty()) {
+				missed++;
+				continue;
+			}
+			sb.append(raw).append('\n');
+			kept.add(n);
+		}
+		if (kept.isEmpty()) {
+			Toast.makeText(this, R.string.backup_failed, Toast.LENGTH_LONG).show();
+			return;
+		}
+		String name = getString(R.string.backup_name,
+			new java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
+				.format(new java.util.Date()));
+		if (prefs.webdavReady()) {
+			uploadBackupRemote(sb.toString(), kept, missed, name);
+		} else {
+			/* 本地备份：存好后直接问要不要"用它覆盖当前订阅"，把"备份 → 恢复"一步走完。 */
+			final String id = Subscription.newId();
+			saveBackupLocal(sb.toString(), id, name, kept, missed);
+			offerApplyBackup(id, name, kept.size());
+		}
+	}
+
+	/* 本地备份刚存好：问用户是"仅保存"还是"应用此备份（覆盖当前订阅）"。 */
+	private void offerApplyBackup(final String id, final String name, final int count) {
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.backup_apply_title)
+			.setMessage(getString(R.string.backup_apply_msg, name, count))
+			.setPositiveButton(R.string.backup_apply, new DialogInterface.OnClickListener() {
+				@Override public void onClick(DialogInterface d, int w) {
+					applyLocalOverride(id, name);
+				}
+			})
+			.setNegativeButton(R.string.backup_apply_save_only, null)
+			.show();
+	}
+
+	/* 用某条本地备份覆盖当前订阅：启用它、停用其它订阅，于是节点池只由它提供。
+	   运行中的隧道若已连接，立即重建配置让覆盖生效。 */
+	private void applyLocalOverride(String subId, String name) {
+		List<Subscription> list = prefs.getSubscriptions();
+		for (Subscription s : list)
+		  s.enabled = s.id.equals(subId);
+		prefs.setSubscriptions(list);
+		if (prefs.getEnable()) {
+			Intent i = new Intent(this, TProxyService.class);
+			i.setAction(TProxyService.ACTION_RECONNECT);
+			startService(i);
+		}
+		Toast.makeText(this, getString(R.string.backup_applied, name), Toast.LENGTH_LONG).show();
+	}
+
+	/* 本地备份：原行为。把可用节点存成一条默认停用的本地订阅，并顺手写好节点缓存
+	   （副本，不入 subId 改动页面的标签），让「订阅配置」立刻显示 "本地内容 · N 个节点"。 */
+	private void saveBackupLocal(String yml, String id, String name, List<ClashNode> kept, int missed) {
+		List<Subscription> list = prefs.getSubscriptions();
+		list.add(new Subscription(id, name, "", false, true));
+		prefs.setSubscriptions(list);
+		prefs.setSubRaw(id, yml);
+		/* 顺手存好节点缓存（**副本**，不拿页面上的对象去改 subId —— 那会让列表里的
+		   "来自哪份订阅"标签跟着变），这样在「订阅配置」里立刻显示 "本地内容 · N 个节点"，
+		   不必先启用再拉取。 */
+		List<ClashNode> copies = new ArrayList<ClashNode>();
+		for (ClashNode n : kept) {
+			ClashNode c = new ClashNode(n.name, n.type, n.server, n.port, n.username, n.password);
+			c.country = n.country;
+			c.latency = n.latency;
+			c.subId = id;
+			copies.add(c);
+		}
+		prefs.setSubNodes(id, ClashNode.encode(copies));
+		TProxyService.log("订阅备份: 已备份 " + kept.size() + " 个可用节点"
+			+ (missed > 0 ? ("（" + missed + " 个因订阅原文里找不到被跳过）") : "")
+			+ " · " + name);
+		Toast.makeText(this, missed > 0
+			? getString(R.string.backup_done_skipped, kept.size(), missed)
+			: getString(R.string.backup_done, kept.size()), Toast.LENGTH_LONG).show();
+	}
+
+	/* 远程备份：工作线程上传到 WebDAV；失败则回退本地并提示（避免数据丢失）。
+	   成功时**只**传远端、不写本地订阅 —— 否则两端各一份、列表里会重复。 */
+	private void uploadBackupRemote(final String yml, final List<ClashNode> kept,
+			final int missed, final String name) {
+		Toast.makeText(this, R.string.backup_uploading, Toast.LENGTH_SHORT).show();
+		new Thread(new Runnable() {
+			@Override public void run() {
+				try {
+					final String fileName = WebDav.uploadBackup(prefs, yml);
+					runOnUiThread(new Runnable() {
+						@Override public void run() {
+							TProxyService.log("订阅备份: 已上传 " + kept.size() + " 个可用节点到 WebDAV · "
+								+ fileName + (missed > 0 ? ("（" + missed + " 个被跳过）") : ""));
+							Toast.makeText(SubscribeActivity.this,
+								getString(R.string.backup_upload_done, fileName, kept.size()),
+								Toast.LENGTH_LONG).show();
+						}
+					});
+				} catch (final IOException e) {
+					/* 回退：远端没存成，先把本地订阅建好，再告诉用户远端失败了。 */
+					runOnUiThread(new Runnable() {
+						@Override public void run() {
+							saveBackupLocal(yml, Subscription.newId(), name, kept, missed);
+							Toast.makeText(SubscribeActivity.this,
+								getString(R.string.backup_upload_failed, e.getMessage()),
+								Toast.LENGTH_LONG).show();
+						}
+					});
+				}
+			}
+		}).start();
 	}
 
 	/* 订阅节点的长按菜单：把它加入手动服务器列表 —— 可以只保存，也可以保存并设为当前

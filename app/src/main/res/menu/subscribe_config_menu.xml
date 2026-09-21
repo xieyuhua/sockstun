@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 订阅配置页的溢出菜单：导入（base64 / 备份文本）与两种"复制全部"。
+     备份/导入产生的都是**本地订阅**（Subscription.local），不依赖机场地址。 -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+	<item
+		android:id="@+id/action_import"
+		android:title="@string/subs_import"/>
+	<item
+		android:id="@+id/action_import_webdav"
+		android:title="@string/subs_import_webdav"/>
+	<item
+		android:id="@+id/action_copy_urls"
+		android:title="@string/subs_copy_all_url"/>
+	<item
+		android:id="@+id/action_copy_nodes"
+		android:title="@string/subs_copy_all_nodes"/>
+</menu>

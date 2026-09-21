@@ -9,10 +9,14 @@
 
 package com.tunvpn;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Spinner;
@@ -37,6 +41,7 @@ public class ServerEditActivity extends BaseActivity {
 	private Spinner spinner_type;
 	private EditText edit_raw;
 	private LinearLayout socksFields;
+	private LinearLayout rawActions;
 	private TextInputLayout rawLayout;
 
 	/* 第 0 项是 SOCKS5（原来的行为）；其余是用 edit_raw 里的原始 YAML 块录入的
@@ -73,6 +78,23 @@ public class ServerEditActivity extends BaseActivity {
 		edit_raw = (EditText) findViewById(R.id.server_raw);
 		socksFields = (LinearLayout) findViewById(R.id.server_socks_fields);
 		rawLayout = (TextInputLayout) findViewById(R.id.server_raw_layout);
+		rawActions = (LinearLayout) findViewById(R.id.server_raw_actions);
+
+		((Button) findViewById(R.id.server_copy_json)).setOnClickListener(
+			new View.OnClickListener() {
+				@Override
+				public void onClick(View v) { copyAsJson(); }
+			});
+		((Button) findViewById(R.id.server_copy_clash)).setOnClickListener(
+			new View.OnClickListener() {
+				@Override
+				public void onClick(View v) { copyAsClash(); }
+			});
+		((Button) findViewById(R.id.server_paste)).setOnClickListener(
+			new View.OnClickListener() {
+				@Override
+				public void onClick(View v) { pasteFromClipboard(); }
+			});
 
 		ArrayAdapter<String> typeAdapter = new ArrayAdapter<String>(this,
 			android.R.layout.simple_spinner_item, TYPES);
@@ -109,6 +131,8 @@ public class ServerEditActivity extends BaseActivity {
 		boolean socks = "socks5".equals(type);
 		socksFields.setVisibility(socks ? View.VISIBLE : View.GONE);
 		rawLayout.setVisibility(socks ? View.GONE : View.VISIBLE);
+		/* 复制 / 粘贴按钮只在"节点配置"可见时出现（SOCKS5 没有 raw）。 */
+		rawActions.setVisibility(socks ? View.GONE : View.VISIBLE);
 		if (!socks && edit_raw.getText().toString().trim().isEmpty())
 		  edit_raw.setText(templateFor(type));
 	}
@@ -133,6 +157,58 @@ public class ServerEditActivity extends BaseActivity {
 			return "- {name: \"\", type: ss, server: \"\", port: 443, "
 				+ "cipher: \"aes-256-gcm\", password: \"\"}";
 		return "";
+	}
+
+	/* 把当前"节点配置"一键复制成 JSON（clash flow map → JSON 对象）。 */
+	private void copyAsJson() {
+		String json = NodeFormat.toJson(edit_raw.getText().toString());
+		if (json == null) {
+			Toast.makeText(this, R.string.server_parse_failed, Toast.LENGTH_LONG).show();
+			return;
+		}
+		copyText("node-json", json);
+	}
+
+	/* 把当前"节点配置"一键复制成 clash 格式（已是 clash，规整成单行 flow map）。 */
+	private void copyAsClash() {
+		String clash = NodeFormat.toClash(edit_raw.getText().toString());
+		if (clash == null)
+		  clash = edit_raw.getText().toString();
+		copyText("node-clash", clash);
+	}
+
+	/* 从剪贴板粘贴：JSON 自动转成 clash flow map；clash 原样填入。 */
+	private void pasteFromClipboard() {
+		ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+		if (cm == null || !cm.hasPrimaryClip()) {
+			Toast.makeText(this, R.string.server_paste_empty, Toast.LENGTH_SHORT).show();
+			return;
+		}
+		CharSequence cs = cm.getPrimaryClip().getItemAt(0).getText();
+		if (cs == null || cs.toString().trim().isEmpty()) {
+			Toast.makeText(this, R.string.server_paste_empty, Toast.LENGTH_SHORT).show();
+			return;
+		}
+		String text = cs.toString().trim();
+		if (NodeFormat.looksLikeJson(text)) {
+			String clash = NodeFormat.toClash(text);
+			if (clash == null) {
+				Toast.makeText(this, R.string.server_parse_failed, Toast.LENGTH_LONG).show();
+				return;
+			}
+			edit_raw.setText(clash);
+			Toast.makeText(this, R.string.server_paste_json_done, Toast.LENGTH_SHORT).show();
+		} else {
+			edit_raw.setText(text);
+			Toast.makeText(this, R.string.server_paste_clash_done, Toast.LENGTH_SHORT).show();
+		}
+	}
+
+	private void copyText(String label, String text) {
+		ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+		if (cm != null)
+		  cm.setPrimaryClip(ClipData.newPlainText(label, text));
+		Toast.makeText(this, R.string.server_copied, Toast.LENGTH_SHORT).show();
 	}
 
 	private void load() {

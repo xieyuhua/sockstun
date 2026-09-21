@@ -17,4 +17,11 @@
 	<item name="settings_node_limit" type="id"/>
 	<item name="settings_autosel_interval" type="id"/>
 	<item name="settings_secret" type="id"/>
+	<item name="settings_webdav" type="id"/>
+	<item name="settings_webdav_config" type="id"/>
+	<item name="settings_webdav_url" type="id"/>
+	<item name="settings_webdav_user" type="id"/>
+	<item name="settings_webdav_pass" type="id"/>
+	<item name="settings_webdav_dir" type="id"/>
+	<item name="settings_webdav_test" type="id"/>
 </resources>
