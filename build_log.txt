@@ -1,5 +1,0 @@
-Starting a Gradle Daemon, 4 stopped Daemons could not be reused, use --status for details
-Checking the license for package Android SDK Build-Tools 34 in D:\Android\Sdk  \licenses
-Warning: License for package Android SDK Build-Tools 34 not accepted.
-Checking the license for package Android SDK Platform 34 in D:\Android\Sdk  \licenses
-Warning: License for package Android SDK Platform 34 not accepted.
