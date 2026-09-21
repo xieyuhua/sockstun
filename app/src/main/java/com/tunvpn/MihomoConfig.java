@@ -589,50 +589,54 @@ public class MihomoConfig {
 		  sb.append("      - \"").append(escapeYaml(m)).append("\"\n");
 	}
 
-	/* 手动配置的服务器所需的最小上游。SOCKS5 仍走原来的表单式生成；其它协议则表示
-	   用户贴的是**原始 clash 节点块**，我们原样输出、并让 select 组指向它 —— 真正的
-	   协议处理由内嵌的 mihomo 内核完成。 */
+	/* 手动配置的服务器所需的最小上游。**有原始节点块就用它**（整块原样输出，协议交给
+	   内嵌的 mihomo 处理，select 组指向块里的 name）；只有 SOCKS5 那种"仅地址+端口"
+	   的条目才用表单拼。 */
 	private static String manualSocksConfig(Preferences prefs, SocksServer s) throws IOException {
-		String type = (s.type == null || s.type.isEmpty()) ? "socks5" : s.type;
-		if ("socks5".equals(type)) {
-			String addr = s.addr == null ? "" : s.addr.trim();
-			if (addr.isEmpty())
-			  throw new IOException("SOCKS5 server address is empty");
-
+		/* 分支看的是**有没有原始节点块**，而不是协议名：协议名只是列表上显示的标签，
+		   可能是空的、写法也可能与订阅里不同。以前按 `type == "socks5"` 判断，而
+		   `SocksServer` 的构造函数会把空的 type 补成 "socks5" —— 于是从订阅里长按加入
+		   的节点一旦没解析出 type，它的**原始块会被整块丢掉**，改发一个"地址端口都对、
+		   协议却写成 socks5"的节点，那种节点永远连不上。 */
+		String raw = s.raw == null ? "" : s.raw.trim();
+		if (!raw.isEmpty()) {
+			String nodeName = nodeNameFromRaw(raw);
 			StringBuilder sb = new StringBuilder();
-			sb.append("proxies:\n");
-			sb.append("  - {name: \"socks5\", type: socks5, server: ").append(addr)
-				.append(", port: ").append(s.port)
-				.append(", udp: true");
-			if (s.user != null && !s.user.isEmpty())
-			  sb.append(", username: \"").append(s.user).append("\"");
-			if (s.pass != null && !s.pass.isEmpty())
-				sb.append(", password: \"").append(s.pass).append("\"");
-			sb.append("}\n");
+			String proxiesText = emitRawProxy(raw);
+			sb.append(proxiesText);
 			sb.append("proxy-groups:\n");
-			sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [\"socks5\"]}\n");
+			sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [\"")
+				.append(escapeYaml(nodeName)).append("\"]}\n");
 			sb.append("rules:\n");
 			appendRules(sb, prefs);
-			lastBuiltNodes = 1;   /* 这一段只产出一个节点（见 lastBuiltNodes） */
+			/* 用户可能贴的就是**整段** `proxies:` 列表，所以节点数要数一下 —— 不过这里只
+			   数这一小段节点文本（不含分组与规则），而非整份配置。 */
+			lastBuiltNodes = ClashParser.extractProxies(proxiesText).size();
 			return sb.toString();
 		}
 
-		String raw = s.raw == null ? "" : s.raw.trim();
-		if (raw.isEmpty())
+		/* 没有原始块：只有 SOCKS5 拼得出来，其它协议在这里就是"配置缺失"。 */
+		if (!s.isSocks())
 		  throw new IOException("节点配置为空，请填写 clash 格式的节点定义");
-		String nodeName = nodeNameFromRaw(raw);
+		String addr = s.addr == null ? "" : s.addr.trim();
+		if (addr.isEmpty())
+		  throw new IOException("SOCKS5 server address is empty");
 
 		StringBuilder sb = new StringBuilder();
-		String proxiesText = emitRawProxy(raw);
-		sb.append(proxiesText);
+		sb.append("proxies:\n");
+		sb.append("  - {name: \"socks5\", type: socks5, server: ").append(addr)
+			.append(", port: ").append(s.port)
+			.append(", udp: true");
+		if (s.user != null && !s.user.isEmpty())
+		  sb.append(", username: \"").append(s.user).append("\"");
+		if (s.pass != null && !s.pass.isEmpty())
+			sb.append(", password: \"").append(s.pass).append("\"");
+		sb.append("}\n");
 		sb.append("proxy-groups:\n");
-		sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [\"")
-			.append(escapeYaml(nodeName)).append("\"]}\n");
+		sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [\"socks5\"]}\n");
 		sb.append("rules:\n");
 		appendRules(sb, prefs);
-		/* 用户可能贴的就是**整段** `proxies:` 列表，所以节点数要数一下 —— 不过这里只
-		   数这一小段节点文本（不含分组与规则），而非整份配置。 */
-		lastBuiltNodes = ClashParser.extractProxies(proxiesText).size();
+		lastBuiltNodes = 1;   /* 这一段只产出一个节点（见 lastBuiltNodes） */
 		return sb.toString();
 	}
 
@@ -652,26 +656,43 @@ public class MihomoConfig {
 
 	/* 把用户粘贴的 clash 节点块包装成合法的 "proxies:" 段。如果用户贴的就是整段
 	   "proxies:" 列表，就原样保留；否则包装成单个节点块。已经以 "- " 开头的块按
-	   列表条目保留（**不能**再补一个短横线，否则 mihomo 看到的是 "  - - {...}"）。 */
+	   列表条目保留（**不能**再补一个短横线，否则 mihomo 看到的是 "  - - {...}"）。
+
+	   续行必须保留**相对缩进**：整块按第一行的内容列重新对齐，每个续行的相对深度
+	   原样平移。以前是每行都 trim 后统一补 4 个空格，于是 reality-opts、ws-opts、
+	   grpc-opts、headers 这些**嵌套映射**会被压平成同级兄弟键（public-key / path /
+	   Host 变成节点的直接字段），内核要么直接报配置错误，要么静默丢掉这些参数 ——
+	   表现就是"手动加进来的节点看着在，但怎么都连不上"。而这正是从订阅里
+	   「长按 → 加入服务器列表」最常搬过来的那类节点。 */
 	private static String emitRawProxy(String raw) {
 		if (raw.startsWith("proxies:"))
 		  return raw + "\n";
 		String[] lines = raw.split("\\r?\\n");
 		StringBuilder sb = new StringBuilder("proxies:\n");
 		boolean first = true;
+		int contentCol = 0;   /* 第一行**内容**所在的列，续行按它算相对缩进 */
 		for (String ln : lines) {
-			String t = ln.trim();
-			if (t.isEmpty())
+			if (ln.trim().isEmpty())
 			  continue;
+			int indent = 0;
+			while (indent < ln.length() && ln.charAt(indent) == ' ')
+			  indent++;
+			String t = ln.trim();
 			if (first) {
-				if (t.startsWith("-"))
-				  sb.append("  ").append(t).append('\n');
-				else
-				  sb.append("  - ").append(t).append('\n');
+				/* 已经是列表条目（"- " 开头）就只补到 "  - "，**不能**再加一个短横线。 */
+				boolean dash = t.startsWith("- ");
+				sb.append("  - ").append(dash ? t.substring(2).trim() : t).append('\n');
+				contentCol = dash ? indent + 2 : indent;
 				first = false;
-			} else {
-				sb.append("    ").append(t).append('\n');
+				continue;
 			}
+			int rel = indent - contentCol;
+			if (rel < 0)
+			  rel = 0;
+			sb.append("    ");           /* 续行落在内容列（第 4 列） */
+			for (int i = 0; i < rel; i++)
+			  sb.append(' ');
+			sb.append(t).append('\n');
 		}
 		return sb.toString();
 	}

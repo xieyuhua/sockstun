@@ -1108,6 +1108,12 @@ public class SubscribeActivity extends BaseActivity {
 			boolean socks = "socks5".equals(n.type == null ? "" : n.type);
 			String raw = socks ? "" : findRawProxy(n);
 			if (!socks && (raw == null || raw.isEmpty())) {
+				/* 失败要说清是**哪一步**失败（订阅原文里找不到这一段）。日志里带上
+				   subId 与原文长度，好区分"订阅没拉取/被清空"和"节点名对不上"。 */
+				String src = prefs.getSubRaw(n.subId);
+				TProxyService.log("服务器: 无法还原节点「" + n.name + "」的原始定义 · type="
+					+ n.type + " · subId=" + n.subId + " · 该订阅原文="
+					+ (src == null ? "缺失" : src.length() + " 字节"));
 				Toast.makeText(this, R.string.sub_add_to_server_failed, Toast.LENGTH_LONG).show();
 				return;
 			}
@@ -1115,6 +1121,11 @@ public class SubscribeActivity extends BaseActivity {
 				n.username, n.password, socks ? "socks5" : n.type, raw);
 			list.add(existing);
 			prefs.setSocksServers(list);
+			/* 记一行：在 设置 → 日志 里能确认这一步到底搬走了什么 ——
+			   原始块 0 字节 = 按 SOCKS5 表单收的，非 0 = 整块原样搬运。 */
+			TProxyService.log("服务器: 已加入「" + n.name + "」（type="
+				+ (socks ? "socks5" : n.type) + "，原始块 "
+				+ (raw == null ? 0 : raw.length()) + " 字节）");
 		}
 		if (!enableNow) {
 			Toast.makeText(this, getString(R.string.sub_add_to_server, n.name),
@@ -1762,6 +1773,9 @@ public class SubscribeActivity extends BaseActivity {
 		MaterialCardView card;
 		TextView flag, name, detail, proto, source, status, badge;
 		Button use, test;
+		/* 这一行当前绑定的节点。行的长按要用它 —— **不能**把节点挂在 card 的 tag 上：
+		   card 就是 convertView，它的 tag 已经被 ViewHolder（本类）占用了。 */
+		ClashNode node;
 	}
 
 	private class NodeAdapter extends ArrayAdapter<ClashNode> {
@@ -1826,6 +1840,25 @@ public class SubscribeActivity extends BaseActivity {
 						  startSingleTest(node);
 					}
 				});
+				/* 行本身也挂一份长按（菜单与 ListView 的那份完全相同，见 onCreate）：
+				   两个按钮会吃掉落在它们身上的触摸，落在卡片空白处才轮到 ListView；而
+				   一旦卡片被主题样式设成 clickable，整行的触摸都会由卡片消费，ListView
+				   的 OnItemLongClickListener 就永远不触发 —— 症状正是"长按没反应"。
+				   两条路都通向同一个菜单，多挂一份没有副作用。 */
+				r.card.setOnLongClickListener(new View.OnLongClickListener() {
+					@Override
+					public boolean onLongClick(View v) {
+						/* 节点从 ViewHolder 里取（见 Row.node），不是从 tag —— card 的
+						   tag 存的就是这个 Row 本身。 */
+						Object t = v.getTag();
+						if (t instanceof Row) {
+							ClashNode node = ((Row) t).node;
+							if (node != null)
+							  showNodeMenu(node);
+						}
+						return true;
+					}
+				});
 				convertView.setTag(r);
 			} else {
 				r = (Row) convertView.getTag();
@@ -1833,6 +1866,7 @@ public class SubscribeActivity extends BaseActivity {
 			final ClashNode n = getItem(position);
 			r.use.setTag(n);
 			r.test.setTag(n);
+			r.node = n;
 
 			String cc = countryCode(n);
 			r.flag.setText(Country.flag(cc));
