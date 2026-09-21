@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Compact spinner item: the sort / filter row is meant to stay small. -->
+<!-- 紧凑的下拉项：排序 / 筛选那一行要保持小巧。 -->
 <TextView xmlns:android="http://schemas.android.com/apk/res/android"
 	android:id="@android:id/text1"
 	android:layout_width="match_parent"

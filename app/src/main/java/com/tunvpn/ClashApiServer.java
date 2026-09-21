@@ -1,13 +1,11 @@
 /*
  ============================================================================
- Name        : ClashApiServer.java
- Description : A tiny loopback HTTP server that exposes mihomo's control API
-               (the "clash-api") by translating each REST call to the in-process
-               action bridge. libmihomo is a JNI-first library and never binds
-               external-controller itself, so without this nothing listens on
-               the API port: a browser cannot reach 127.0.0.1:9090 and the app's
-               own REST-based code paths (the latency test) fail too.
-               Runs inside the :native process, where the core is loaded.
+ 文件名  : ClashApiServer.java
+ 说明    : 一个极小的**回环** HTTP 服务，把 mihomo 的控制接口（clash-api）暴露出来：
+           每个 REST 请求都被翻译成进程内的动作桥调用。libmihomo 是 JNI 优先的库，
+           自己从不绑定 external-controller，所以没有它就没有任何东西监听 API 端口：
+           浏览器连不上 127.0.0.1:9090，App 自己的 REST 代码路径（延迟测试）也会失败。
+           运行在 :native 进程（内核所在的那个进程）里。
  ============================================================================
 */
 
@@ -27,16 +25,13 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 class ClashApiServer {
-	/* Worker threads. More than this buys NOTHING: every route ends in
-	   TProxyService.apiAction(), which serialises on the single in-flight
-	   callback the native bridge supports, so extra workers would just park on
-	   that lock (16 of them cost ~16 MB of stacks for zero throughput). The
-	   app's own probe pool runs 4 at a time, which is what this matches; an
-	   external dashboard simply queues behind the same lock. */
+	/* 工作线程数。再多也没用：每个路由最终都落到 TProxyService.apiAction()，而它被
+	   原生桥"单次在途回调"的限制串行化了 —— 多出来的 worker 只是堵在那把锁上
+	   （16 个线程约 16MB 栈，吞吐一点不涨）。App 自己的探测池是 4 并发，这里与它对齐；
+	   外部面板的请求就排在同一个锁后面。 */
 	private static final int WORKERS = 4;
-	/* Largest request body we will buffer. Content-Length comes straight off the
-	   wire, so a bogus (or hostile) value must not size an allocation: only
-	   loopback can reach us, but any local app could send 2 GB. */
+	/* 允许缓冲的最大请求体。Content-Length 直接来自网络，不能让一个胡乱（或恶意）的
+	   数值决定分配大小：只有本机能访问，但本机任何进程都能发一个 2GB 的头。 */
 	private static final int MAX_BODY = 1 << 20;
 
 	private final int port;
@@ -51,9 +46,8 @@ class ClashApiServer {
 		this.prefs = prefs;
 	}
 
-	/* Bind 127.0.0.1:<port>. Returns false when the port is already taken
-	   (e.g. mihomo DID bind it in this environment); the caller just logs and
-	   keeps going, and the core's own listener then serves the API. */
+	/* 绑定 127.0.0.1:<port>。端口被占用时返回 false（例如这个环境里 mihomo **自己**
+	   绑上了）；调用方只记日志然后继续，之后由内核自己的监听提供服务。 */
 	boolean start() {
 		ServerSocket ss = null;
 		try {
@@ -69,10 +63,9 @@ class ClashApiServer {
 			acceptThread.start();
 			return true;
 		} catch (Throwable e) {
-			/* A failed bind must not leak the socket (it holds an fd even when
-			   never bound), and its REASON has to reach the log: the caller
-			   always claimed "port already in use", which hid permission and
-			   out-of-fd failures. */
+			/* 绑定失败不能泄漏这个 socket（即使从未 bind 成功，它也占着一个 fd），
+			   而且**失败原因**必须进日志：调用方以前一律宣称"端口被占用"，把权限问题、
+			   fd 耗尽等真实原因都掩盖了。 */
 			if (ss != null) {
 				try { ss.close(); } catch (Throwable ignore) { }
 			}
@@ -97,9 +90,8 @@ class ClashApiServer {
 				});
 			} catch (Throwable e) {
 				if (!running) return;
-				/* accept() failing while we are supposed to be running means the
-				   listener became unusable (fd exhausted, closed under us). Back
-				   off instead of spinning this thread at 100% CPU forever. */
+				/* 本该在运行时 accept() 却失败，说明监听已不可用（fd 耗尽、被关掉）。
+				   退避一下，而不是让这个线程 100% 空转烧 CPU。 */
 				try { Thread.sleep(100); } catch (InterruptedException ie) { return; }
 			}
 		}
@@ -133,6 +125,8 @@ class ClashApiServer {
 				}
 			}
 			String body = "";
+			/* 不能拿网络上传来的 Content-Length 直接决定分配大小：一个乱写的头就能
+			   把进程撑爆（虽然只有本机能访问，但本机任何 App 都能发）。 */
 			if (contentLength > MAX_BODY) {
 				write(out, 413, "application/json", "{\"message\":\"body too large\"}");
 				return;
@@ -153,9 +147,8 @@ class ClashApiServer {
 			if (q >= 0) { path = target.substring(0, q); query = target.substring(q + 1); }
 			route(method, path, query, body, out);
 		} catch (Throwable e) {
-			/* Swallowing this made a failing route look like "the core never
-			   answered": the client just saw the connection close and nothing
-			   was written anywhere. Log it; the tunnel itself is unaffected. */
+			/* 吞掉这里会让"路由失败"看起来像"内核没回应"：客户端只看到连接被关，
+			   日志里一个字都没有。记下来；隧道本身不受影响。 */
 			TProxyService.log("clash-api: 请求处理失败 " + e);
 		} finally {
 			try { s.close(); } catch (Throwable ignore) { }
@@ -164,13 +157,13 @@ class ClashApiServer {
 
 	private void route(String method, String path, String query, String body,
 			OutputStream out) throws Exception {
-		/* The info page needs no auth (we only ever listen on loopback). */
+		/* 说明页不需要鉴权（我们只监听回环）。 */
 		if (path.equals("/") || path.equals("/ui") || path.equals("/ui/")) {
 			write(out, 200, "text/html; charset=utf-8", dashboardHtml());
 			return;
 		}
-		/* Everything else mirrors mihomo's REST surface, translated to the
-		   in-process bridge (the names mihomo itself uses). */
+		/* 其余接口对齐 mihomo 的 REST 面（用内核自己的名字），只是被翻译成进程内的
+		   动作桥调用。 */
 		if (path.equals("/version")) {
 			write(out, 200, "application/json", "{\"meta\":true,\"version\":\"v1.19.30\"}");
 			return;
@@ -229,10 +222,9 @@ class ClashApiServer {
 		write(out, 404, "application/json", "{\"message\":\"not found\"}");
 	}
 
-	/* GET /proxies/{name}/delay?url=&timeout= -> mihomo's ISOLATED per-proxy
-	   URL test via the "testDelay" action (exactly what FlClash uses). It does
-	   NOT touch the group selection, so many run concurrently. Returns
-	   {"delay": n} on success, 504 when the node cannot complete the probe. */
+	/* GET /proxies/{name}/delay?url=&timeout= → 走 "testDelay" 动作做内核的**隔离**逐节点
+	   URL 测速（与 FlClash 完全一致）。它**不碰**组的选择，所以可以并发很多个。
+	   成功返回 {"delay": n}；节点无法完成探测时返回 504。 */
 	private void handleDelay(String name, String query, OutputStream out) throws Exception {
 		String url = param(query, "url");
 		if (url == null || url.isEmpty())
@@ -241,18 +233,16 @@ class ClashApiServer {
 		try { timeout = Integer.parseInt(param(query, "timeout")); } catch (Throwable ignore) { }
 		if (timeout <= 0)
 		  timeout = 5000;
-		/* Same parameter shape the in-process probe uses (CoreTestHost knows
-		   which one this core accepts - see DELAY_SHAPES). */
+		/* 与进程内探测使用同一种参数形状（CoreTestHost 知道这个内核接受哪一种，
+		   见 DELAY_SHAPES）。 */
 		String data = CoreTestHost.delayData(name, url, timeout);
-		/* The probe may run for `timeout` inside the core, so wait past it -
-		   the default 6s bridge wait cuts a long probe off and loses the
-		   verdict (which then looked like a failed node). */
+		/* 探测可能在内核里跑满 `timeout`，所以要等得比它更久：默认 6s 的桥等待会把
+		   长时间探测掐断、丢掉判定结果（那就会被当成"节点失败"）。 */
 		String r = data == null ? null
 			: TProxyService.apiAction("testDelay", data, timeout + 5000L);
 		if (r == null) {
-			/* No answer at all: the bridge/core is the problem, the node is
-			   NOT proven dead. 502 = "test could not run"; the caller must
-			   leave the node untested rather than mark it 不可用. */
+			/* 完全没有回应：问题在桥/内核，**不能**据此认定节点已死。
+			   502 = "测试没能跑起来"；调用方必须把节点留作未测速，而不是标成不可用。 */
 			TProxyService.log("clash-api delay: 无返回 name=" + name + " url=" + url);
 			write(out, 502, "application/json", "{\"message\":\"bridge error\"}");
 			return;
@@ -261,9 +251,8 @@ class ClashApiServer {
 		try {
 			delay = Integer.parseInt(r.trim());
 		} catch (Throwable e) {
-			/* Answered with something that is not a number: malfunction, not
-			   a node verdict. Reporting 504 here used to flip working nodes
-			   to 不可用, so keep it a 502. */
+			/* 回了一个不是数字的东西：这是故障，不是节点判定。以前这里报 504，会把
+			   本来可用的节点刷成"不可用"，所以保持 502。 */
 			TProxyService.log("clash-api delay: 返回非数字 \"" + r + "\" name=" + name);
 			write(out, 502, "application/json", "{\"message\":\"bad delay result\"}");
 			return;
@@ -296,7 +285,7 @@ class ClashApiServer {
 		return s == null ? "" : s.replace("\\", "\\\\").replace("\"", "\\\"");
 	}
 
-	/* Read one CRLF/LF-terminated line; null at end of stream. */
+	/* 读一行（以 CRLF 或 LF 结尾）；流已结束返回 null。 */
 	private static String readLine(InputStream in) throws Exception {
 		ByteArrayOutputStream bos = new ByteArrayOutputStream();
 		int b;

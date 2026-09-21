@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One SOCKS5 server row: server avatar, name + "enabled" chip, a latency
-     pill (right) and two actions: 测速 (speed test) and 启用 (use as upstream).
-     Edit / delete live in the long-press menu, matching the subscription list. -->
+<!-- 一行 SOCKS5 服务器：头像、名字 +「已启用」标签、右侧延迟胶囊，
+     以及两个操作：测速 和 启用（作为上游使用）。
+     编辑 / 删除放在长按菜单里，与订阅列表保持一致。 -->
 <com.google.android.material.card.MaterialCardView
 	xmlns:android="http://schemas.android.com/apk/res/android"
 	xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -77,7 +77,7 @@
 					android:textAppearance="?attr/textAppearanceBodySmall"
 					android:textColor="?attr/colorOnSurfaceVariant"/>
 			</LinearLayout>
-			<!-- Latency (or 未测速 / 不可用) in a pill; text colour is set in code. -->
+			<!-- 胶囊里的延迟（或「未测速 / 不可用」）；文字颜色由代码设置。 -->
 			<TextView
 				android:id="@+id/item_status"
 				android:layout_width="wrap_content"

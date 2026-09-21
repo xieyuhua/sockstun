@@ -2,8 +2,6 @@
 <resources>
 	<string name="app_name">ProTun</string>
 	<string name="socks_addr">Адрес Socks</string>
-	<string name="socks_udp_addr">UDP-aдрес Socks</string>
-	<string name="socks_port">Порт Socks</string>
 	<string name="socks_user">Имя пользователя Socks</string>
 	<string name="socks_pass">Пароль Socks</string>
 	<string name="dns_ipv4">DNS IPv4</string>
@@ -18,22 +16,12 @@
 	<string name="control_enable">Включить</string>
 	<string name="control_disable">Отключить</string>
 	<string name="search">Поиск</string>
-	<string name="profile_prev">◀</string>
-	<string name="profile_next">▶</string>
-	<string name="profile_rename">Переименовать</string>
-	<string name="profile_add">Добавить</string>
-	<string name="profile_delete">Удалить</string>
-	<string name="profile_name">Имя профиля</string>
-	<string name="profile_limit">Достигнут лимит профилей (13)</string>
-	<string name="profile_last">Нельзя удалить последний профиль</string>
-	<string name="profile_delete_confirm">Удалить профиль «%s»?</string>
 	<string name="stats_realtime">Текущ.</string>
 	<string name="stats_session">Сессия</string>
 	<string name="stats_total">Всего</string>
 	<string name="stats_line">%1$s  ↑ %2$s  ↓ %3$s</string>
 	<string name="traffic">Трафик</string>
 	<string name="traffic_reset">Сбросить итоги</string>
-	<string name="traffic_empty">Данных о трафике пока нет</string>
 	<string name="rules">Правила маршрутизации</string>
 	<string name="rules_hint">Совпадение по домену, IP или диапазону IP. Домены разрешаются при запуске туннеля; правила «напрямую» требуют Android 13+.</string>
 	<string name="rules_default_proxy">Несовпавший трафик идёт через прокси</string>

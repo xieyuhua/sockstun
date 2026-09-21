@@ -1,9 +1,8 @@
 /*
  ============================================================================
- Name        : SettingsActivity.java
- Description : The "Settings" tab: a sectioned list (connection, subscription,
-               general, about). Every row shows an icon, a title and a live
-               subtitle; tapping it opens the matching detail page or dialog.
+ 文件名  : SettingsActivity.java
+ 说明    : 「设置」页：按分组排列的列表（连接 / 局域网代理 / 订阅 / 通用 / 关于）。
+           每行显示图标、标题和实时副标题；点击打开对应的详情页或对话框。
  ============================================================================
 */
 
@@ -68,8 +67,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		group_about = (LinearLayout) findViewById(R.id.settings_group_about);
 	}
 
-	/* Rebuilt on every resume so the subtitles reflect what the user just
-	   changed in the pages behind these rows (apps, subscription, theme). */
+	/* 每次 resume 都重建一次列表，这样副标题能反映用户刚刚在那些入口页面里改过的
+	   内容（应用、订阅、主题）。 */
 	@Override
 	protected void onResume() {
 		super.onResume();
@@ -112,15 +111,13 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			getString(R.string.sub_test_url, prefs.getAutoTestUrl()), R.id.settings_test_url);
 		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_test_timeout,
 			getString(R.string.sub_test_timeout, prefs.getProxyTestTimeout()), R.id.settings_test_timeout);
-		/* Hard cap on the time ONE node may take (all its probes together).
-		   Without it a node whose probes never answer can burn ~36s, which is
-		   what made a "test all" pass crawl and look stuck. */
+		/* 单个节点（含它所有探测）的**硬性**时间上限。没有它时，一个从不回应的节点
+		   能烧掉约 36 秒，一轮"测速全部"就会慢到看起来卡死。 */
 		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_node_limit,
 			getString(R.string.sub_test_node_limit, prefs.getNodeTestLimit()),
 			R.id.settings_node_limit);
-		/* What a probe with NO answer means for the node: 不可用 (default) or
-		   未测速. Kept as a switch because "all my nodes became unavailable" is
-		   otherwise hard to tell apart from a broken core/bridge. */
+		/* 探测**完全没有回应**时该怎么算：不可用（默认）还是未测速。做成开关，是因为
+		   否则"所有节点都变不可用"与"内核/桥坏了"这两种情况很难区分。 */
 		addSwitchRow(group_subscription, R.drawable.ic_routing,
 			R.string.settings_probe_timeout_fail,
 			R.string.settings_probe_timeout_fail_hint, prefs.getProbeTimeoutAsFail(),
@@ -132,9 +129,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			});
 		addRow(group_subscription, R.drawable.ic_routing, R.string.settings_autosel_interval,
 			autoSelectIntervalSubtitle(), R.id.settings_autosel_interval);
-		/* Latency-test behaviour: whether a TUN-less core is kept alive so the
-		   real forwarding delay can be measured while disconnected, and
-		   whether that core carries ALL nodes (ignore the country filter). */
+		/* 测速相关开关：未连接时是否预加载无 TUN 的测速内核（以便测真实转发延迟），
+		   以及该内核是否携带**全部**节点（忽略国家/地区筛选）。 */
 		addSwitchRow(group_subscription, R.drawable.ic_routing, R.string.settings_preload_core,
 			R.string.settings_preload_core_hint, prefs.getPreloadCore(),
 			new CompoundButton.OnCheckedChangeListener() {
@@ -144,7 +140,7 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 					CoreTestHost.reset();
 				}
 			});
-		/* Whether the subscribe list also shows unusable / untested nodes. */
+		/* 订阅列表是否同时列出"不可用 / 未测速"的节点。 */
 		addSwitchRow(group_subscription, R.drawable.ic_routing, R.string.settings_show_unavailable,
 			R.string.settings_show_unavailable_hint, prefs.getShowUnavailable(),
 			new CompoundButton.OnCheckedChangeListener() {
@@ -163,8 +159,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			versionSubtitle(), R.id.settings_version);
 	}
 
-	/* One row: icon + title + optional subtitle + chevron. A hairline divider
-	   is inserted between rows so the card reads as a grouped list. */
+	/* 一行：图标 + 标题 + 可选副标题 + 右侧箭头。行与行之间插一条细分隔线，让卡片
+	   看起来是一个分组列表。 */
 	private void addRow(LinearLayout group, int iconRes, int titleRes, String subtitle, int id) {
 		if (group.getChildCount() > 0)
 		  group.addView(makeDivider());
@@ -186,9 +182,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		group.addView(row);
 	}
 
-	/* Same as addRow(), but the trailing control is a switch. Tapping anywhere
-	   on the row toggles it as well, since the switch itself is a small
-	   target. */
+	/* 与 addRow() 相同，只是右侧控件换成开关。开关本身点击区域很小，所以点整行
+	   也能切换。 */
 	private void addSwitchRow(LinearLayout group, int iconRes, int titleRes, int subtitleRes,
 			boolean checked, CompoundButton.OnCheckedChangeListener listener) {
 		if (group.getChildCount() > 0)
@@ -213,18 +208,18 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		group.addView(row);
 	}
 
-	/* Port and allow-lan both land in the generated config, so a running
-	   tunnel keeps the old values until it restarts. */
+	/* 代理端口与"允许局域网"都会写进生成的配置，所以运行中的隧道会一直沿用旧值，
+	   直到重启。 */
 	private void afterNetworkChange() {
 		if (prefs.getEnable())
 		  Toast.makeText(this, R.string.settings_restart_needed, Toast.LENGTH_LONG).show();
 	}
 
-	/* The URL mihomo's url-test groups measure against. If a node's network
-	   cannot reach this host, every node scores as failed there even though the
-	   node itself works — the usual cause of "tested OK but unusable". */
-	/* Test URL: blank restores the default; any value must be an http(s) URL,
-	   validated live so a bad entry is caught before saving. */
+	/* mihomo 的 url-test 组用来测速的目标地址。如果一个节点所在的网络访问不到这个
+	   主机，那么在该组里每个节点都会被测成失败，哪怕节点本身是好的 —— 这正是
+	   "测速正常但用不了"的常见原因。 */
+	/* 测速地址：留空恢复默认值；任何输入都必须是 http(s) 地址，且边输边校验，
+	   避免把坏值存进去。 */
 	private void editTestUrl() {
 		showInputDialog(R.string.sub_test_url_title,
 			getString(R.string.sub_test_url_title),
@@ -255,9 +250,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		return u.startsWith("http://") || u.startsWith("https://");
 	}
 
-	/* Proxy port: a numeric field with live range checking; "默认" restores the
-	   built-in default. applyProxyPort() still clamps, so an in-range value is
-	   saved as-is. */
+	/* 代理端口：数字输入框，边输边做范围校验；「默认」恢复内置默认值。
+	   applyProxyPort() 仍会再做一次夹取，所以范围内的值会原样保存。 */
 	private void editPort() {
 		showInputDialog(R.string.settings_lan_port,
 			getString(R.string.settings_port_hint),
@@ -294,8 +288,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			});
 	}
 
-	/* Shared save path for the proxy port: clamp into the valid range, persist,
-	   refresh the settings row, and re-apply if the tunnel is live. */
+	/* 代理端口的统一保存路径：夹到合法范围内、持久化、刷新设置行；隧道在运行时
+	   还要重新应用。 */
 	private void applyProxyPort(int port) {
 		int clamped = Math.max(Preferences.MIN_PROXY_PORT,
 			Math.min(Preferences.MAX_PROXY_PORT, port));
@@ -313,7 +307,7 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
 			LinearLayout.LayoutParams.MATCH_PARENT, 1);
 		float density = getResources().getDisplayMetrics().density;
-		/* start where the title starts: 16dp padding + 22dp icon + 16dp gap */
+		/* 与标题左对齐：16dp 内边距 + 22dp 图标 + 16dp 间距 */
 		lp.leftMargin = (int) (54 * density);
 		divider.setLayoutParams(lp);
 		divider.setBackgroundColor(MaterialColors.getColor(this,
@@ -321,10 +315,9 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		return divider;
 	}
 
-	/* Shared, polished single-field editor: an outlined Material input with a
-	   live validation error and an optional help line. Replaces the bare
-	   EditText dialogs so the test URL, proxy port and auto-test interval all
-	   get a consistent, legible UI with inline error feedback. */
+	/* 统一的单字段编辑器：Material 描边输入框 + 实时校验错误 + 可选的帮助文字。
+	   取代了原来朴素的 EditText 对话框，让测速地址、代理端口、自动测速间隔都有一致、
+	   易读的界面与行内错误提示。 */
 	private interface InputValidator {
 		String validate(String value);
 	}
@@ -386,10 +379,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		return d;
 	}
 
-	/* What the tunnel has moved this session. This row is the connection's
-	   live data rather than a place to configure a proxy, so lead with the
-	   counters - which node it is using already shows on the home screen and
-	   inside the dialog. */
+	/* 本次会话隧道跑了多少流量。这一行是连接的实时数据，而不是配置代理的地方，
+	   所以把计数器放在前面 —— 用的是哪个节点，首页和弹窗里都已经显示了。 */
 	private String connectionSubtitle() {
 		if (!prefs.getEnable())
 		  return getString(R.string.status_disconnected);
@@ -426,7 +417,7 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			: R.string.settings_state_off);
 	}
 
-	/* Whether a generated config exists, and whether it is overridden by hand. */
+	/* 说明生成的配置是否存在，以及是否被手动接管（使用自定义配置）。 */
 	private String configSubtitle() {
 		File f = new File(getFilesDir(), "config.yaml");
 		if (!f.exists())
@@ -445,7 +436,7 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 	private String versionSubtitle() {
 		try {
 			PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
-			/* PackageInfo.versionCode is deprecated since API 28. */
+			/* PackageInfo.versionCode 从 API 28 起已废弃。 */
 			long code = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
 				? pi.getLongVersionCode() : pi.versionCode;
 			return pi.versionName + " (" + code + ")";
@@ -454,16 +445,15 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		}
 	}
 
-	/* Auto re-test interval for the url-test group, moved here from the
-	   subscription page so its auto-select row can stay a plain on/off switch.
-	   The value is in minutes and applies when the tunnel is (re)started. */
+	/* url-test 组的自动重测间隔。从订阅页挪到设置里，好让订阅页的"自动选择"行保持
+	   一个朴素的开/关。单位是分钟，在隧道（重）启动时生效。 */
 	private String autoSelectIntervalSubtitle() {
 		return getString(R.string.sub_minutes,
 			Math.max(1, Math.round(prefs.getAutoSelectInterval() / 60f)));
 	}
 
-	/* Auto re-test interval: a single minute field (1–1440), replacing the old
-	   preset-list-then-custom flow. Blank or out-of-range is caught inline. */
+	/* 自动重测间隔：单个分钟输入框（1–1440），取代原来"先选预设再自定义"的流程。
+	   留空或超出范围会在输入框内直接报错。 */
 	private void editAutoSelectInterval() {
 		final int cur = Math.max(1, Math.round(prefs.getAutoSelectInterval() / 60f));
 		showInputDialog(R.string.sub_interval_title,
@@ -503,9 +493,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			null);
 	}
 
-	/* Latency-test timeout for the manual "test node" pass (seconds, 1–30).
-	   It caps how long mihomo may spend forwarding the probe, so a slow but
-	   usable node is not flagged unavailable by an over-tight default. */
+	/* 手动"测节点"时单个探测目标的超时（秒，1–30）。它限定内核转发这次探测最多花多久，
+	   免得一个慢但可用的节点被过紧的默认值误判为不可用。 */
 	private void editTestTimeout() {
 		final int cur = prefs.getProxyTestTimeout();
 		showInputDialog(R.string.settings_test_timeout,
@@ -546,10 +535,9 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			null);
 	}
 
-	/* Per-NODE time limit for one latency test (seconds, 5-120). This is the
-	   knob that decides how long a "test all" may spend on a single node: the
-	   node's probes are tried within this window and whatever is not measured
-	   by then is reported as 未测速 instead of being guessed. */
+	/* 一个节点的测速时间上限（秒，5-120）。这个值决定"测速全部"在单个节点上最多花
+	   多久：该节点的探测都在这个窗口内尝试，到点还没测出结果的按「未测速」处理，
+	   不做猜测。 */
 	private void editNodeTestLimit() {
 		final int cur = prefs.getNodeTestLimit();
 		showInputDialog(R.string.settings_node_limit,
@@ -625,10 +613,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  showSecretDialog();
 	}
 
-	/* Live snapshot of the running tunnel: the real state (including a failed
-	   start), the node/server it is on, and the counters as of now. The
-	   Prefs are re-read first because Enable / LastError / stats are written
-	   by the :native process. */
+	/* 运行中隧道的实时快照：真实状态（含启动失败）、所在节点/服务器、以及当前计数器。
+	   先重新读取 Preferences，因为 Enable / LastError / 统计都是 :native 进程写的。 */
 	private void showConnectionDialog() {
 		prefs = new Preferences(this);
 
@@ -686,8 +672,7 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			.show();
 	}
 
-	/* Theme picker: choose one of the bundled palettes, then recreate so the
-	   new theme is picked up. */
+	/* 主题选择：从内置的几套配色里挑一个，然后 recreate 让新主题生效。 */
 	private void showThemeDialog() {
 		final int current = prefs.getTheme();
 		final String[] names = new String[ThemeManager.count()];
@@ -717,7 +702,7 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		try {
 			PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
 			name = pi.versionName;
-			/* PackageInfo.versionCode is deprecated since API 28. */
+			/* PackageInfo.versionCode 从 API 28 起已废弃。 */
 			code = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
 				? pi.getLongVersionCode() : pi.versionCode;
 		} catch (Exception e) {
@@ -730,9 +715,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			.show();
 	}
 
-	/* Masked preview of the clash-api bearer token for the settings row: show
-	   only the first and last four chars so the value is recognisable without
-	   being fully exposed in the list. */
+	/* 设置行里 clash-api 令牌的脱敏预览：只显示首尾各四个字符，既能辨认又不会在列表里
+	   完全暴露。 */
 	private String secretSubtitle() {
 		String s = prefs.getSecret();
 		if (s == null || s.isEmpty())
@@ -743,10 +727,9 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		return s.substring(0, 4) + "••••••••" + s.substring(n - 4);
 	}
 
-	/* clash-api bearer token viewer: read-only (selectable for manual copy),
-	   plus Copy and Reset. Resetting regenerates the token; the running core
-	   only picks it up after the tunnel (re)starts, so we warn via
-	   afterNetworkChange(). */
+	/* clash-api 令牌查看器：只读（可选中手动复制），另有"复制"与"重置"。重置会重新
+	   生成令牌，而运行中的内核要等隧道（重）启动才会采用它，所以用 afterNetworkChange()
+	   给出提示。 */
 	private void showSecretDialog() {
 		prefs = new Preferences(this);
 		final String secret = prefs.getSecret();

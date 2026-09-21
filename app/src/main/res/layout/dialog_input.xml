@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Shared single-field editor used by the test URL, proxy port and auto-test
-     interval rows. An outlined Material input with a live validation error and
-     an optional help line, so the three settings share one clean, legible UI. -->
+<!-- 共用的单字段编辑器，测速地址、代理端口、自动重测间隔三项都用它。
+     带边框的 Material 输入框，配实时校验错误提示和可选说明行，
+     让这三个设置共用一套干净、易读的界面。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
 	android:orientation="vertical"
 	android:layout_width="match_parent"

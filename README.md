@@ -11,7 +11,7 @@
 * **多协议**：mihomo 支持的全部节点类型 —— vmess / vless / trojan / shadowsocks / shadowsocksr / hysteria2 / tuic / socks5 / wireguard 等。
 * 转发 TCP 连接与 UDP 数据包。
 * **两种上游，二选一**：远程 `clash.yml` 订阅，或手动 SOCKS5 服务器。
-* **Clash 订阅**：导入远程 `clash.yml`（明文或 base64），多个订阅合并为**一个节点池**，经内核做延迟测速，按国家 / 协议筛选、按延迟排序。默认只列可用节点，可在 设置 → 订阅 打开「显示不可用节点」。
+* **Clash 订阅**：导入远程 `clash.yml`（明文或 base64），多个订阅合并为**一个节点池**，经内核做延迟测速，按国家 / 协议筛选、按延迟排序。默认只列可用节点，可在 设置 → 订阅 打开「显示不可用节点」。订阅地址的增删改查与「拉取订阅」都在 设置 → **订阅配置**，订阅页只展示合并后的节点。
 * **长按节点**：可把某个订阅节点加入「服务器」列表，或直接启用它（忽略订阅）；非 SOCKS5 会连原始 clash 定义一起搬运，uuid / sni / ws 等参数不丢。
 * **测速可调**：单目标超时、每节点时间上限、无响应是否判为不可用、未连接时是否预加载测速内核，都在 设置 → 订阅。
 * **切换立即生效**：选中节点马上作用于运行中的隧道（该节点不在当前配置里时自动重建配置）；切换国家/地区会自动重连应用新节点池。
@@ -53,13 +53,29 @@ docker pull  mingc/android-build-box
 
 docker run --rm \
   -v "$PWD":/project \
-  -v "$HOME/.gradle-cache":/root/.gradle \
+  -v gradle-cache:/root/.gradle \
   -v "$HOME/android-ndk":/opt/android-sdk/ndk \
   -e JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
   -e ANDROID_SDK_ROOT=/opt/android-sdk \
   mingc/android-build-box \
-  bash -lc 'cd /project && ./gradlew assembleDebug --warning-mode all --no-daemon'
+  bash -lc 'cp -a /project /work && cd /work \
+            && rm -rf app/build build .gradle && rm -f local.properties \
+            && ./gradlew assembleDebug --warning-mode all --no-daemon'
 ```
+
+> 上面三条清理不是可选项，而是把「宿主机上的构建残留」和「宿主机专属的 SDK 路径」挡在容器外：
+> - `app/build` / `build` / `.gradle` 里可能是**另一个操作系统**生成的增量状态。容器经 bind mount 读到它们后，AGP 在 `javaPreCompileDebug` 读写 `annotation_processor_list`、`tmp/*.uniqueId*` 时会报 `java.io.IOException: Input/output error`（跨系统挂载上做原子改名不可靠）。
+> - `local.properties` 里是宿主机 SDK 路径（如 `D:\Android\Sdk`），且**优先级高于** `ANDROID_SDK_ROOT`，容器里会报 `sdk.dir ... Directory does not exist`。
+> - `cp -a /project /work` 让编译发生在容器自己的文件系统；Gradle home 用命名卷 `gradle-cache` 而非宿主机目录，避免同类问题并明显更快。
+>
+> 若必须原地构建，至少先清残留并让 SDK 生效：
+>
+> ```bash
+> rm -rf app/build build .gradle && rm -f local.properties   # 或 echo 'sdk.dir=/opt/android-sdk' > local.properties
+> ./gradlew assembleDebug --no-daemon
+> ```
+>
+> “SDK XML version 4 / only understands up to 3” 只是 cmdline-tools 比 AGP 更新带来的**警告**，可以忽略。
 
 ## SOCKS5 服务器（手动上游）
 

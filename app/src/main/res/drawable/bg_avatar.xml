@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Circular tint behind the country flag on each node row. -->
+<!-- 节点行里国旗背后的圆形底色。 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
 	android:shape="oval">
 	<solid android:color="?attr/colorSurfaceVariant"/>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<!-- ===== Neon Green (default, near-black + neon green) ===== -->
+	<!-- ===== 霓虹绿（默认：近黑底 + 霓虹绿）===== -->
 	<style name="Theme.TunVPN" parent="Theme.Material3.Dark.NoActionBar">
 		<item name="colorPrimary">#00E5A0</item>
 		<item name="colorOnPrimary">#060A09</item>
@@ -27,7 +27,7 @@
 		<item name="android:windowBackground">#060A09</item>
 	</style>
 
-	<!-- ===== Cyber Cyan ===== -->
+	<!-- ===== 赛博青 ===== -->
 	<style name="Theme.TunVPN.Cyan" parent="Theme.Material3.Dark.NoActionBar">
 		<item name="colorPrimary">#22D3EE</item>
 		<item name="colorOnPrimary">#04181C</item>
@@ -54,7 +54,7 @@
 		<item name="android:windowBackground">#05090C</item>
 	</style>
 
-	<!-- ===== Midnight Purple ===== -->
+	<!-- ===== 午夜紫 ===== -->
 	<style name="Theme.TunVPN.Purple" parent="Theme.Material3.Dark.NoActionBar">
 		<item name="colorPrimary">#A78BFA</item>
 		<item name="colorOnPrimary">#160C33</item>
@@ -81,7 +81,7 @@
 		<item name="android:windowBackground">#0A0712</item>
 	</style>
 
-	<!-- ===== Amber ===== -->
+	<!-- ===== 琥珀 ===== -->
 	<style name="Theme.TunVPN.Amber" parent="Theme.Material3.Dark.NoActionBar">
 		<item name="colorPrimary">#FFB020</item>
 		<item name="colorOnPrimary">#2B1700</item>
@@ -108,7 +108,7 @@
 		<item name="android:windowBackground">#0C0905</item>
 	</style>
 
-	<!-- ===== Paper Light ===== -->
+	<!-- ===== 纸感浅色 ===== -->
 	<style name="Theme.TunVPN.Light" parent="Theme.Material3.Light.NoActionBar">
 		<item name="colorPrimary">#0A7D5A</item>
 		<item name="colorOnPrimary">#FFFFFF</item>

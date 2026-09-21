@@ -63,13 +63,17 @@ app/src/main/java/com/tunvpn/
 ├── ClashParser.java         # clash.yml 解析（块式 + 单行内联）
 ├── ClashNode.java           # 节点数据与序列化（含延迟）
 ├── MainActivity.java        # 首页 + 底部导航
-├── SubscribeActivity.java   # 订阅：拉取 / 测速 / 筛选 / 选用节点
-├── SubscribeConfigActivity.java  # 多订阅地址管理
+├── SubscribeActivity.java   # 订阅：展示合并节点 / 测速 / 筛选 / 使用与长按加入服务器
+├── SubscribeConfigActivity.java  # 多订阅地址管理 + **拉取订阅**（fetchAll/download）
+├── CoreTestHost.java        # App 进程内的无 TUN 测速内核（真实转发延迟）
+├── ClashApiServer.java      # App 自建的回环 HTTP 控制接口（REST → 进程内桥）
+├── TestLog.java / TestProgress.java  # 日志落盘 / 进程级测速进度
 ├── ServerListActivity.java / ServerEditActivity.java / SocksServer.java  # 手动上游
 ├── RulesHubActivity.java    # 规则页：分流 + DNS + 路由规则
 ├── AppListActivity.java     # 部分应用模式选应用
 ├── SettingsActivity.java    # 设置页
-├── LogActivity.java / ConfigActivity.java
+├── LogActivity.java         # 「日志」页
+├── ConfigActivity.java      # 自定义 config.yaml 的编辑（配合「使用自定义配置」）
 ├── ConnectionsActivity.java     # 活跃连接
 ├── RecentRequestsActivity.java  # 最近请求
 ├── Preferences.java         # 多配置档与持久化
@@ -77,6 +81,7 @@ app/src/main/java/com/tunvpn/
 ├── QSTileService.java / ServiceReceiver.java  # 磁贴 / 开机自启
 └── ThemeManager.java / BaseActivity.java
 app/thirdparty/mihomo/       # 从 AAR 解包的 classes.jar + jni/<abi>/*.so
+app/thirdparty/libmihomo-android-v0.3.3.aar   # 首次构建自动下载（需联网）
 ```
 
 ---

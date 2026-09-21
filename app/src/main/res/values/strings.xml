@@ -15,8 +15,6 @@
 	<string name="refresh">Refresh</string>
 	<string name="clear">Clear</string>
 	<string name="socks_addr">Socks Address</string>
-	<string name="socks_udp_addr">Socks UDP Address</string>
-	<string name="socks_port">Socks Port</string>
 	<string name="socks_user">Socks Username</string>
 	<string name="socks_pass">Socks Password</string>
 	<string name="dns_ipv4">DNS IPv4</string>
@@ -31,32 +29,16 @@
 	<string name="control_enable">Enable</string>
 	<string name="control_disable">Disable</string>
 	<string name="search">Search</string>
-	<string name="profile_prev">◀</string>
-	<string name="profile_next">▶</string>
-	<string name="profile_rename">Rename</string>
-	<string name="profile_add">Add</string>
-	<string name="profile_delete">Delete</string>
-	<string name="profile_name">Profile name</string>
-	<string name="profile_limit">Profile limit reached (13)</string>
-	<string name="profile_last">Cannot delete the last profile</string>
-	<string name="profile_delete_confirm">Delete profile “%s”?</string>
 
 	<string name="status_connected">Connected</string>
 	<string name="status_disconnected">Disconnected</string>
 	<string name="status_failed">连接失败</string>
 	<string name="status_connected_hint">Tunnel is running, traffic goes through the proxy</string>
 	<string name="status_disconnected_hint">Tap Enable to start the tunnel</string>
-	<string name="section_profile">Profile</string>
 	<string name="section_server">Server</string>
 	<string name="section_dns">DNS</string>
 	<string name="section_routing">Routing</string>
 	<string name="port">Port</string>
-	<string name="global_hint">Route all apps through the tunnel</string>
-	<string name="apps_hint">When global mode is off, only selected apps use the tunnel</string>
-	<string name="remote_dns_hint">Resolve domain names by the proxy server</string>
-	<string name="profile_prev_desc">Previous profile</string>
-	<string name="profile_next_desc">Next profile</string>
-	<string name="profile_menu">Profile options</string>
 	<string name="app_list_empty">No matching apps</string>
 	<string name="app_list_loading">正在读取应用…</string>
 	<string name="apps_selected">%d selected</string>
@@ -67,7 +49,6 @@
 	<string name="stats_line">%1$s  ↑ %2$s  ↓ %3$s</string>
 	<string name="traffic">Traffic</string>
 	<string name="traffic_reset">Reset totals</string>
-	<string name="traffic_empty">No traffic recorded yet</string>
 
 	<string name="rules">Routing rules</string>
 	<string name="rules_hint">先选「分流策略」，再按需添加规则：域名后缀 / 精确域名 / 关键字 / IP / IP 段 / 国家(GeoIP) / 域名分类(GeoSite) / 进程名 / 进程路径 / 端口 / 网络类型 → 代理或直连；未命中的按底部开关处理。订阅自带规则不参与，修改后重新连接生效。</string>
@@ -101,8 +82,8 @@
 	<string name="rules_mode_hint_rules">规则模式：按下方规则分流，未命中的流量走「未命中默认」开关。</string>
 	<string name="rules_mode_hint_global">全局代理：所有流量都走代理，下方规则不生效。</string>
 	<string name="rules_mode_hint_direct">全局直连：所有流量都不走代理，下方规则不生效。</string>
-	<!-- Order matters: the spinner position IS the rule type (see
-	     Preferences.Rule.TYPE_*), so new entries must be appended, never inserted. -->
+	<!-- 顺序很重要：下拉框的位置**就是**规则类型（见 Preferences.Rule.TYPE_*），
+	     所以新项只能追加在末尾，绝不能插在中间。 -->
 	<string-array name="rule_types">
 		<item>@string/rule_type_domain</item>
 		<item>@string/rule_type_ip</item>
@@ -117,7 +98,7 @@
 		<item>@string/rule_type_src_port</item>
 		<item>@string/rule_type_network</item>
 	</string-array>
-	<!-- Same order as rule_types: the hint shown in the value field. -->
+	<!-- 顺序与 rule_types 一致：这些是显示在"规则值"输入框里的提示。 -->
 	<string-array name="rule_value_hints">
 		<item>如 google.com（匹配该域名及其所有子域）</item>
 		<item>如 1.2.3.4</item>
@@ -150,7 +131,6 @@
 	<string name="theme_light">Paper Light</string>
 
 	<string name="subscribe">订阅</string>
-	<string name="sub_fetch">拉取订阅</string>
 	<string name="sub_fetching">拉取中…</string>
 	<string name="sub_test_all">测速全部</string>
 	<string name="sub_testing">测速中 %1$d/%2$d（%3$d%%）</string>
@@ -159,51 +139,21 @@
 	<string name="sub_test">测速</string>
 	<string name="sub_use">使用</string>
 	<string name="sub_empty">暂无节点，先拉取订阅</string>
-	<string name="sub_latency_untested">未测速</string>
-	<string name="sub_latency_failed">失败</string>
 	<string name="sub_fetched">已拉取 %d 个节点</string>
 	<string name="sub_no_nodes">未能从订阅解析到任何节点（请确认是标准 clash.yml 并含 proxies: 列表）</string>
 	<string name="sub_fetch_failed">拉取失败：%s</string>
-	<string name="sub_applied">已应用：%s</string>
-	<string name="sub_sort">排序</string>
-	<string name="sub_filter">筛选</string>
 	<string name="sub_section_auto">自动选择</string>
-	<string name="sub_section_filter">筛选</string>
-	<string name="sub_country_switched">已切换：%s</string>
-	<!-- 位置 0 是默认值：最快优先 -->
-	<string-array name="sub_sort_options">
-		<item>按延迟（快→慢）</item>
-		<item>订阅顺序</item>
-	</string-array>
-	<string-array name="sub_filter_options">
-		<item>全部</item>
-		<item>仅可用</item>
-		<item>仅不可用</item>
-	</string-array>
 	<string name="sub_stats">可用 %1$d · 不可用 %2$d · 共 %3$d</string>
 	<string name="sub_auto">自动选择最快节点</string>
-	<string name="sub_auto_hint">每 %1$s 重新测速（点击修改）</string>
 	<string name="sub_manual_hint">手动模式：使用你点选的那个节点</string>
-	<string name="sub_country_label">自动选择国家/地区</string>
-	<string name="sub_country_filter_label">按国家筛选</string>
-	<string name="sub_country_filter_reconnect">已切换国家,重新连接后生效(配置只含该国的代理)</string>
 	<string name="sub_country_all">全部</string>
-	<string name="sub_country_all_label">全部国家</string>
 	<string name="sub_visible">显示 %d 个</string>
 	<string name="sub_proto_filter_label">按协议筛选</string>
 	<string name="sub_proto_all">全部协议</string>
-	<string name="sub_country_global">全局最快</string>
-	<string name="sub_country_unknown">未知（%1$d）</string>
-	<string name="sub_detect">探测国家</string>
-	<string name="sub_detecting">正在探测节点所属国家/地区…</string>
-	<string name="sub_detect_none">所有节点都已探测过国家</string>
-	<string name="sub_auto_country_hint">自动模式下：选「自动最优国家」会按测速自动挑最快的国家；选具体国家则在该国挑最快节点；选「全局最快」则不限国家。点「探测国家」可识别各节点所属国家。</string>
 	<string name="sub_minutes">%1$d 分钟</string>
 	<string name="sub_interval_title">自动测速间隔（分钟）</string>
-	<string name="sub_interval_custom">自定义…（当前 %1$d 分钟）</string>
 	<string name="sub_interval_custom_title">自定义间隔</string>
 	<string name="sub_interval_hint">分钟数，范围 1 – 1440</string>
-	<string name="sub_interval_clamped">已调整为 %1$d 分钟</string>
 	<string name="sub_interval_invalid">请输入 1 – 1440 之间的分钟数</string>
 	<string name="sub_auto_restart">设置已保存，重新连接后生效</string>
 	<string name="sub_auto_on_hint">自动模式：按延迟自动选择最快节点</string>
@@ -228,7 +178,6 @@
 	<string name="sub_test_timeout">超时：%1$d 秒</string>
 	<string name="sub_test_timeout_hint">手动测速（验证节点真实转发）的超时秒数，范围 1 – 30；超时即判为不可用。</string>
 	<string name="sub_test_timeout_invalid">请输入 1 – 30 之间的秒数</string>
-	<string name="sub_status_ok">可用</string>
 	<string name="sub_status_fail">不可用</string>
 	<string name="sub_status_untested">未测速</string>
 	<string name="sub_test_no_core">没有可用内核，本次未测速。请检查 设置 → 订阅 中的测速开关，或查看「日志」</string>
@@ -240,8 +189,6 @@
 	<string name="sub_help_title">订阅怎么用？</string>
 	<string name="sub_help_text">1. 可以保存多个订阅（设置 → 订阅配置）。点「拉取订阅」会更新全部订阅，节点合并成一个池，再排序、筛选、测速。\n\n2. 「自动选择最快节点」：打开后由内核定时测速，自动使用延迟最低的那个，测速间隔和测试地址点下方文字修改。关掉即为手动模式，点哪个节点就用哪个。\n\n3. 测速全部：绿色 = 可用，红色 = 不可用，数字是内核经该节点**真实转发**测得的延迟（不是端口连通），只代表链路快慢，不代表实际带宽。测速范围跟随顶部选中的国家/地区：选「全部」就测全部节点，选某个国家就测该国的全部节点。测速要经内核逐个真实转发，而内核一次只处理一个探测，所以总时间≈各节点之和（进度条会显示剩余估算）；每个节点最多花多久、无响应算不算不可用，见 设置 → 订阅 里的「每节点测速上限 / 无响应判为不可用」；是否显示不可用节点、未连接时是否预先加载内核也在那里。\n\n3.1 长按列表里的节点，可以把它「添加到服务器列表」或「添加并启用」（启用后将忽略订阅、直接用这个节点）。非 SOCKS5 协议会连同原始 clash 定义一起搬过去，uuid / sni / ws 等参数不会丢；「服务器」页里可查看和删除。\n\n4. 分流由「路由规则」页统一决定（域名 / IP / IP 段 → 代理或直连），未命中的按该页顶部的开关处理；订阅自带的规则不参与。\n\n5. 与「服务器」页的关系：有订阅就用订阅；没有订阅时，「服务器」里启用的 SOCKS5 会作为手动上游生效。</string>
 	<string name="sub_applied_hint">已选择：%s\n下次启动隧道时生效</string>
-	<string name="sub_switched">已选择：%s</string>
-	<string name="sub_switched_restart">已选择：%1$s\n自动选择已关闭，重新连接后固定使用该节点</string>
 	<string name="sub_switched_now">已选择：%1$s\n正在切换到该节点…（若它不在当前配置里会自动重连）</string>
 	<string name="sub_country_filter_applying">已切换国家/地区，正在重新连接以应用（新配置只含该地区节点）</string>
 	<string name="sub_add_server_only">添加到服务器列表</string>
@@ -249,16 +196,7 @@
 	<string name="sub_add_to_server">已添加到服务器列表：%1$s\n可在「服务器」页启用它（启用后会忽略订阅）</string>
 	<string name="sub_add_server_enabled_now">已添加并启用：%1$s\n正在重新连接以应用（将忽略订阅）</string>
 	<string name="sub_add_server_enabled">已添加并启用：%1$s（将忽略订阅，启动隧道后生效）</string>
-	<string name="sub_server_exists">该节点已在服务器列表中</string>
 	<string name="sub_add_to_server_failed">无法还原该节点的原始定义（多因订阅内容已更新）→ 请先「拉取订阅」再试，或到「服务器」页手动粘贴节点定义</string>
-	<string name="proxy_state_probing">代理连通：检测中…</string>
-	<string name="proxy_state_ok">代理连通：正常</string>
-	<string name="proxy_state_fail_reason">代理不通（%1$s）</string>
-	<string name="proxy_fail_timeout">超时</string>
-	<string name="proxy_fail_closed">端口未监听</string>
-	<string name="sub_invalid_url">请输入有效的订阅地址</string>
-	<string name="server_manual_hint">未配置订阅时，这里填写的节点会作为手动上游生效（支持 SOCKS5 / Hysteria2 / VMess / VLESS / Trojan / SS 等）；已配置订阅时以订阅为准。</string>
-	<string name="server_use_as_upstream">使用此 SOCKS5 作为上游（忽略订阅）</string>
 	<string name="settings">设置</string>
 	<string name="subs_config">订阅配置</string>
 	<string name="subs_add">新增订阅</string>

@@ -1,13 +1,11 @@
 /*
  ============================================================================
- Name        : CoreTestHost.java
- Description : Runs a SECOND, TUN-less mihomo core inside the APP process so
-               the latency test can use the core's REAL forwarding delay even
-               when the VPN tunnel is not connected. A core never needs a TUN
-               to test a proxy - it just dials the node server itself - which
-               is exactly how FlClash measures latency. The test core is
-               configured with no tun, no mixed-port and no external-controller,
-               so it can never clash with the tunnel core in the :native process.
+ 文件名  : CoreTestHost.java
+ 说明    : 在 **App 进程内**再跑一个**无 TUN** 的 mihomo 内核，这样即使 VPN 没连接，
+           测速也能用内核的**真实转发延迟**。测一个节点本来就不需要 TUN（内核自己直连
+           节点服务器即可），FlClash 就是这么测的。这个测速内核刻意不配 tun、不配
+           mixed-port、不配 external-controller，所以永远不会和 :native 进程里的隧道
+           内核打架。
  ============================================================================
 */
 
@@ -26,18 +24,17 @@ import java.io.File;
 class CoreTestHost {
 	private static final String TAG = "CoreTestHost";
 
-	/* Guarded by the class monitor (ensureReady is synchronized). */
+	/* 由类锁保护（ensureReady 是 synchronized）。 */
 	private static boolean loaded = false;
-	/* True once a config was actually applied to the test core. isReady() must
-	   only report ready then: "library loaded but quickSetup failed" would
-	   otherwise send every delay probe at a core that has no proxies at all. */
+	/* 配置**真正应用**到测速内核之后才置 true。isReady() 只能在这之后报 ready：
+	   否则"库已加载但 quickSetup 失败"会让所有探测都发给一个根本没有节点的内核。 */
 	private static boolean applied = false;
 	private static String lastConfig = "";
 
 	private CoreTestHost() { }
 
-	/* Forget the applied config so the next ensureReady() rebuilds and
-	   re-applies it (called when the relevant switches change). */
+	/* 忘掉已应用的配置，让下一次 ensureReady() 重新生成并重新应用
+	   （相关开关变化时调用）。 */
 	static synchronized void reset() {
 		lastConfig = "";
 		applied = false;
@@ -47,9 +44,8 @@ class CoreTestHost {
 		return applied;
 	}
 
-	/* Load the test core and apply the current node set. Returns true when the
-	   core is ready to serve testDelay. Cheap to call repeatedly: the config is
-	   regenerated, but only re-applied when it actually changed. */
+	/* 加载测速内核并应用当前节点集。内核可以服务 testDelay 时返回 true。
+	   可以反复调用：配置每次都会重新生成，但只有**真的变了**才重新应用。 */
 	static synchronized boolean ensureReady(Context context, Preferences prefs) {
 		try {
 			Context app = context.getApplicationContext();
@@ -60,11 +56,10 @@ class CoreTestHost {
 			File home = new File(app.getFilesDir(), "coretest");
 			if (!home.exists())
 			  home.mkdirs();
-			/* Apply - and if the core rejects a SPECIFIC proxy, drop that node
-			   and try again. mihomo validates the whole file at once ("proxy
-			   645: invalid REALITY short ID"), so one broken node in a
-			   600-node subscription otherwise made every single node untestable,
-			   while a small country pool happened to work. */
+			/* 应用配置；如果内核明确拒绝**某一个**节点，就把那个节点剔掉重试。
+			   mihomo 是**整份文件**一起校验的（"proxy 645: invalid REALITY short
+			   ID"），所以 600 个节点的订阅里有 1 个坏节点，就会导致**所有**节点都测不了
+			   —— 而只含某个国家的小节点池碰巧能过。 */
 			for (int attempt = 0; attempt <= MAX_DROP_RETRIES; attempt++) {
 				String cfg;
 				try {
@@ -74,8 +69,7 @@ class CoreTestHost {
 					TProxyService.log("测试内核配置生成失败：" + e);
 					return false;
 				}
-				/* Direct evidence for "is the generated config carrying the
-				   nodes?": the size of its own `proxies:` section. */
+				/* "生成的配置到底带没带上节点"的直接证据：它自己 `proxies:` 段的规模。 */
 				if (cfg == null)
 				  return true;
 				boolean same = cfg.equals(lastConfig);
@@ -92,8 +86,8 @@ class CoreTestHost {
 				}
 				Apply res = applyConfig(home, nodeCount);
 				if (res.timeout) {
-					/* Still parsing: NOT ready. Probing now would aim every node
-					   at a half-loaded core. */
+					/* 还在解析配置：**不算**就绪。此时探测等于把所有节点都发给一个
+					   只加载了一半的内核。 */
 					applied = false;
 					lastConfig = "";
 					return false;
@@ -128,20 +122,19 @@ class CoreTestHost {
 		}
 	}
 
-	/* True when the core has already refused this node (badProxies): it can
-	   never be tested, so callers should report it untested instead of burning
-	   probes on it. */
+	/* 内核已经拒绝过这个节点（见 badProxies）时为 true：它永远测不了，调用方应直接
+	   报"未测速"，而不是在它身上浪费探测。 */
 	static boolean isRejected(String name) {
 		return name != null && badProxies.contains(name);
 	}
 
-	/* Outcome of one quickSetup attempt. */
+	/* 一次 quickSetup 尝试的结果。 */
 	private static final class Apply {
-		String err;        /* the core's error text, or null on success */
-		boolean timeout;   /* no callback within the scaled deadline */
+		String err;        /* 内核返回的错误文本；成功时为 null */
+		boolean timeout;   /* 在按规模放大的期限内没有收到回调 */
 	}
 
-	/* One quickSetup attempt against the file buildTestCoreConfig just wrote. */
+	/* 对 buildTestCoreConfig 刚写出的文件做一次 quickSetup 尝试。 */
 	private static Apply applyConfig(File home, int nodeCount) {
 		Apply res = new Apply();
 		String initParams = "{\"home-dir\":\"" + home.getAbsolutePath() + "\"}";
@@ -158,11 +151,9 @@ class CoreTestHost {
 				synchronized (lock) { done[0] = true; lock.notifyAll(); }
 			}
 		});
-		/* The wait scales with the config: parsing a few hundred nodes takes
-		   seconds, and a FIXED 8s window once declared a big pool "ready" while
-		   the core was still loading - every probe then failed and the whole
-		   selection came back 不可用. A timeout is a FAILURE, never a silent
-		   success. */
+		/* 等待时间随配置规模变化：解析几百个节点要好几秒，而原来**固定 8 秒**的窗口
+		   会把一个还在加载的内核判成"就绪" —— 于是每个探测都失败，整个选择结果全变成
+		   不可用。超时就是**失败**，绝不当作"悄悄成功"。 */
 		synchronized (lock) {
 			long waitMs = Math.min(60000L, 8000L + nodeCount * 30L);
 			long end = System.currentTimeMillis() + waitMs;
@@ -173,8 +164,8 @@ class CoreTestHost {
 				try {
 					lock.wait(left);
 				} catch (InterruptedException ie) {
-					/* Keep the flag and stop waiting: a caller that interrupts us
-					   wants out, and the config is then simply not ready. */
+					/* 保留标志、停止等待：调用方既然中断我们，就是想撤了，这时配置
+					   就是"没准备好"。 */
 					Thread.currentThread().interrupt();
 					break;
 				}
@@ -190,16 +181,15 @@ class CoreTestHost {
 		return res;
 	}
 
-	/* Parameter shapes the "testDelay" action may expect. The library documents
-	   none of them, so these are tried in order and the accepted one is
-	   remembered (the probing then costs one call, not one per node).
-	   What the core has told us so far, from its own error text:
-	     * `data` must be the params JSON as a STRING, not an inline object -
-	       otherwise: {"data":"invalid data type","code":-1}
-	     * inside it, `timeout` must be a NUMBER: sending a string gives
+	/* "testDelay" 动作可能接受的**参数形状**。这个库没有任何文档，所以按顺序试，
+	   并把被接受的那种记下来（之后探测只花一次调用，而不是每个节点都试一遍）。
+	   以下是内核自己的报错文本告诉我们的：
+	     * `data` 必须是**字符串**形式的参数 JSON，不能是内联对象 ——
+	       否则返回：{"data":"invalid data type","code":-1}
+	     * 其中的 `timeout` 必须是**数字**：传字符串会得到
 	       "json: cannot unmarshal string into Go struct field
-	       TestDelayParams.timeout of type int64".
-	   Hence the numeric-timeout shape comes first. */
+	       TestDelayParams.timeout of type int64"。
+	   所以"数字 timeout"的形状排在第一位。 */
 	private static final String[][] DELAY_SHAPES = {
 		{ "proxy-name", "test-url", "n" },   /* the shape the core asked for */
 		{ "proxy-name", "test-url", "s" },
@@ -208,28 +198,26 @@ class CoreTestHost {
 		{ "name", "url", "s" },
 	};
 	private static volatile int delayShape = -1;
-	/* Serialises that one-shot decision (see testDelay). */
+	/* 串行化这个"只决定一次"的过程（见 testDelay）。 */
 	private static final Object SHAPE_LOCK = new Object();
-	/* Per-probe success lines help when testing ONE node and are pure I/O noise
-	   for a thousand-node pass (each line opens and closes the log file). */
+	/* 逐个探测的成功日志，在**单节点**测速时有用；但一轮上千个节点时纯粹是 I/O 噪音
+	   （每写一行都要开关一次日志文件）。 */
 	private static volatile boolean verbose = true;
 
 	static void setVerbose(boolean v) {
 		verbose = v;
 	}
 
-	/* Node names the core refused (mihomo validates the whole file at once, so
-	   one bad proxy used to make every node untestable). Kept for the life of
-	   the process: a node the core cannot parse stays unusable. */
+	/* 内核拒绝过的节点名（mihomo 一次校验整份文件，所以以前 1 个坏节点就让**所有**
+	   节点都测不了）。进程生命周期内保留：内核解析不了的节点，一直都不能用。 */
 	private static final java.util.Set<String> badProxies =
 		java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
-	/* How many rejected nodes to peel off in one ensureReady() call before
-	   giving up. Each retry regenerates + re-applies the config, so this is
-	   deliberately small - the remaining bad nodes are dropped on later calls. */
+	/* 一次 ensureReady() 里最多剔掉多少个被拒节点。每次重试都要重新生成 + 重新应用
+	   配置，所以这个数字刻意很小 —— 剩下的坏节点留给后续调用再剔。 */
 	private static final int MAX_DROP_RETRIES = 8;
 
-	/* Body for the testDelay action in shape #shape.index. Shared with
-	   ClashApiServer, which answers the REST /delay route the same way. */
+	/* 第 shape 种形状下 testDelay 动作的参数体。与 ClashApiServer 共用
+	   （它响应 REST 的 /delay 路由时用的是同一套参数）。 */
 	static String delayData(int shape, String proxyName, String url, int timeoutMs) {
 		try {
 			String[] s = DELAY_SHAPES[shape];
@@ -243,49 +231,42 @@ class CoreTestHost {
 		}
 	}
 
-	/* Body using the remembered shape (shape 0 until one is accepted). */
+	/* 用**已记住**的形状构造参数体（还没有任何一种被接受时用形状 0）。 */
 	static String delayData(String proxyName, String url, int timeoutMs) {
 		return delayData(delayShape < 0 ? 0 : delayShape, proxyName, url, timeoutMs);
 	}
 
-	/* One probe attempt. */
+	/* 一次探测尝试。 */
 	private static final class Probe {
-		long measured = -1;   /* >=0 when the core measured a latency */
-		boolean answered;     /* the core produced a delay verdict */
-		boolean rejected;     /* the core refused THESE PARAMS (wrong shape) */
+		long measured = -1;   /* 内核测出延迟时为 >=0 */
+		boolean answered;     /* 内核给出了延迟判定 */
+		boolean rejected;     /* 内核拒绝了**这组参数**（形状不对） */
 		String raw;
 	}
 
-	/* The core's ISOLATED per-proxy probe (the "testDelay" action - what
-	   FlClash uses). Returns the latency (>=0) on success, -2 when the core
-	   itself reports that the node could not complete the probe, or null when
-	   there is no verdict at all (bridge unavailable, no answer, or a reply we
-	   cannot interpret) - which the caller reports as "未测速", NOT as
-	   unavailable. Getting that distinction wrong is what made working nodes
-	   flip to 不可用. */
+	/* 内核的**隔离式**逐节点探测（"testDelay" 动作，FlClash 用的就是这个）。
+	   成功返回延迟（>=0）；内核自己报"该节点无法完成探测"时返回 -2；完全没有判定
+	   （桥不可用 / 没有回包 / 回包看不懂）时返回 null —— 后者由调用方报成「未测速」，
+	   而不是「不可用」。把这两种情况搞混，正是当初好节点被刷成"不可用"的原因。 */
 	static Long testDelay(String proxyName, String url, int timeoutMs) {
 		return testDelay(proxyName, url, timeoutMs, 0);
 	}
 
-	/* Same, with an explicit bound on how long we may wait for the reply. The
-	   caller's per-node time limit (设置 → 每节点测速上限) can be TIGHTER than
-	   the probe's own timeout; waiting past it would make that limit a lie (the
-	   core would still hold the single bridge slot after the caller gave up),
-	   so the bound is threaded all the way down to the bridge wait. 0 = the
-	   default (probe timeout + 5s). */
+	/* 同上，但显式限定"最多等回包多久"。调用方的**每节点测速上限**
+	   （设置 → 每节点测速上限）可能比探测自身的超时更**紧**；等超过它就是让那个设置
+	   说谎（调用方放弃之后，内核还占着那唯一的桥槽位），所以这个上界一路传到桥的等待
+	   时间上。传 0 = 用默认值（探测超时 + 5s）。 */
 	static Long testDelay(String proxyName, String url, int timeoutMs, long waitBound) {
 		final long waitMs = waitBound > 0
 			? Math.max(500L, Math.min(timeoutMs + 5000L, waitBound))
 			: timeoutMs + 5000L;
-		/* No core in THIS process means the tunnel core (in :native) must be
-		   reached over HTTP instead, so answer "no verdict" without a bridge
-		   call - otherwise every probe would log a skipped action. */
+		/* 本进程里没有内核，意味着要走 HTTP 去够 :native 里的隧道内核，所以这里直接
+		   回"无判定"、不做桥调用 —— 否则每个探测都会记一条"动作被跳过"。 */
 		if (!isReady())
 		  return null;
-		/* The accepted shape is a shared one-shot latch. Settle it on ONE thread
-		   before the pool fans out: 16 concurrent probes racing it could latch
-		   shape #0 while it was still being rejected (or vice versa) and then
-		   fail every node at once - the "单个测速能用、测速全部全废" symptom. */
+		/* "哪种形状被接受"是一个**共享的一次性闩锁**。必须在工作线程铺开**之前**由单线程
+		   定下来：多个探测并发抢它，可能在形状 #0 其实仍被拒的时候就把它锁死（或反之），
+		   于是所有节点一起失败 —— 也就是"单个测速能用、测速全部全废"那个现象。 */
 		if (delayShape < 0) {
 			synchronized (SHAPE_LOCK) {
 				if (delayShape < 0) {
@@ -306,9 +287,8 @@ class CoreTestHost {
 		  return null;
 		Probe p = probe(shape, proxyName, url, timeoutMs, waitMs);
 		if (p.rejected) {
-			/* The remembered shape stopped being accepted (the core reloaded
-			   with another build?): forget it so the next call re-detects,
-			   instead of failing every remaining node this pass. */
+			/* 已记住的形状不再被接受（内核被换成了别的构建版本？）：忘掉它，让下一次
+			   调用重新探测，而不是让本轮剩下的所有节点全部失败。 */
 			synchronized (SHAPE_LOCK) {
 				delayShape = -1;
 			}
@@ -322,13 +302,11 @@ class CoreTestHost {
 		return null;
 	}
 
-	/* Try each shape until the core stops complaining about the parameters.
-	   Runs on one thread only.
-	   "Accepted" means the core did not refuse the payload - NOT that it
-	   produced a delay: waiting for a real answer here costs one full probe per
-	   shape (5 x (timeout+5s) = over a minute with a long timeout) and that
-	   stall happens BEFORE any node is tested, so the user just sees a frozen
-	   0% progress bar. */
+	/* 逐个形状试，直到内核不再抱怨参数。**只在单线程上跑**。
+	   这里的"被接受"指的是内核没有拒绝这个参数体，**不是**它给出了延迟：如果在这里
+	   等一个真实答案，每种形状都要耗掉一整次探测（5 ×（超时+5s），超时调大时超过
+	   一分钟），而且这段卡顿发生在**任何一个节点被测之前**，用户看到的只是进度条
+	   冻在 0%。 */
 	private static int detectShape(String proxyName, String url, int timeoutMs,
 			long waitMs) {
 		for (int i = 0; i < DELAY_SHAPES.length; i++) {
@@ -342,14 +320,14 @@ class CoreTestHost {
 		return -1;
 	}
 
-	/* One attempt with shape #shape. */
+	/* 用第 shape 种形状做一次尝试。 */
 	private static Probe probe(int shape, String proxyName, String url, int timeoutMs,
 			long waitMs) {
 		Probe r = new Probe();
 		try {
 			String params = delayData(shape, proxyName, url, timeoutMs);
-			/* The probe may run for `timeoutMs` inside the core, so wait beyond
-			   that - but never past the caller's per-node budget. */
+			/* 探测可能在内核里跑满 `timeoutMs`，所以要等得比它久 —— 但绝不越过调用方
+			   给这个节点的额度。 */
 			String raw = TProxyService.apiActionRaw("testDelay", params, waitMs);
 			r.raw = raw;
 			if (raw == null) {
@@ -369,12 +347,10 @@ class CoreTestHost {
 			}
 			if (code != 0) {
 				String msg = String.valueOf(data);
-				/* These are the core REFUSING THE PARAMETERS (wrong container,
-				   wrong field type, wrong field name), NOT a verdict about the
-				   node - so the caller tries the next shape instead of writing
-				   the node off. The core spells it out: "invalid data type" for
-				   a bad container and "json: cannot unmarshal ..." for a field
-				   of the wrong type. */
+				/* 这些是内核在**拒绝参数**（容器不对 / 字段类型不对 / 字段名不对），
+				   **不是**对节点的判定 —— 所以调用方应该换下一种形状，而不是把这个节点
+				   写死成坏节点。内核自己说得很直白：容器不对是 "invalid data type"，
+				   字段类型不对是 "json: cannot unmarshal ..."。 */
 				r.rejected = msg.contains("invalid data type")
 					|| msg.contains("cannot unmarshal")
 					|| msg.contains("unmarshal")
@@ -390,20 +366,20 @@ class CoreTestHost {
 			try {
 				ms = Integer.parseInt(s);
 			} catch (Throwable e) {
-				/* Answered, but not with a number: a malfunction (bad reply),
-				   so the node stays untested rather than being called broken. */
+				/* 有回包，但不是数字：这是**故障**（回包异常），所以节点保持"未测速"，
+				   而不是被判成坏节点。 */
 				TProxyService.log("delay: 动作返回非数字 \"" + truncate(s) + "\" name="
 					+ proxyName + " url=" + url);
 				return r;
 			}
 			r.answered = true;
 			if (ms <= 0) {
-				/* The core's own verdict: the probe could not complete. */
+				/* 这是**内核自己**的判定：探测无法完成。 */
 				TProxyService.log("delay: 内核判定失败(" + ms + ") name=" + proxyName
 					+ " url=" + url);
 				return r;
 			}
-			/* mihomo's own number, used as-is: no offset, no estimate. */
+			/* 直接用 mihomo 自己给的数字：不加偏移、不做估算。 */
 			r.measured = ms;
 			if (verbose)
 			  TProxyService.log("delay: 可用 name=" + proxyName + " " + ms + "ms shape#"
@@ -415,9 +391,8 @@ class CoreTestHost {
 		}
 	}
 
-	/* Number of list entries inside the config's own `proxies:` section, i.e.
-	   how many nodes the generated profile actually declares. Counting stops at
-	   the next top-level key so rules / groups are never included. */
+	/* 配置自己 `proxies:` 段里的条目数，也就是生成的配置**真正声明**了多少个节点。
+	   数到下一个顶层 key 就停，所以规则 / 代理组永远不会被算进来。 */
 	static int countProxies(String cfg) {
 		if (cfg == null)
 		  return 0;
@@ -430,7 +405,7 @@ class CoreTestHost {
 			}
 			if (!inProxies)
 			  continue;
-			/* A non-indented, non-empty line is the next top-level section. */
+			/* 没有缩进且非空的行 = 下一个顶层段开始了。 */
 			if (!line.isEmpty() && !line.startsWith(" ") && !line.startsWith("\t"))
 			  break;
 			if (line.trim().startsWith("- "))

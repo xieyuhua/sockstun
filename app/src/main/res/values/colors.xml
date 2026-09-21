@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-	<!-- Terminal / hacker palette: near-black canvas, one neon accent. -->
+	<!-- 终端 / 极客配色：近乎纯黑的底色，配一个霓虹强调色。 -->
 	<color name="brand">#00E5A0</color>
 	<color name="brand_dim">#0B2E26</color>
 	<color name="brand_deep">#10261F</color>
@@ -15,7 +15,7 @@
 	<color name="text_dim">#7F9A93</color>
 	<color name="line">#1F2C29</color>
 
-	<!-- Adaptive launcher icon background. -->
+	<!-- 自适应启动图标的背景色。 -->
 	<color name="icon_background">#060A09</color>
 
 	<color name="danger">#FF5C7A</color>

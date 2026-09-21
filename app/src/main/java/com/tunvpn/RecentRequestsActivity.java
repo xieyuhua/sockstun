@@ -1,10 +1,9 @@
 /*
  ============================================================================
- Name        : RecentRequestsActivity.java
- Description : Historical view of connections that have already closed. The
-               core only reports what is open *now*, so TProxyService watches
-               for connections disappearing from /connections and records them
-               here as "what went where". This screen just reads that list.
+ 文件名  : RecentRequestsActivity.java
+ 说明    : 已经关闭的连接的历史视图。内核只报告"此刻开着"的连接，所以 TProxyService
+           会盯着 /connections，把消失的连接记成一条"谁去过哪里"，存下来；本页只负责
+           读这份记录。
  ============================================================================
 */
 
@@ -48,9 +47,8 @@ public class RecentRequestsActivity extends BaseActivity {
 	private final List<Row> rows = new ArrayList<Row>();
 	private String query = "";
 
-	/* One closed request, kept as raw fields so the detail dialog can show
-	   every piece of information the recorder captured. route()/meta() build
-	   the composite strings the list rows display. */
+	/* 一条已关闭的请求，按原始字段保存，这样详情弹窗能展示记录器抓到的每一项信息。
+	   route()/meta() 负责拼出列表行展示的组合字符串。 */
 	private static class Row {
 		String target;
 		String rule;
@@ -150,8 +148,7 @@ public class RecentRequestsActivity extends BaseActivity {
 		load();
 	}
 
-	/* The recorder keeps running while the tunnel is up, so refresh on every
-	   resume rather than only once. */
+	/* 隧道运行期间记录器一直在写，所以每次回到本页都要刷新，而不是只刷一次。 */
 	@Override
 	protected void onResume() {
 		super.onResume();
@@ -192,8 +189,7 @@ public class RecentRequestsActivity extends BaseActivity {
 		} catch (Exception e) {
 			return null;
 		}
-		/* Busiest first: the request the user is usually hunting for is the one
-		   that actually moved data. */
+		/* 流量大的排前面：用户要找的通常就是真正传了数据的那条。 */
 		Collections.sort(out, new Comparator<Row>() {
 			@Override
 			public int compare(Row a, Row b) {
@@ -217,18 +213,26 @@ public class RecentRequestsActivity extends BaseActivity {
 		return h + "h" + (m % 60) + "m";
 	}
 
-	/* startMs is recorded as SystemClock.elapsedRealtime() (time since boot),
-	   not a wall-clock stamp. Convert it back to a real local time so the user
-	   sees "when" the request happened rather than an opaque uptime value. */
+	/* startMs 记录的是 SystemClock.elapsedRealtime()（开机以来的毫秒数），不是墙钟
+	   时间戳。这里换算回真实的本地时间，让用户看到请求**发生在什么时候**，而不是一个
+	   看不懂的开机时长。 */
+	/* 这个方法在每行渲染、以及每次输入过滤时都会被逐行调用，
+	   所以格式化器按线程复用一个（SimpleDateFormat 非线程安全）。 */
+	private static final ThreadLocal<java.text.SimpleDateFormat> CLOCK_FMT =
+		new ThreadLocal<java.text.SimpleDateFormat>() {
+			@Override protected java.text.SimpleDateFormat initialValue() {
+				return new java.text.SimpleDateFormat(
+					"MM-dd HH:mm:ss", java.util.Locale.getDefault());
+			}
+		};
+
 	private static String formatClock(long elapsedMs) {
 		if (elapsedMs <= 0)
 		  return "";
 		long nowWall = System.currentTimeMillis();
 		long nowElapsed = SystemClock.elapsedRealtime();
 		long wallStart = nowWall - (nowElapsed - elapsedMs);
-		java.text.DateFormat df = new java.text.SimpleDateFormat(
-			"MM-dd HH:mm:ss", java.util.Locale.getDefault());
-		return df.format(new java.util.Date(wallStart));
+		return CLOCK_FMT.get().format(new java.util.Date(wallStart));
 	}
 
 	private void updateSummary(boolean available) {
@@ -264,9 +268,8 @@ public class RecentRequestsActivity extends BaseActivity {
 		return s != null && s.toLowerCase().contains(q);
 	}
 
-	/* Wipe the whole recent-requests history. We both clear the persisted store
-	   and ask the running service to drop its in-memory list, otherwise the
-	   background flush would refill the file on its next tick. */
+	/* 清空全部最近请求。既清持久化存储，也要让正在运行的服务丢掉它内存里的列表，
+	   否则后台的定期落盘下一次就会把文件重新填满。 */
 	private void clearAll() {
 		if (allRows.isEmpty()) {
 			Toast.makeText(this, R.string.recent_requests_empty, Toast.LENGTH_SHORT).show();
@@ -289,8 +292,7 @@ public class RecentRequestsActivity extends BaseActivity {
 			.show();
 	}
 
-	/* Tap a row to see everything the recorder captured for that request.
-	   Values are selectable so the user can copy a host or rule. */
+	/* 点某一行查看记录器为这条请求抓到的全部信息。各字段可选中，方便复制主机名或规则名。 */
 	private void showDetail(Row r) {
 		ScrollView sv = new ScrollView(this);
 		LinearLayout ll = new LinearLayout(this);

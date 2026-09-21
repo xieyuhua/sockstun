@@ -1,52 +1,32 @@
-/* Root build script: declares the Android Gradle Plugin on the buildscript
-   classpath for the :app module, and the repositories every module resolves
-   from. Do NOT overwrite this file with app/build.gradle - the root script
-   has no AGP on its classpath, so an "apply plugin: 'com.android.application'"
-   at line 1 makes Gradle fail with
-   "Plugin with id 'com.android.application' not found". */
+/* 根构建脚本：在 buildscript 的 classpath 上声明 Android Gradle Plugin，
+   供 :app 模块使用，并声明所有模块解析依赖所用的仓库。
+   **不要**把本文件的内容覆盖成 app/build.gradle —— 根脚本的 classpath 上没有 AGP，
+   所以第 1 行写 "apply plugin: 'com.android.application'" 会让 Gradle 报
+   "Plugin with id 'com.android.application' not found"。 */
 
-/**
- * The buildscript block is where you configure the repositories and
- * dependencies for Gradle itself--meaning, you should not include dependencies
- * for your modules here. For example, this block includes the Android plugin for
- * Gradle as a dependency because it provides the additional instructions Gradle
- * needs to build Android app modules.
- */
+/* buildscript 块配置的是 Gradle **自身**（构建时）要用的仓库和依赖，
+   也就是插件；各个模块的依赖不放这里。 */
 
 buildscript {
 
-	/**
-	 * The repositories block configures the repositories Gradle uses to
-	 * search or download the dependencies. Gradle pre-configures support for remote
-	 * repositories such as JCenter, Maven Central, and Ivy. You can also use local
-	 * repositories or define your own remote repositories. The code below defines
-	 * JCenter as the repository Gradle should use to look for its dependencies.
-	 */
+	/* 从 Maven Central 与 Google 的 Maven 仓库解析插件依赖。
+	   （Android Studio 模板里那段"使用 JCenter"是旧内容：JCenter 早已停服。） */
 
 	repositories {
 		mavenCentral()
 		google()
 	}
 
-	/**
-	 * The dependencies block configures the dependencies Gradle needs to use
-	 * to build your project. The following line adds Android plugin for Gradle
-	 * version 2.3.1 as a classpath dependency.
-	 */
+	/* 把 Android Gradle Plugin 作为 classpath 依赖引入（当前版本见下一行，
+	   模板注释里写的 2.3.1 早已过时）。 */
 
 	dependencies {
 		classpath 'com.android.tools.build:gradle:8.4.1'
 	}
 }
 
-/**
- * The allprojects block is where you configure the repositories and
- * dependencies used by all modules in your project, such as third-party plugins
- * or libraries. Dependencies that are not required by all the modules in the
- * project should be configured in module-level build.gradle files. For new
- * projects, Android Studio configures JCenter as the default repository, but it
- * does not configure any dependencies.
- */
+/* allprojects 配置的是**所有模块共用**的仓库和依赖；
+   只有某个模块需要的依赖，应写在那个模块自己的 build.gradle 里。 */
 
 allprojects {
 	repositories {

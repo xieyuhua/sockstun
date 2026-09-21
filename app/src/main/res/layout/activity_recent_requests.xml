@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Recent-requests screen: a searchable list of connections that have already
-     closed, recorded by TProxyService. No "close all" button because these are
-     historical, not live. -->
+<!-- 「最近请求」页：一个可搜索的列表，内容是由 TProxyService 记录的**已关闭**连接。
+     这里没有"全部断开"按钮，因为这些都是历史记录，不是活动连接。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
 	xmlns:app="http://schemas.android.com/apk/res-auto"
 	android:orientation="vertical"

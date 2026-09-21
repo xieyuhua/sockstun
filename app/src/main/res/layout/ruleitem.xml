@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One routing rule: a type chip, its value, the action and a delete button. -->
+<!-- 一行路由规则：类型标签、规则值、动作，以及一个删除按钮。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
 	android:orientation="horizontal"
 	android:layout_width="match_parent"

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Ids for the programmatically built settings rows (SettingsActivity): each
-     row is given its id with View.setId(), so the id only needs to exist in R. -->
+<!-- 给代码里动态构建的设置行用的 id（SettingsActivity）：每一行都用 View.setId()
+     赋 id，所以这些 id 只需要存在于 R 里即可。 -->
 <resources>
 	<item name="settings_connection" type="id"/>
 	<item name="settings_apps" type="id"/>

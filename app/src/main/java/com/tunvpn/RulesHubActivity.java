@@ -1,8 +1,8 @@
 /*
  ============================================================================
- Name        : RulesHubActivity.java
- Description : One page for the routing / DNS / rule settings, in the order
-               they apply: routing → DNS → routing rules.
+ 文件名  : RulesHubActivity.java
+ 说明    : 分流 / DNS / 路由规则三块设置合在一页，且按生效顺序排列：
+           分流作用域 → DNS → 路由规则。
  ============================================================================
  */
 
@@ -41,12 +41,12 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 	private CompoundButton checkbox_ipv6;
 	private CompoundButton checkbox_udp_in_tcp;
 	private MaterialButton button_apps;
-	/* Live hint under the routing card: explains the two routing layers, and
-	   warns when "per-app" mode has no apps selected (empty tunnel scope). */
+	/* 分流卡片下方的实时提示：解释"两层路由"，并在"部分应用"却没勾任何应用
+	   （隧道作用域为空）时给出警告。 */
 	private TextView textview_scope_hint;
 	private int scopeHintColor;
 	private int scopeErrorColor;
-	/* Action colours for the rule rows: proxy = primary, direct = muted. */
+	/* 规则行的动作配色：走代理 = 主色，直连 = 弱化色。 */
 	private int ruleProxyColor;
 	private int ruleDirectColor;
 
@@ -59,7 +59,7 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 	private CompoundButton switch_default_proxy;
 	private Spinner spinner_type;
 	private Spinner spinner_action;
-	/* Value field's container, so its hint can follow the picked rule type. */
+	/* 值输入框的容器，方便让它的 hint 跟着所选规则类型变化。 */
 	private TextInputLayout til_rule_value;
 	private Spinner spinner_strategy;
 	private TextView textview_mode_hint;
@@ -83,7 +83,7 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 			}
 		});
 
-		/* --- routing --- */
+		/* --- 路由开关 --- */
 		checkbox_global = (CompoundButton) findViewById(R.id.global);
 		checkbox_ipv4 = (CompoundButton) findViewById(R.id.ipv4);
 		checkbox_ipv6 = (CompoundButton) findViewById(R.id.ipv6);
@@ -101,7 +101,7 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		ruleDirectColor = MaterialColors.getColor(this,
 			com.google.android.material.R.attr.colorOnSurfaceVariant, Color.GRAY);
 
-		/* --- dns --- */
+		/* --- DNS --- */
 		checkbox_remote_dns = (CompoundButton) findViewById(R.id.remote_dns);
 		edittext_dns_ipv4 = (EditText) findViewById(R.id.dns_ipv4);
 		edittext_dns_ipv6 = (EditText) findViewById(R.id.dns_ipv6);
@@ -109,7 +109,7 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		til_dns_ipv6 = (TextInputLayout) findViewById(R.id.til_dns_ipv6);
 		checkbox_remote_dns.setOnClickListener(this);
 
-		/* --- rules --- */
+		/* --- 路由规则 --- */
 		switch_default_proxy = (CompoundButton) findViewById(R.id.rules_default_proxy);
 		spinner_type = (Spinner) findViewById(R.id.rule_type);
 		spinner_action = (Spinner) findViewById(R.id.rule_action);
@@ -121,8 +121,8 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 
 		setupSpinner(spinner_type, R.array.rule_types);
 		setupSpinner(spinner_action, R.array.rule_actions);
-		/* The expected value differs per rule type, so the hint follows the
-		   picker (it fires right away with position 0). */
+		/* 每种规则类型期望的值不一样，所以 hint 跟着选择器走（它会立刻以 position 0
+		   触发一次，正好把初始提示刷成第一种类型）。 */
 		spinner_type.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
 			@Override
 			public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
@@ -133,7 +133,7 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 			}
 		});
 
-		/* Routing strategy: rule mode / global proxy / global direct. */
+		/* 分流策略：规则模式 / 全局代理 / 全局直连。 */
 		spinner_strategy = (Spinner) findViewById(R.id.rules_strategy);
 		textview_mode_hint = (TextView) findViewById(R.id.rules_mode_hint);
 		setupSpinner(spinner_strategy, R.array.rule_strategies);
@@ -194,30 +194,27 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		edittext_dns_ipv6.setText(prefs.getDnsIpv6());
 
 		boolean editable = !prefs.getEnable();
-		/* The global/per-app switch must stay togglable while connected, since
-		   "per-app" is the only way the app allow-list takes effect. With it
-		   locked, a running tunnel could never leave global mode, making the
-		   app list (edited in AppListActivity) permanently ignored. */
+		/* 全局/部分应用这个开关在已连接时也必须可切换：只有切到"部分应用"，应用
+		   白名单才会生效。若锁住它，运行中的隧道就永远出不了全局模式，AppListActivity
+		   里编辑的应用列表会被永久忽略。 */
 		checkbox_global.setEnabled(true);
 		checkbox_ipv4.setEnabled(editable);
 		checkbox_ipv6.setEnabled(editable);
 		checkbox_udp_in_tcp.setEnabled(editable);
 		checkbox_remote_dns.setEnabled(editable);
 
-		/* Allow entering the app list while connected too; AppListActivity
-		   now rebuilds the tunnel on save so the new scope applies live. */
+		/* 已连接时也允许进入应用列表：AppListActivity 现在保存后会重建隧道，新的
+		   作用域可以立即生效。 */
 		button_apps.setEnabled(!checkbox_global.isChecked());
 		applyDnsEnabled(editable, checkbox_remote_dns.isChecked());
-		/* Rule controls depend on both editability and the chosen strategy, so
-		   let updateModeUi() own them. */
+		/* 规则控件的状态同时取决于"可编辑"与"当前策略"，所以统一交给 updateModeUi()
+		   处理。 */
 		updateModeUi();
 		updateScopeHint();
 	}
 
-	/* Refresh the hint under the routing card. It always explains that the
-	   VPN scope (global / per-app) is evaluated before the routing strategy,
-	   and turns into a warning when per-app mode has no apps selected (which
-	   would leave the tunnel with zero captured traffic). */
+	/* 刷新分流卡片下方的提示。它始终说明"VPN 作用域（全局/部分应用）先于分流策略
+	   生效"；当"部分应用"却没勾任何应用时（隧道将捕获不到任何流量）变成警告。 */
 	private void updateScopeHint() {
 		if (textview_scope_hint == null)
 		  return;
@@ -237,9 +234,8 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		}
 	}
 
-	/* Enable/disable the rule-editing controls and pick the mode hint based on
-	   the current routing strategy. In the two global modes the rule list is
-	   ignored, so editing it would be misleading. */
+	/* 按当前分流策略启用/禁用规则编辑控件，并选择对应的模式提示。两个全局模式下
+	   规则列表根本不参与匹配，还允许编辑会误导用户。 */
 	private void updateModeUi() {
 		boolean editable = !prefs.getEnable();
 		String strat = prefs.getRulesStrategy();
@@ -275,8 +271,8 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 	@Override
 	protected void onResume() {
 		super.onResume();
-		/* The app list is edited in a separate activity; re-sync the hint
-		   (an empty per-app scope may now have apps, or vice versa). */
+		/* 应用列表是在另一个页面编辑的，回到本页要重新同步提示
+		   （刚才"空的部分应用范围"现在可能已经有应用了，反之亦然）。 */
 		updateScopeHint();
 	}
 
@@ -307,9 +303,8 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 				  Toast.makeText(RulesHubActivity.this,
 					R.string.routing_scope_empty_warn, Toast.LENGTH_LONG).show();
 			}
-			/* Global vs per-app scope is decided when the tunnel is
-			   established, so toggling it on a live connection must rebuild
-			   the tunnel for the change to take effect. */
+			/* 全局 vs 部分应用的作用域是在**建立隧道**时决定的，所以在已连接状态切换
+			   它必须重建隧道才能生效。 */
 			if (prefs.getEnable()) {
 				startService(new Intent(this, TProxyService.class)
 					.setAction(TProxyService.ACTION_RECONNECT));
@@ -355,8 +350,7 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		}
 	}
 
-	/* The value field's hint follows the picked rule type, so the expected
-	   format is visible instead of guessed. */
+	/* 值输入框的 hint 跟着所选规则类型走，把期望格式直接摆出来，不用用户猜。 */
 	private void updateValueHint(int type) {
 		String[] hints = getResources().getStringArray(R.array.rule_value_hints);
 		if (type >= 0 && type < hints.length)
@@ -419,14 +413,14 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		renderRules();
 	}
 
-	/* Validate the value against the chosen rule type. '|' and ';' are rejected
-	   because they are the field/record separators used when rules are stored. */
+	/* 按所选规则类型校验值。'|' 与 ';' 一律拒绝，因为规则持久化时用的就是它们做
+	   字段 / 记录分隔符。 */
 	private boolean checkValue(int type, String value) {
 		if (value.isEmpty() || value.indexOf('|') >= 0 || value.indexOf(';') >= 0)
 		  return false;
 		switch (type) {
 			case Preferences.Rule.TYPE_DOMAIN:
-				/* A domain suffix: no slash, no prefix. */
+				/* 域名后缀：不能带斜杠、也不能带前缀。 */
 				return value.indexOf('/') < 0;
 			case Preferences.Rule.TYPE_IP:
 				if (value.indexOf('/') >= 0)
@@ -449,18 +443,18 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 				return prefix >= 0 && prefix <= (v6 ? 128 : 32);
 			}
 			case Preferences.Rule.TYPE_KEYWORD:
-				/* Any non-empty substring of a domain name. */
+				/* 域名里任意一段非空子串都算合法。 */
 				return true;
 			case Preferences.Rule.TYPE_GEOIP:
-				/* ISO-3166 alpha-2 country code. */
+				/* ISO-3166 两位国家码。 */
 				return value.matches("^[A-Za-z]{2}$");
 			case Preferences.Rule.TYPE_PROCESS:
 				return true;
 			case Preferences.Rule.TYPE_DOMAIN_FULL:
-				/* An exact domain: no path, no leading dot. */
+				/* 精确域名：不能带路径，也不能以点开头。 */
 				return value.indexOf('/') < 0 && !value.startsWith(".");
 			case Preferences.Rule.TYPE_GEOSITE:
-				/* A geosite tag, e.g. "geolocation-cn" or "openai". */
+				/* geosite 标签，例如 "geolocation-cn" 或 "openai"。 */
 				return value.matches("^[A-Za-z0-9_\\-]+$");
 			case Preferences.Rule.TYPE_PROCESS_PATH:
 				return true;
@@ -477,8 +471,8 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		}
 	}
 
-	/* True for a literal IPv4 (four 0-255 octets) or IPv6 (contains ':') address.
-	   Hostnames are rejected so an "IP" rule never triggers a DNS lookup. */
+	/* 字面量 IPv4（四段 0-255）或 IPv6（含 ':'）才返回 true。域名一律拒绝，这样
+	   "IP" 规则永远不会触发 DNS 查询。 */
 	private static boolean looksLikeIp(String s) {
 		if (s.indexOf(':') >= 0)
 		  return true;

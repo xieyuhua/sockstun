@@ -1,17 +1,13 @@
 /*
  ============================================================================
- Name        : MihomoConfig.java
- Description : Build a mihomo (clash.meta) configuration file from what the app
-               owns, plus the TUN/DNS/log sections mihomo needs on Android.
+ 文件名  : MihomoConfig.java
+ 说明    : 按 App 自己的设置生成 mihomo（clash.meta）配置文件，并补上 Android 上必需的
+           TUN / DNS / log 等段。
 
-               Routing is owned by the app, not by the subscriptions: every
-               subscription contributes proxy nodes only, the nodes are merged
-               into one pool, and a single self-built group points at that pool
-               (url-test = auto-pick the fastest, select = use exactly the node
-               the user chose). Subscriptions' own proxy-groups and rules are
-               deliberately ignored - they cannot be merged across several
-               sources anyway - and the app's "routing rules" page is what
-               decides proxy vs direct.
+           分流由 App 自己掌握，而不是交给订阅：每份订阅**只贡献节点**，节点被合并成
+           一个池，再由我们自己构造的组指向这个池（url-test = 自动挑最快，select = 严格
+           使用用户选中的那个节点）。订阅自带的代理组与规则被**刻意忽略**（多份订阅本来
+           也无法合并），代理还是直连由 App 的「路由规则」页决定。
  ============================================================================
 */
 
@@ -31,32 +27,25 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class MihomoConfig {
-	/* The proxy-group we build ourselves. The app's rules and the manual node
-	   pick both resolve through this name. */
+	/* 我们自己构造的代理组名。App 的规则和"手动选节点"都通过这个名字解析。 */
 	public static final String GROUP = "tunvpn";
-	/* The url-test group that spans every node (the "fastest anywhere" choice
-	   in auto mode). */
+	/* 覆盖全部节点的 url-test 组（自动模式下的"哪都快"选项）。 */
 	public static final String GLOBAL_GROUP = GROUP + "-global";
 
-	/* Name of the per-country url-test group for an ISO-3166 alpha-2 code. */
+	/* 某个 ISO-3166 两位国家码对应的"按国家" url-test 组名。 */
 	public static String countryGroup(String cc) {
 		return GROUP + "-" + cc;
 	}
-	/* mihomo's RESTful API. Bound to 0.0.0.0 (all interfaces) rather than
-	   127.0.0.1: on several Android builds the VPN app's own loopback traffic
-	   is captured by its own gvisor TUN and re-emerges on the device's LAN IP,
-	   so a 127.0.0.1-only listener is unreachable from the app (the symptom
-	   was "9090 never listens" while mixed-port, bound to "*", worked). We DO
-	   set a `secret`, so the now-LAN-exposed API is authenticated. At startup
-	   we scan 9090..9100 and switch to the first free port, because a port
-	   already held by another process makes mihomo silently fail to bind the
-	   control API (symptom: tunnel up but /connections is connection-refused
-	   and every counter stays 0). */
+	/* mihomo 的 RESTful 控制接口端口。**绑回环 127.0.0.1**：在本构建上绑
+	   0.0.0.0（所有接口）会**静默绑定失败**（症状是"9090 从没监听"，而绑 "*" 的
+	   mixed-port 却正常），所以配置里一律写成 127.0.0.1。仍然设置 `secret` 鉴权。
+	   启动时从 9090 扫到 9100、取第一个空闲端口：端口被别的进程占着时，mihomo 绑定
+	   控制接口会**静默失败**（症状：隧道通了，但 /connections 连接被拒、所有计数器
+	   恒为 0）。 */
 	public static int API_PORT = 9090;
 
-	/* Find a free loopback port for the clash-api and store it in API_PORT.
-	   Returns the chosen port. Falls back to 9090 if the whole range is taken,
-	   letting mihomo report the real bind error instead of us guessing. */
+	/* 为 clash-api 找一个空闲的回环端口并存进 API_PORT，返回选中的端口。
+	   整段范围都被占用时退回 9090，让 mihomo 报出真实的绑定错误，而不是我们瞎猜。 */
 	public static int pickApiPort() {
 		for (int p = 9090; p <= 9100; p++) {
 			if (isPortFree(p)) {
@@ -68,10 +57,9 @@ public class MihomoConfig {
 		return API_PORT;
 	}
 
-	/* True when nothing on this device is already listening on 127.0.0.1:port.
-	   mihomo binds external-controller to 127.0.0.1, so the probe must use the
-	   same address: a port we can bind on 127.0.0.1 is one mihomo can bind too.
-	   We bind a throwaway socket the same way mihomo will. */
+	/* 本机上 127.0.0.1:port 还没人监听时为 true。mihomo 把 external-controller
+	   绑在 127.0.0.1，所以探测也必须用同一个地址：我们能在 127.0.0.1 上绑的端口，
+	   mihomo 也能绑。这里就是按 mihomo 的方式绑一个一次性 socket 来试。 */
 	private static boolean isPortFree(int port) {
 		java.net.ServerSocket ss = null;
 		try {
@@ -87,95 +75,95 @@ public class MihomoConfig {
 			}
 		}
 	}
-	/* Bail-out threshold for the auto re-test interval. */
+	/* 自动重测间隔的上下限（超出即拒绝）。 */
 	private static final int MIN_INTERVAL = 30;
 	private static final int MAX_INTERVAL = 86400;
 
-	/* Compiled once: the proxy validation runs for every node of every config
-	   rebuild (hundreds of nodes, several rebuilds per launch). */
+	/* 只编译一次：节点校验会在每次重建配置时对**每个**节点跑一遍
+	   （几百个节点、每次启动要重建好几次）。 */
 	private static final Pattern SHORT_ID =
 		Pattern.compile("short-id\\s*:\\s*[\"']?([^\"'\\s,}\\]{]*)");
-	/* mihomo names a rejected proxy as "proxy <index>: <reason>". */
+	/* mihomo 对被拒节点的报法是 "proxy <序号>: <原因>"。 */
 	private static final Pattern PROXY_INDEX = Pattern.compile("proxy\\s+(\\d+)\\s*:");
 
-	/* Write the final clash config into the app's files dir and return the
-	   file. Throws if no upstream has been configured yet. */
+	/* build() **实际写进配置**的节点数（已应用"手动服务器优先"、国家筛选、内核拒绝的
+	   节点剔除与重名去重），供 describe() 的日志行使用。-1 = 还没构建过。
+	   由生成配置的那两个函数（mergedConfig / manualSocksConfig）在**产出文本时**顺手
+	   记下，而不是事后回头解析一遍，也不是让 describe() 去数订阅 —— 后者数出来的是
+	   **打算用的**节点（被筛掉、被排除的也算在内），于是"筛选后一个都不剩"这种最该
+	   看见的情况，日志里反而写着 600 个节点。 */
+	private static volatile int lastBuiltNodes = -1;
+
+	/* 把最终的 clash 配置写进 App 的 files 目录并返回该文件。
+	   还没有配置任何上游时抛异常。 */
 	public static File build(Context context, Preferences prefs) throws IOException {
 		return build(context, prefs, null);
 	}
 
-	/* Same, minus the node names the core has already refused (see
-	   TProxyService.rejectedNodes): one invalid proxy otherwise makes mihomo
-	   reject the whole profile, so the tunnel never comes up. */
+	/* 同上，但会剔除内核已经拒绝过的节点名（见 TProxyService.rejectedNodes）：
+	   否则只要有一个非法节点，mihomo 就会拒绝**整份**配置，隧道永远起不来。 */
 	public static File build(Context context, Preferences prefs,
 			java.util.Set<String> skip) throws IOException {
-		/* An enabled SOCKS5 server wins; otherwise every subscription is
-		   merged into one node pool. */
+		/* 已启用的手动服务器优先；否则把所有订阅合并成一个节点池。 */
 		SocksServer server = prefs.getActiveSocksServer();
 		StringBuilder cfg = new StringBuilder(
 			server != null ? manualSocksConfig(prefs, server) : mergedConfig(prefs, skip));
 		if (!cfg.toString().endsWith("\n"))
 		  cfg.append('\n');
 
-		/* DNS: without a subscription to inherit one from, set up the fake-ip
-		   resolver ourselves. */
+		/* DNS：没有订阅可以继承 DNS 配置，所以自己搭一个 fake-ip 解析器。 */
 		if (!sectionExists(cfg, "dns:"))
 			cfg.append("dns:\n")
 				.append("  enable: true\n")
 				.append("  enhanced-mode: fake-ip\n")
 				.append("  fake-ip-range: 198.18.0.1/16\n")
-				/* No DoH fallback: 1.1.1.1 is unreachable from a lot of
-				   networks, and an unreachable fallback makes every lookup
-				   wait for its timeout. With fake-ip the real hostname is
-				   handed to the proxy anyway, so foreign names do not need a
-				   local resolver at all. */
+				/* 不配 DoH 兜底：1.1.1.1 在很多网络里都不可达，而一个不可达的兜底会
+				   让每次解析都等到自己超时。用 fake-ip 时真实域名本来就会交给代理去解，
+				   所以境外域名根本不需要本地解析器。 */
 				.append("  nameserver:\n")
 				.append("    - 223.5.5.5\n")
 				.append("    - 119.29.29.29\n");
 
-		/* Point mihomo's own log at a file. The clash-api start/bind lines and
-		   any panic live here, not in the app's stdio - without this the reason
-		   "9090 never listens" stays invisible (we only saw a silent no-listen). */
+		/* 让 mihomo 自己的日志写进文件。clash-api 的启动/绑定行、以及任何 panic 都在
+		   这里，而不在 App 的标准输出里 —— 少了它，"9090 从没监听"的原因就永远看不见
+		   （我们以前只看到一个"静默地没监听"）。 */
 		if (!sectionExists(cfg, "log:"))
 			cfg.append("log:\n  level: info\n  report: false\n  file: \"")
 				.append(new File(context.getCacheDir(), "mihomo.log").getAbsolutePath())
 				.append("\"\n");
 
-		/* TUN is driven by Clash.startTUN (it supplies the fd + protect
-		   callback). We only enable it and let mihomo auto-route traffic. */
+		/* TUN 由 Clash.startTUN 驱动（它负责提供 fd 与 protect 回调）。我们只把它打开，
+		   路由交给 mihomo 自动接管。 */
 		if (!sectionExists(cfg, "tun:"))
 			cfg.append("tun:\n")
 				.append("  enable: true\n")
 				.append("  auto-route: true\n")
 				.append("  auto-detect-interface: true\n")
-				/* Without the hijack, DNS lookups skip the core's fake-ip
-				   resolver and hit the system resolver directly. */
+				/* 不做 DNS 劫持的话，域名解析会绕过内核的 fake-ip 解析器，直接打到
+				   系统解析器上。 */
 				.append("  dns-hijack:\n")
 				.append("    - any:53\n");
 
-		/* API used to tell proxied traffic apart from direct traffic (the point
-		   of the home screen's counters). Bound to 127.0.0.1 (loopback) and
-		   authenticated via `secret` - see the note on API_PORT above. */
-		/* Bind the clash-api to the loopback (127.0.0.1). The app reaches it via
-		   a protect()'d socket (localApi), and a 127.0.0.1:7890 probe already
-		   proved loopback is reachable from the app - so the controller is too.
-		   This also matches isPortFree(), which probes 127.0.0.1 to decide the
-		   port. A 0.0.0.0 controller bind silently failed to listen on this
-		   device (mixed-port, also 0.0.0.0, came up fine), which is exactly the
-		   "9090 never listens" symptom. Authentication stays on via `secret`. */
+		/* API 用来区分"经代理"与"直连"的流量（首页计数器就是靠它）。绑在 127.0.0.1
+		   （回环）并用 `secret` 鉴权 —— 见上面 API_PORT 的说明。 */
+		/* 把 clash-api 绑在回环（127.0.0.1）。App 通过 protect() 过的 socket
+		   （localApi）访问它，而且 127.0.0.1:7890 的探测已经证明 App 能访问回环 ——
+		   所以控制接口也一样能访问。这也和 isPortFree() 一致（它正是探测 127.0.0.1
+		   来决定端口的）。控制接口绑 0.0.0.0 在本机上是**静默监听失败**的（同样绑
+		   0.0.0.0 的 mixed-port 却正常），这正是"9090 从没监听"的症状。鉴权继续靠
+		   `secret` 打开。 */
 		if (!sectionExists(cfg, "external-controller:"))
 			cfg.append("external-controller: 127.0.0.1:").append(API_PORT).append('\n');
-		/* clash-api bearer token: every control request must carry
-		   Authorization: Bearer <secret> or mihomo replies 401. */
+		/* clash-api 的 bearer 令牌：每个控制请求都必须带
+		   Authorization: Bearer <secret>，否则 mihomo 回 401。 */
 		if (!sectionExists(cfg, "secret:"))
 			cfg.append("secret: \"").append(escapeYaml(prefs.getSecret())).append("\"\n");
 
-		/* Sensible core defaults that mirror mihomo's own reference config: rule
-		   mode, unified delay measurement, concurrent TCP dialing, IPv6 off by
-		   default, process names in /connections (the home screen's "recent
-		   requests" view benefits), and a permissive CORS policy for the local
-		   clash-api. Each is guarded so a hand-edited config keeps its own
-		   value, and none of them collides with the API/auth keys above. */
+		/* 一组合理的核心默认值，对齐 mihomo 自己的参考配置：rule 模式、统一延迟口径、
+		   TCP 并发拨号、默认关闭 IPv6、在 /connections 里带进程名（首页"最近请求"
+		   因此受益）、以及给本地 clash-api 一个宽松的 CORS 策略。每一项都有
+		   "已存在就不写"的保护，所以手工改过的配置会保留自己的值，且都不与上面的
+		   API/鉴权键冲突。 */
 		if (!sectionExists(cfg, "mode:"))
 			cfg.append("mode: rule\n");
 		if (!sectionExists(cfg, "unified-delay:"))
@@ -192,33 +180,31 @@ public class MihomoConfig {
 				.append("    - \"*\"\n")
 				.append("  allow-private-network: true\n");
 
-		/* The home screen asks an echo service for the public IP through the
-		   core's local HTTP port, and the "allow LAN" setting exposes it to the
-		   network, so the app owns this port outright. The config is built from
-		   scratch (subscription port settings are not carried over), hence the
-		   value is always written - never inherited, never omitted. */
+		/* 首页会通过内核的本地 HTTP 端口去问回显服务"我的公网 IP 是多少"，而
+		   「允许局域网」还会把这个端口暴露出去，所以这个端口完全由 App 说了算。
+		   配置是从零拼的（订阅里的端口设置不会继承），所以这个值每次都写 ——
+		   既不继承、也不省略。 */
 		cfg.append("mixed-port: ").append(prefs.getProxyPort()).append('\n');
-		/* allow-lan stays off unless asked for: an open proxy on a shared
-		   network lets anyone on it use (and pay for) the tunnel. */
+		/* 除非用户主动打开，否则 allow-lan 保持关闭：在共享网络上开一个开放代理，
+		   等于让同网段任何人都能用（而且是你付费的）这条隧道。 */
 		if (prefs.getAllowLan()) {
 			cfg.append("allow-lan: true\n")
 				.append("bind-address: \"*\"\n");
 		}
 
-		/* GEOIP/GEOSITE rules need mihomo's geoip.dat / geosite.dat. mihomo
-		   fetches them from geo-download-url when absent, so turn auto-update
-		   on only when such a rule exists: users who never geo-route pay no
-		   startup download, and users who do get working fine routing. The
-		   jsdelivr mirror is used because the upstream GitHub release is often
-		   throttled or blocked on restricted networks. */
+		/* GEOIP/GEOSITE 规则需要 mihomo 的 geoip.dat / geosite.dat。文件缺失时 mihomo
+		   会从 geo-download-url 去取，所以**只有**存在这类规则时才打开自动更新：
+		   从不按地区分流的用户不必付这次启动下载，而需要的人能正常分流。用 jsdelivr
+		   镜像是因为上游 GitHub 发布在很多受限网络里会被限速或拦掉。 */
 		if (rulesNeedGeo(prefs) && !sectionExists(cfg, "geo-auto-update:")) {
 			cfg.append("geo-auto-update: true\n")
 				.append("geo-download-url: \"https://cdn.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@latest\"\n");
 		}
 
-		/* The core loads <homeDir>/config.yaml, so the file name matters —
-		   naming it anything else makes quickSetup fail with
-		   "stat config.yaml: no such file or directory". */
+		/* 内核固定加载 <homeDir>/config.yaml，所以**文件名不能改** —— 叫别的名字会让
+		   quickSetup 报 "stat config.yaml: no such file or directory"。 */
+		/* 节点数已由上面那两个生成函数在产出文本时记下（见 lastBuiltNodes），
+		   这里不再回头解析一遍整份配置。 */
 		File out = new File(context.getFilesDir(), "config.yaml");
 		try (FileOutputStream fos = new FileOutputStream(out, false)) {
 			fos.write(cfg.toString().getBytes("UTF-8"));
@@ -226,43 +212,36 @@ public class MihomoConfig {
 		return out;
 	}
 
-	/* Build a minimal, TUN-less, listener-less profile for the in-app TEST core
-	   (see CoreTestHost). It only needs the node list so the core's isolated
-	   latency test (the "testDelay" action) can run without a VPN: no `tun:`
-	   means no interface, no `mixed-port` means nothing binds, no
-	   `external-controller` means no API listener - so this core can never
-	   clash with the tunnel core running in the :native process. Writes
-	   <homeDir>/config.yaml and returns its content (for change detection). */
+	/* 给 App 内的**测速内核**生成一份最小配置：无 TUN、无监听端口（见 CoreTestHost）。
+	   它只需要节点列表，好让内核的隔离式延迟测试（"testDelay" 动作）在**没有 VPN**
+	   的情况下也能跑：不配 `tun:` 就没有虚拟网卡，不配 `mixed-port` 就没有任何监听，
+	   不配 `external-controller` 就没有 API 监听 —— 所以这个内核**永远**不会和
+	   :native 进程里的隧道内核打架。写入 <homeDir>/config.yaml 并返回其内容
+	   （用于变更检测）。 */
 	public static String buildTestCoreConfig(Preferences prefs, File homeDir)
 			throws IOException {
 		return buildTestCoreConfig(prefs, homeDir, null);
 	}
 
-	/* Same, minus the node names the core has already refused (see
-	   CoreTestHost.badProxies): the group must not reference a proxy that is no
-	   longer in the file, so the kept list drives the group too. */
+	/* 同上，但剔除内核已经拒绝过的节点名（见 CoreTestHost.badProxies）：
+	   组里不能引用文件里已经不存在的节点，所以代理组也用**保留下来的那份**列表。 */
 	public static String buildTestCoreConfig(Preferences prefs, File homeDir,
 			java.util.Set<String> skip) throws IOException {
-		/* Same node pool the list/tunnel is scoped to: the country filter IS the
-		   scope, so "全部" carries every node and a country chip carries that
-		   country's nodes. */
+		/* 与列表/隧道**同一范围**的节点池：国家筛选就是范围本身 —— 选「全部」带全部
+		   节点，选某个国家就只带该国的节点。 */
 		String body = mergedConfig(prefs);
 
-		/* Keep ONLY the `proxies:` section. A latency test needs the nodes and
-		   nothing else: the tunnel's groups are not just useless here, they are
-		   actively harmful. mihomo runs a url-test group's health check as soon
-		   as the config loads - and it dials EVERY member at the same time - so
-		   with the full multi-country pool (one url-test group per country PLUS
-		   a global one covering all of them) the core fires dozens of concurrent
-		   probes the moment it starts. Our own testDelay calls then queue behind
-		   that storm and time out one after another, which is exactly why
-		   「全部」came back all-不可用 while a single country (a handful of
-		   members) was fine. */
+		/* **只保留** `proxies:` 段。延迟测试只需要节点，别的都不需要；而隧道那套代理组
+		   在这里不只是没用，而是**有害**：mihomo 一加载配置就会跑 url-test 组的健康
+		   检查，而且是**同时**拨测组内每一个成员 —— 所以带上完整的多国节点池
+		   （每个国家一个 url-test 组，再加一个覆盖全部的全局组），内核一启动就会同时
+		   发出几十个探测。我们自己的 testDelay 调用只能排在这波风暴后面，于是一个接一个
+		   超时。这正是「全部」测出来一片"不可用"、而单选某个国家（只有几个成员）却正常
+		   的原因。 */
 		int cut = body.indexOf("\nproxy-groups:");
 		String proxies = cut > 0 ? body.substring(0, cut + 1) : body;
-		/* Rebuild the section WITHOUT the nodes the core has refused: that is
-		   what lets the retry in CoreTestHost drop one bad node instead of
-		   losing all 600. */
+		/* 重建这一段时**去掉**内核已拒绝的节点：正是这一点让 CoreTestHost 的重试可以
+		   只剔掉一个坏节点，而不是丢掉全部 600 个。 */
 		List<ClashParser.ProxyDef> kept = new ArrayList<ClashParser.ProxyDef>();
 		StringBuilder sb = new StringBuilder("proxies:\n");
 		for (ClashParser.ProxyDef p : ClashParser.extractProxies(proxies)) {
@@ -273,9 +252,8 @@ public class MihomoConfig {
 		}
 		if (kept.isEmpty())
 		  throw new IOException("no usable proxy after filtering rejected nodes");
-		/* One select group listing every KEPT node: enough for the config to be
-		   well-formed (a group must only reference proxies declared before it,
-		   which they are), with nothing periodic running in the background. */
+		/* 一个 select 组列出**保留下来的**每个节点：配置因此是合法的（组只能引用在它
+		   之前声明的节点，这里正是如此），而且后台不会跑任何周期性任务。 */
 		sb.append("proxy-groups:\n");
 		sb.append("  - name: \"").append(GROUP).append("\"\n");
 		sb.append("    type: select\n");
@@ -302,36 +280,33 @@ public class MihomoConfig {
 		return sb.toString();
 	}
 
-	/* Cheap pre-filter for the mistakes the core refuses outright. It validates
-	   the whole file at once, so ONE bad proxy poisons every node.
-	   REALITY `short-id` must be hex with an even length of at most 16 chars;
-	   anything else (odd length, non-hex, too long) makes cloud.flare reject the
-	   node with "invalid REALITY short ID". */
+	/* 便宜的先手过滤，专门拦内核会**直接拒绝**的错误。内核是整份文件一起校验的，
+	   所以**一个**坏节点就会毒掉所有节点。
+	   REALITY 的 short-id 必须是**长度不超过 16 的偶数个十六进制字符**；其它情况
+	   （奇数长度、非十六进制、过长）都会让 cloud.flare 以 "invalid REALITY short ID"
+	   拒掉该节点。 */
 	private static boolean isRejectedByCore(String text) {
 		if (text == null || text.isEmpty())
 		  return false;
-		/* NOT anchored to the line start: half the subscriptions in the wild use
-		   flow style (`- {name: x, server: y, reality-opts: {short-id: zz}}`),
-		   where the key sits inside braces and an anchored pattern misses it -
-		   which is exactly how the bad node still reached the core.
-		   Compiled once: this runs for every proxy of every rebuild. */
+		/* **不锚定行首**：网上有一半订阅用 flow 风格
+		   （`- {name: x, server: y, reality-opts: {short-id: zz}}`），键在花括号里，
+		   锚定行首的正则会漏掉 —— 那个坏节点当初就是这样混进内核的。
+		   只编译一次：每次重建都要对**每个**节点跑这行。 */
 		Matcher m = SHORT_ID.matcher(text);
 		if (!m.find())
 		  return false;
 		String id = m.group(1).trim();
 		if (id.isEmpty())
 		  return false;
-		/* mihomo does hex.DecodeString(short-id); anything that is not an even
-		   run of hex digits makes it reject the node (and with it the whole
-		   profile) with "invalid REALITY short ID". */
+		/* mihomo 会对 short-id 做 hex.DecodeString；只要不是"偶数个十六进制数字"，
+		   它就会以 "invalid REALITY short ID" 拒掉该节点（连带**整份**配置）。 */
 		if (id.length() > 16 || (id.length() % 2) != 0)
 		  return true;
 		return !id.matches("(?i)[0-9a-f]+");
 	}
 
-	/* mihomo reports a rejected proxy as "proxy <index>: <reason>", where the
-	   index is the position inside the generated `proxies:` list. Map it back to
-	   a node name so it can be excluded and retried (see CoreTestHost). */
+	/* mihomo 对被拒节点的报法是 "proxy <序号>: <原因>"，序号是它在生成的 `proxies:`
+	   列表里的位置。这里把它映射回节点名，以便排除该节点后重试（见 CoreTestHost）。 */
 	public static String badProxyNameFromError(String err, String cfg) {
 		if (err == null || cfg == null)
 		  return null;
@@ -350,25 +325,24 @@ public class MihomoConfig {
 		return list.get(idx).name;
 	}
 
-	/* One-line summary of what the config contains, for the log: an empty
-	   merged pool is the kind of thing that stays invisible until every
-	   connection times out. */
+	/* 给日志用的一行摘要，说明配置里有什么：一个空的合并节点池是那种"一直隐形，
+	   直到所有连接都超时"的问题。 */
 	public static String describe(Preferences prefs) {
-		int nodes = 0;
-		for (Subscription sub : prefs.getSubscriptions())
-		  if (sub.enabled)
-			nodes += ClashParser.extractProxies(prefs.getSubRaw(sub.id)).size();
-		/* The catch-all target is the single most useful thing to log: if it
-		   says DIRECT, everything is bypassing the proxy no matter how healthy
-		   the node pool looks. */
-		return nodes + " node(s), " + prefs.getRules().size() + " rule(s), "
+		/* 节点数取自 build() 实测写出去的那个数（见 lastBuiltNodes）：它才是**这份配置
+		   里真有**的节点。以前这里重新解析每份订阅来数，既不准确（筛选掉、排除掉的
+		   也算在内），又白解析一遍。还没构建过时显示 "?"，而不是编一个数字。 */
+		int nodes = lastBuiltNodes;
+		String nodeCount = nodes >= 0 ? String.valueOf(nodes) : "?";
+		/* 最值得记进日志的就是**兜底目标**：如果它是 DIRECT，那么无论节点池多健康，
+		   所有流量都在绕开代理走。 */
+		return nodeCount + " node(s), " + prefs.getRules().size() + " rule(s), "
 			+ strategyLabel(prefs) + ", "
 			+ (prefs.getAutoSelect()
 				? ("auto url-test " + prefs.getAutoSelectInterval() + "s" + autoCountryLabel(prefs))
 				: "manual select");
 	}
 
-	/* One-line description of the routing strategy for the log. */
+	/* 给日志用的一行分流策略说明。 */
 	private static String strategyLabel(Preferences prefs) {
 		String s = prefs.getRulesStrategy();
 		if (Preferences.RULES_STRATEGY_GLOBAL.equals(s))
@@ -379,8 +353,8 @@ public class MihomoConfig {
 			+ (prefs.getRulesDefaultProxy() ? GROUP : "DIRECT") + ")";
 	}
 
-	/* One-line description of which pool auto mode picks the fastest node from.
-	   The pool is already narrowed to the chosen country by mergedConfig. */
+	/* 给日志用的一行说明：自动模式是从**哪个池**里挑最快节点。
+	   该池已由 mergedConfig 收窄到用户选中的国家。 */
 	private static String autoCountryLabel(Preferences prefs) {
 		String c = prefs.getSubCountryFilter();
 		if (c == null || c.isEmpty())
@@ -388,30 +362,29 @@ public class MihomoConfig {
 		return " (country=" + c + ")";
 	}
 
-	/* Merge every subscription into one node pool and point a single
-	   self-built group at it. The pool honours the subscribe page's country
-	   filter, and the SAME method feeds the tunnel AND the TUN-less test core -
-	   that is what keeps "测速范围 = 你看到的列表" true with no extra switch. */
+	/* 把所有订阅合并成一个节点池，并让**一个**自建组指向它。这个池遵守订阅页的国家
+	   筛选；而且隧道和那个无 TUN 的测速内核用的是**同一个方法** —— 这正是"测速范围 =
+	   你看到的列表"不需要额外开关就能成立的原因。 */
 	private static String mergedConfig(Preferences prefs) throws IOException {
 		return mergedConfig(prefs, null);
 	}
 
-	/* Same, minus the node names the core has refused. Because mihomo validates
-	   the whole profile in one go, dropping the one bad node is the difference
-	   between "the tunnel comes up" and "nothing works at all". */
+	/* 同上，但剔除内核已拒绝的节点名。因为 mihomo 是**一次性**校验整份配置的，
+	   去掉这一个坏节点，就是"隧道能起来"和"什么都不工作"的区别。 */
 	private static String mergedConfig(Preferences prefs, java.util.Set<String> skip)
 			throws IOException {
-		List<String> taken = new ArrayList<String>();
+		/* 用 Set 而不是 List：判重时 List.contains 是 O(n)，
+		   600 个节点就是十几万次字符串比较，而这段在每次连接、每次测速前都要跑。 */
+		java.util.Set<String> taken = new java.util.HashSet<String>();
 		StringBuilder proxies = new StringBuilder();
 
-		/* The subscribe page's country chip narrows the whole tunnel to one
-		   country's proxies, so "auto fastest" and a manual pick both stay
-		   inside that country. An empty filter means "all countries". */
+		/* 订阅页的国家标签会把整条隧道收窄到**某一个国家**的节点，所以"自动最快"和
+		   手动选节点都只会在该国范围内。筛选为空 = 所有国家。 */
 		String cc = prefs.getSubCountryFilter();
 		boolean ccSet = (cc != null && !cc.isEmpty());
 
 		for (Subscription sub : prefs.getSubscriptions()) {
-			/* A disabled subscription is kept but not merged into the pool. */
+			/* 已停用的订阅会被保留，但不并入节点池。 */
 			if (!sub.enabled)
 			  continue;
 			List<ClashParser.ProxyDef> list =
@@ -420,20 +393,19 @@ public class MihomoConfig {
 				if (ccSet) {
 					String pc = prefs.getServerCountry(p.server);
 					boolean match = cc.equals(pc);
-					/* "Unknown" also covers nodes whose country has not been
-					   resolved yet (empty server->country map). */
+					/* "未知"这一档也涵盖"国别还没解析出来"的节点
+					   （server->country 映射为空）。 */
 					if (!match && GeoIp.UNKNOWN.equals(cc)
 							&& (pc == null || pc.isEmpty()))
 					  match = true;
 					if (!match)
 					  continue;
 				}
-				/* mihomo refuses the WHOLE config when a single proxy is
-				   invalid ("proxy 645: invalid REALITY short ID"), which took
-				   down the tunnel AND every latency test - and it is why "全部"
-				   came back 全部不可用 while a single country (whose pool did
-				   not contain the bad node) worked fine. Drop the broken entries
-				   here instead of handing the core a doomed file. */
+				/* 只要有一个节点非法，mihomo 就会**拒绝整份配置**
+				   （"proxy 645: invalid REALITY short ID"），这会让隧道和所有延迟测试
+				   一起趴下 —— 也正是"「全部」测出一片不可用，而单选某个国家（池里恰好
+				   没有那个坏节点）却正常"的原因。在这里就把坏条目剔掉，而不是把一份注定
+				   失败的配置交给内核。 */
 				if (isRejectedByCore(p.text)) {
 					TProxyService.log("配置: 跳过内核无法解析的节点「" + p.name + "」");
 					continue;
@@ -453,23 +425,19 @@ public class MihomoConfig {
 			  ? ("no upstream in country " + cc)
 			  : "no upstream: add a subscription or enable a SOCKS5 server");
 
-		/* Group off what the proxies: section *really* contains, not off the
-		   names we intended. A de-dup rename or a quoting difference can leave
-		   a name that was never emitted, and mihomo aborts the entire config
-		   load when a group references a missing member
-		   ("proxy group[0] ... not found"). Parsing our own output back makes
-		   the two agree by construction - a node we cannot re-read is simply
-		   left out of the groups instead of poisoning the whole config. */
+		/* 代理组要按 `proxies:` 段**实际包含**的内容来构造，而不是按我们"打算"用的
+		   名字。去重改名或引号写法差异都可能留下一个根本没被写出去的名字，而只要组里
+		   引用了一个不存在的成员，mihomo 就会以 "proxy group[0] ... not found"
+		   中断**整份**配置的加载。把自己生成的输出**再解析回来**，两者就天然一致 ——
+		   读不回来的节点直接被排除在组之外，而不是毒掉整份配置。 */
 		String proxiesText = "proxies:\n" + proxies;
 		List<ClashParser.ProxyDef> proxys = ClashParser.extractProxies(proxiesText);
 		if (proxys.isEmpty())
 		  throw new IOException("no usable proxy in the merged pool");
 
-		/* Block style rather than a flow mapping: with a few hundred nodes the
-		   single line would run into tens of kilobytes, and a parse failure
-		   there silently leaves MATCH pointing at a group that does not
-		   exist - which shows up as "connected but nothing goes through the
-		   proxy". One node per line cannot blow up that way. */
+		/* 用块风格而不是 flow 映射：几百个节点挤在一行会有几十 KB，而那里一旦解析
+		   失败，MATCH 就会**静默地**指向一个不存在的组 —— 症状是"已连接，但流量不走
+		   代理"。一行一个节点就不会这么炸。 */
 		StringBuilder sb = new StringBuilder(proxiesText);
 		sb.append("proxy-groups:\n");
 		if (prefs.getAutoSelect())
@@ -479,11 +447,10 @@ public class MihomoConfig {
 			sb.append("  - name: \"").append(GROUP).append("\"\n");
 			sb.append("    type: select\n");
 			sb.append("    proxies:\n");
-			/* mihomo defaults a select group to its FIRST member, and the app's
-			   own switch is applied afterwards through the control API - which
-			   is exactly the step that fails when 9090 is unreachable. Listing
-			   the picked node first makes the choice hold by itself, instead of
-			   silently falling back to whatever node happens to be first. */
+			/* mihomo 默认选中 select 组的**第一个**成员，而 App 自己的切换是在之后
+			   通过控制接口补做的 —— 那个步骤恰恰在 9090 不可达时会失败。把用户选中的
+			   节点排在最前，这个选择就**自身成立**，而不会静默地退回"恰好排第一"的
+			   那个节点。 */
 			if (sel != null && !sel.isEmpty()) {
 				for (ClashParser.ProxyDef p : proxys) {
 					if (sel.equals(p.name)) {
@@ -501,18 +468,20 @@ public class MihomoConfig {
 
 		sb.append("rules:\n");
 		appendRules(sb, prefs);
+		/* proxys 就是把写出去的 `proxies:` 段再解析回来的结果（见上），它的个数正是
+		   这份配置**实际包含**的节点数 —— 顺手记下，省掉事后的一次重解析。 */
+		lastBuiltNodes = proxys.size();
 		return sb.toString();
 	}
 
-	/* Auto mode: one url-test group per country (fastest node *within* that
-	   country) plus a global url-test group (fastest anywhere), all gathered
-	   under a top-level select group. The default sub-group is:
-	     - "AUTO"  -> the country whose nodes have the lowest measured latency
-	     - a code  -> that country's url-test group
-	     - "GLOBAL"/empty -> the global url-test group (fastest anywhere). */
+	/* 自动模式：每个国家一个 url-test 组（该国**内部**最快的节点），再加一个全局
+	   url-test 组（哪儿最快），全部挂在一个顶层 select 组下面。顶层默认指向的子组是：
+	     - "AUTO"     -> 实测延迟最低的那个国家
+	     - 某个国家码 -> 该国的 url-test 组
+	     - "GLOBAL"/空 -> 全局 url-test 组（哪儿最快）。 */
 	private static void appendAutoGroups(StringBuilder sb,
 			List<ClashParser.ProxyDef> proxys, Preferences prefs) {
-		/* Country code -> member node names, preserving first-seen order. */
+		/* 国家码 -> 该国的节点名列表，保持首次出现的顺序。 */
 		java.util.LinkedHashMap<String, List<String>> byCountry =
 			new java.util.LinkedHashMap<String, List<String>>();
 		List<String> global = new ArrayList<String>();
@@ -529,26 +498,22 @@ public class MihomoConfig {
 			global.add(p.name);
 		}
 
-		/* The country pool is already narrowed by the subscribe page's filter
-		   (MihomoConfig.mergedConfig), so "auto fastest" simply means the
-		   global url-test group inside that pool. */
+		/* 国家池已经被订阅页的筛选收窄过了（MihomoConfig.mergedConfig），所以
+		   "自动最快"就是该池内的全局 url-test 组。 */
 		String defaultSub = GLOBAL_GROUP;
 
-		/* mihomo resolves a proxy-group's members in definition order: a group
-		   may only reference proxies/groups declared BEFORE it. The per-country
-		   url-test groups (and the global one) therefore have to be emitted
-		   first; the top-level select group that points at them comes last.
-		   Getting this order wrong makes quickSetup fail with
-		   "proxy group[0] tunvpn: proxy '...' not found", which also takes the
-		   external-controller down - the symptoms are an unreachable node
-		   picker, an empty connection list and zero proxy counters. */
+		/* mihomo 按**定义顺序**解析代理组成员：一个组只能引用在它**之前**声明过的
+		   节点/组。所以各国的 url-test 组（以及全局组）必须先输出，指向它们的顶层
+		   select 组放在最后。顺序写错会让 quickSetup 以
+		   "proxy group[0] tunvpn: proxy '...' not found" 失败，并且**连带**把
+		   external-controller 也拖垮 —— 症状是节点选择器打不开、连接列表为空、
+		   代理计数恒为 0。 */
 		for (java.util.Map.Entry<String, List<String>> e : byCountry.entrySet())
 		  appendUrlTestGroup(sb, countryGroup(e.getKey()), e.getValue(), prefs);
 		appendUrlTestGroup(sb, GLOBAL_GROUP, global, prefs);
 
-		/* The top select group: mihomo defaults it to its FIRST member, so the
-		   chosen sub-group is listed first, then the remaining country groups,
-		   then the global group, then a direct escape hatch. */
+		/* 顶层 select 组：mihomo 默认选中它的**第一个**成员，所以把用户选中的子组排在
+		   最前，然后是其余国家组，再是全局组，最后留一个直连出口。 */
 		sb.append("  - name: \"").append(GROUP).append("\"\n");
 		sb.append("    type: select\n");
 		sb.append("    proxies:\n");
@@ -564,15 +529,13 @@ public class MihomoConfig {
 		sb.append("      - DIRECT\n");
 	}
 
-	/* When auto-best is selected, return the ISO code of the country whose nodes
-	   have the lowest measured latency (from the app's earlier TCP tests, cached
-	   per subscription). Null when no usable latency exists, so the caller falls
-	   back to the global group. UNKNOWN nodes are skipped - we cannot optimise a
-	   country we could not identify. */
+	/* 选了"自动最佳"时，返回"节点实测延迟最低"的那个国家的 ISO 码（延迟来自 App
+	   之前的 TCP 测速，按订阅缓存）。没有任何可用延迟时返回 null，调用方会退回
+	   全局组。UNKNOWN 节点会被跳过 —— 连国家都没认出来的，没法拿来优化。 */
 	private static String bestCountryForAuto(Preferences prefs,
 			java.util.LinkedHashMap<String, List<String>> byCountry,
 			List<ClashParser.ProxyDef> proxys) {
-		/* Proxy name -> server, then server -> best latency seen in the caches. */
+		/* 代理名 -> 服务器，再由 服务器 -> 各缓存里见过的最好延迟。 */
 		java.util.HashMap<String, String> nameToServer = new java.util.HashMap<String, String>();
 		for (ClashParser.ProxyDef p : proxys)
 		  nameToServer.put(p.name, p.server);
@@ -611,8 +574,8 @@ public class MihomoConfig {
 		return best;
 	}
 
-	/* A url-test group: mihomo measures every member against the test URL and
-	   routes through the lowest-latency one, re-checking on `interval`. */
+	/* 一个 url-test 组：mihomo 会拿测试地址量每个成员的延迟，走最低的那个，并按
+	   `interval` 反复复查。 */
 	private static void appendUrlTestGroup(StringBuilder sb, String name,
 			List<String> members, Preferences prefs) {
 		sb.append("  - name: \"").append(escapeYaml(name)).append("\"\n");
@@ -626,10 +589,9 @@ public class MihomoConfig {
 		  sb.append("      - \"").append(escapeYaml(m)).append("\"\n");
 	}
 
-	/* Minimal upstream for a manually configured proxy server. SOCKS5 keeps the
-	   original form-based emission; any other protocol means the user supplied a
-	   raw clash proxy block, which we emit verbatim and point the select group
-	   at. The embedded mihomo core does the real protocol handling. */
+	/* 手动配置的服务器所需的最小上游。SOCKS5 仍走原来的表单式生成；其它协议则表示
+	   用户贴的是**原始 clash 节点块**，我们原样输出、并让 select 组指向它 —— 真正的
+	   协议处理由内嵌的 mihomo 内核完成。 */
 	private static String manualSocksConfig(Preferences prefs, SocksServer s) throws IOException {
 		String type = (s.type == null || s.type.isEmpty()) ? "socks5" : s.type;
 		if ("socks5".equals(type)) {
@@ -651,6 +613,7 @@ public class MihomoConfig {
 			sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [\"socks5\"]}\n");
 			sb.append("rules:\n");
 			appendRules(sb, prefs);
+			lastBuiltNodes = 1;   /* 这一段只产出一个节点（见 lastBuiltNodes） */
 			return sb.toString();
 		}
 
@@ -660,17 +623,21 @@ public class MihomoConfig {
 		String nodeName = nodeNameFromRaw(raw);
 
 		StringBuilder sb = new StringBuilder();
-		sb.append(emitRawProxy(raw));
+		String proxiesText = emitRawProxy(raw);
+		sb.append(proxiesText);
 		sb.append("proxy-groups:\n");
 		sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [\"")
 			.append(escapeYaml(nodeName)).append("\"]}\n");
 		sb.append("rules:\n");
 		appendRules(sb, prefs);
+		/* 用户可能贴的就是**整段** `proxies:` 列表，所以节点数要数一下 —— 不过这里只
+		   数这一小段节点文本（不含分组与规则），而非整份配置。 */
+		lastBuiltNodes = ClashParser.extractProxies(proxiesText).size();
 		return sb.toString();
 	}
 
-	/* Pull the "name:" out of a raw clash proxy block so the select group can
-	   reference it. Falls back to "node" when none is present. */
+	/* 从原始 clash 节点块里抠出 "name:"，好让 select 组能引用它。
+	   没有 name 时退回 "node"。 */
 	private static String nodeNameFromRaw(String raw) {
 		java.util.regex.Pattern p = java.util.regex.Pattern.compile(
 			"name\\s*:\\s*[\"']?([^\"',\\n]+)");
@@ -683,10 +650,9 @@ public class MihomoConfig {
 		return "node";
 	}
 
-	/* Wrap a pasted clash proxy block as a valid "proxies:" section. If the user
-	   pasted the whole "proxies:" list we keep it; otherwise we wrap a single
-	   proxy block. A block that already starts with "- " is kept as a list item
-	   (we must not prepend another dash, or mihomo sees "  - - {...}"). */
+	/* 把用户粘贴的 clash 节点块包装成合法的 "proxies:" 段。如果用户贴的就是整段
+	   "proxies:" 列表，就原样保留；否则包装成单个节点块。已经以 "- " 开头的块按
+	   列表条目保留（**不能**再补一个短横线，否则 mihomo 看到的是 "  - - {...}"）。 */
 	private static String emitRawProxy(String raw) {
 		if (raw.startsWith("proxies:"))
 		  return raw + "\n";
@@ -710,23 +676,21 @@ public class MihomoConfig {
 		return sb.toString();
 	}
 
-	/* The app's routing rules, then the catch-all switch. The strategy decides
-	   whether the user's rules even run: the two global modes route everything
-	   one way and skip the list. */
+	/* App 的路由规则，后面接兜底项。策略决定用户自己的规则**是否真的会执行**：
+	   两种全局模式把一切都按同一个方向送走，直接跳过规则列表。 */
 	private static void appendRules(StringBuilder sb, Preferences prefs) {
 		String strategy = prefs.getRulesStrategy();
 		if (Preferences.RULES_STRATEGY_GLOBAL.equals(strategy)) {
-			/* Everything through the proxy; the rule list is ignored. */
+			/* 全部走代理；规则列表被忽略。 */
 			sb.append("  - MATCH,").append(GROUP).append('\n');
 			return;
 		}
 		if (Preferences.RULES_STRATEGY_DIRECT.equals(strategy)) {
-			/* Everything direct; the rule list is ignored. */
+			/* 全部直连；规则列表被忽略。 */
 			sb.append("  - MATCH,DIRECT\n");
 			return;
 		}
-		/* Rule mode: the user's rules first, then the catch-all (itself proxy or
-		   direct per the switch below). */
+		/* rule 模式：先用户规则，再兜底项（兜底走代理还是直连，由下面的开关决定）。 */
 		for (Preferences.Rule r : prefs.getRules()) {
 			String line = clashRule(r);
 			if (line != null)
@@ -736,9 +700,8 @@ public class MihomoConfig {
 			.append(prefs.getRulesDefaultProxy() ? GROUP : "DIRECT").append('\n');
 	}
 
-	/* One app rule as a clash rule line, honouring the type the user actually
-	   picked (an earlier build re-derived the type from the value and ignored
-	   the choice). Returns null when the rule cannot be expressed. */
+	/* 把一条 App 规则转成 clash 规则行，**尊重用户实际选的类型**（早期版本会从值里
+	   反推类型、忽略用户的选择）。无法表达时返回 null。 */
 	private static String clashRule(Preferences.Rule r) {
 		String target = r.proxy ? GROUP : "DIRECT";
 		String value = r.value == null ? "" : r.value.trim();
@@ -748,8 +711,8 @@ public class MihomoConfig {
 			case Preferences.Rule.TYPE_KEYWORD:
 				return "DOMAIN-KEYWORD," + value + "," + target;
 			case Preferences.Rule.TYPE_GEOIP:
-				/* value is an ISO-3166 alpha-2 code; GEOIP needs the core's
-				   geoip database, which mihomo fetches on first use. */
+				/* value 是 ISO-3166 两位国家码；GEOIP 依赖内核的 geoip 数据库，
+				   mihomo 首次使用时会去下载。 */
 				if (!value.matches("^[A-Za-z]{2}$"))
 				  return null;
 				return "GEOIP," + value.toUpperCase() + "," + target;
@@ -758,7 +721,7 @@ public class MihomoConfig {
 			case Preferences.Rule.TYPE_CIDR:
 				if (!value.contains("/"))
 				  return null;
-				/* IPv6 needs its own rule type, otherwise mihomo rejects it. */
+				/* IPv6 必须用自己的规则类型，否则 mihomo 会拒绝。 */
 				return (value.contains(":") ? "IP-CIDR6," : "IP-CIDR,") + value + "," + target;
 			case Preferences.Rule.TYPE_IP:
 				if (isIpv4(value))
@@ -784,9 +747,8 @@ public class MihomoConfig {
 		}
 	}
 
-	/* True when the rule list uses a GEOIP or GEOSITE matcher, which requires
-	   mihomo's country/domain databases to be present (see build()'s
-	   geo-auto-update block). */
+	/* 规则列表里用到 GEOIP 或 GEOSITE 匹配器时为 true —— 它们需要内核本地的
+	   国家/域名数据库（见 build() 里的 geo-auto-update 段）。 */
 	private static boolean rulesNeedGeo(Preferences prefs) {
 		for (Preferences.Rule r : prefs.getRules()) {
 			if (r.type == Preferences.Rule.TYPE_GEOIP
@@ -796,10 +758,9 @@ public class MihomoConfig {
 		return false;
 	}
 
-	/* Attach the clash-api bearer token so mihomo (which requires it once
-	   `secret:` is set in the config) accepts the call instead of replying 401
-	   with an empty body. Every control endpoint - /proxies, /delay, /rules,
-	   /connections, /configs, /version - needs this. */
+	/* 带上 clash-api 的 bearer 令牌：配置里一旦设了 `secret:`，mihomo 就要求带上它，
+	   否则会返回 401 而且响应体是空的。所有控制接口（/proxies、/delay、/rules、
+	   /connections、/configs、/version）都需要这一步。 */
 	public static void applyAuth(HttpURLConnection conn, Preferences prefs) {
 		String s = prefs.getSecret();
 		if (s != null && !s.isEmpty())
@@ -822,9 +783,9 @@ public class MihomoConfig {
 		return true;
 	}
 
-	/* The merged pool has to be addressable by name, and two subscriptions may
-	   well ship the same label, so make it unique. */
-	private static String uniqueName(List<String> taken, String name) {
+	/* 合并后的节点池必须能按名字寻址，而两份订阅完全可能带同一个名字，
+	   所以这里给它去重。用 Set 判重（见 mergedConfig 的说明）。 */
+	private static String uniqueName(java.util.Set<String> taken, String name) {
 		if (!taken.contains(name))
 		  return name;
 		for (int i = 2; ; i++) {
@@ -834,8 +795,8 @@ public class MihomoConfig {
 		}
 	}
 
-	/* Rewrite the name: value of one proxy block - only that key, so a server
-	   address that happens to contain the same text is left alone. */
+	/* 改写一个节点块里的 name: 值 —— **只动这个键**，所以服务器地址里恰好含有
+	   同样文本的情况不会被误伤。 */
 	private static String renameProxy(String text, String oldName, String newName) {
 		try {
 			Pattern p = Pattern.compile("(name\\s*:\\s*)[\"']?" + Pattern.quote(oldName)
@@ -852,7 +813,7 @@ public class MihomoConfig {
 		return s.replace("\\", "\\\\").replace("\"", "\\\"");
 	}
 
-	/* A too-small interval hammers every node; a huge one never re-tests. */
+	/* 间隔太小会不停折腾所有节点；太大则等于永远不再重测。 */
 	private static int clampInterval(int seconds) {
 		if (seconds < MIN_INTERVAL)
 		  return MIN_INTERVAL;
@@ -861,7 +822,7 @@ public class MihomoConfig {
 		return seconds;
 	}
 
-	/* True when "key:" appears as a top-level YAML key (column 0). */
+	/* "key:" 作为**顶层** YAML 键（第 0 列）出现时为 true。 */
 	private static boolean sectionExists(StringBuilder sb, String key) {
 		String s = sb.toString();
 		int idx = 0;

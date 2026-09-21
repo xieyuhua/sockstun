@@ -1,9 +1,8 @@
 /*
  ============================================================================
- Name        : LogActivity.java
- Description : Startup / runtime log viewer. Tails the file while "auto refresh"
-               is on; touching the text pauses it so a selection survives, and
-               the whole log can be copied in one tap.
+ 文件名  : LogActivity.java
+ 说明    : 启动 / 运行日志查看器。开启"自动刷新"时持续跟随文件尾部；一碰文本就暂停，
+           这样选中的内容不会被冲掉；整份日志可一键复制。
  ============================================================================
 */
 
@@ -43,9 +42,8 @@ public class LogActivity extends BaseActivity implements View.OnClickListener {
 	private SwitchMaterial log_switch;
 	private SwitchMaterial log_follow;
 	private Preferences prefs;
-	/* Last text handed to the TextView, so a tick that changed nothing does not
-	   re-set it: setText() drops the selection, which is what made copying
-	   impossible while the page was tailing. */
+	/* 上一次交给 TextView 的文本。没变化就不重新 setText()：setText() 会清掉选中，
+	   这正是"页面边滚动边复制不了"的原因。 */
 	private String shownText = null;
 
 	@Override
@@ -81,8 +79,8 @@ public class LogActivity extends BaseActivity implements View.OnClickListener {
 		((Button) findViewById(R.id.clear)).setOnClickListener(this);
 		((Button) findViewById(R.id.copy)).setOnClickListener(this);
 
-		/* Auto refresh (tail -f). Turned off the moment the user touches the
-		   text, so a long-press selection is not wiped by the next tick. */
+		/* 自动刷新（相当于 tail -f）。用户一碰文本就关掉它，免得下一次刷新把长按选中的
+		   内容冲掉。 */
 		log_follow = (SwitchMaterial) findViewById(R.id.log_follow);
 		log_follow.setChecked(true);
 		log_follow.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
@@ -144,8 +142,7 @@ public class LogActivity extends BaseActivity implements View.OnClickListener {
 		}
 	}
 
-	/* Re-read the log and, while auto refresh is on, keep the view pinned to the
-	   newest line. The text is only reassigned when it actually changed. */
+	/* 重新读取日志；自动刷新开启时把视图钉在最新一行。只有内容真的变了才重新赋值。 */
 	private void refresh() {
 		String text = readLog();
 		if (!text.equals(shownText)) {
@@ -162,8 +159,8 @@ public class LogActivity extends BaseActivity implements View.OnClickListener {
 		}
 	}
 
-	/* The tunnel's log file. Startup diagnostics are written there even when
-	   logging is disabled, so a fatal error is always visible. */
+	/* 隧道的日志文件。即使关闭了"记录日志"，启动诊断也会写进这里，所以致命错误永远
+	   看得到。 */
 	private String readLog() {
 		File log = new File(getCacheDir(), LOG_NAME);
 		StringBuilder sb = new StringBuilder();
@@ -183,8 +180,7 @@ public class LogActivity extends BaseActivity implements View.OnClickListener {
 		return sb.toString();
 	}
 
-	/* Put the whole log on the clipboard, so it can be pasted out without
-	   fighting the selection handles on a long TextView. */
+	/* 把整份日志放进剪贴板：不用再跟长文本里的选择手柄较劲。 */
 	private void copyLog() {
 		String text = textview_log.getText().toString();
 		if (text.isEmpty())
@@ -195,7 +191,7 @@ public class LogActivity extends BaseActivity implements View.OnClickListener {
 		Toast.makeText(this, R.string.log_copied, Toast.LENGTH_SHORT).show();
 	}
 
-	/* Truncate the log file (effective when the tunnel is stopped). */
+	/* 清空日志文件（隧道停止时才会真正生效）。 */
 	private void clearLog() {
 		File log = new File(getCacheDir(), LOG_NAME);
 		try (RandomAccessFile raf = new RandomAccessFile(log, "rw")) {

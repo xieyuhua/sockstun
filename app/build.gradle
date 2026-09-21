@@ -1,6 +1,6 @@
 apply plugin: 'com.android.application'
 
-/* Auto increment version on each package build (versionName += 0.01, versionCode += 1) */
+/* 每次打包自动递增版本号（versionName += 0.01，versionCode += 1） */
 def versionPropsFile = file('version.properties')
 def versionProps = new Properties()
 if (versionPropsFile.exists()) {
@@ -39,8 +39,8 @@ android {
 		versionCode pkgVersionCode
 		versionName pkgVersionName
 		ndk {
-			/* libmihomo ships arm64-v8a + armeabi-v7a; keep the APK aligned to
-			   what the core actually provides so Clash.load() never misses a .so. */
+			/* libmihomo 只提供 arm64-v8a + armeabi-v7a；APK 的 ABI 要与内核实际提供的
+			   保持一致，否则 Clash.load() 会找不到 .so。 */
 			abiFilters "arm64-v8a", "armeabi-v7a"
 		}
 	}
@@ -75,14 +75,13 @@ android {
 		}
 	}
 
-	/* The .so files must really be extracted on install: Clash.load() is
-	   handed getApplicationInfo().nativeLibraryDir, which only contains them
-	   when extractNativeLibs ends up true. useLegacyPackaging = true is
-	   exactly that, and it is the ONLY place to say it - AGP 8 ignores
-	   android:extractNativeLibs in the source manifest (and warns about it),
-	   and leaving both in place makes :app:packageDebug fail inside
-	   PackageAndroidArtifact$IncrementalSplitterRunnable.
-	   So the attribute was removed from AndroidManifest.xml on purpose. */
+	/* 安装时必须**真的**把 .so 解压出来：Clash.load() 拿到的是
+	   getApplicationInfo().nativeLibraryDir，只有 extractNativeLibs 最终为 true 时
+	   那个目录里才会有这些 .so。useLegacyPackaging = true 就是这个意思，而且这里是
+	   **唯一**该写它的地方 —— AGP 8 会忽略源码 manifest 里的 android:extractNativeLibs
+	   （还会给出警告），而两处都留着会让 :app:packageDebug 在
+	   PackageAndroidArtifact$IncrementalSplitterRunnable 里失败。
+	   所以那个属性是**故意**从 AndroidManifest.xml 里移除的。 */
 	packaging {
 		jniLibs {
 			useLegacyPackaging = true
@@ -91,41 +90,38 @@ android {
 
 	lintOptions {
 		checkReleaseBuilds false
-		// Or, if you prefer, you can continue to check for errors in release builds,
-		// but continue the build even when errors are found:
+		// 另一种写法是：release 构建继续检查错误，但发现错误也继续构建：
 		abortOnError false
 	}
 
 	dependenciesInfo {
-		// Disables dependency metadata when building APKs.
+		// 构建 APK 时不写入依赖元数据。
 		includeInApk = false
-		// Disables dependency metadata when building Android App Bundles.
+		// 构建 Android App Bundle 时不写入依赖元数据。
 		includeInBundle = false
 	}
 }
 
-/* APK/AAB name: "<applicationId>-<versionName>".
-   archivesBaseName is deprecated (removed in Gradle 9), the base extension's
-   archivesName is the replacement. */
+/* APK/AAB 文件名："<applicationId>-<versionName>"。
+   archivesBaseName 已废弃（Gradle 9 会移除），替代品是 base 扩展的 archivesName。 */
 base {
 	archivesName = "${android.defaultConfig.applicationId}-${android.defaultConfig.versionName}"
 }
 
 /* ---------------------------------------------------------------------------
-   libmihomo (clash.meta) embedded core.
+   内嵌内核 libmihomo（clash.meta）。
 
-   The library is published as a GitHub Release .aar (not on Maven Central).
-   We download it (once) into app/thirdparty/ (NOT app/libs/: AGP auto-treats
-   app/libs/*.aar as a dependency and would merge its res/ + manifest) and then
-   EXTRACT only what the app actually needs, dropping the rest on purpose:
-     - classes.jar            -> compile/runtime classpath (io.github.oviron.libmihomo.*)
-     - jni/<abi>/*.so         -> packaged as native libraries (libmihomo.so, ...)
-     - (any) libs/*.jar       -> extra classpath jars
-   The AAR's res/ and AndroidManifest.xml are intentionally NOT merged into the
-   app: they are irrelevant for a headless JNI core, and merging them has been
-   observed to crash AGP's resource merger (NullPointerException in
-   mergeDebugResources).  Pinned: v0.3.3 bundles mihomo v1.19.30.
-   License: GPL-3.0 (the embedded core is statically linked Go code).
+   这个库是以 GitHub Release 的 .aar 形式发布的（**不在** Maven Central）。
+   我们把它下载（一次性）到 app/thirdparty/（**不是** app/libs/：AGP 会把
+   app/libs/*.aar 自动当成依赖，并合并它的 res/ + manifest），然后**只解出**
+   App 真正需要的东西，其余**故意**丢掉：
+     - classes.jar            -> 编译/运行时 classpath（io.github.oviron.libmihomo.*）
+     - jni/<abi>/*.so         -> 作为原生库打包（libmihomo.so 等）
+     - (任意) libs/*.jar      -> 额外的 classpath jar
+   AAR 里的 res/ 与 AndroidManifest.xml **刻意不合并**进 App：对一个无界面的 JNI
+   内核来说它们毫无意义，而且实测合并它们会让 AGP 的资源合并器崩溃
+   （mergeDebugResources 里抛 NullPointerException）。固定版本：v0.3.3 内含
+   mihomo v1.19.30。许可：GPL-3.0（内嵌内核是静态链接的 Go 代码）。
 --------------------------------------------------------------------------- */
 def mihomoVersion = "0.3.3"
 def mihomoAarName = "libmihomo-android-v${mihomoVersion}.aar"
@@ -177,8 +173,8 @@ if (!isUsableMihomoAar(mihomoAar)) {
 	println "libmihomo AAR ready: ${mihomoAar} (${mihomoAar.length()} bytes)"
 }
 
-/* Extract classes.jar, jni libs and any bundled jars from the AAR. Re-extract
-   only when needed (missing output, or a newer AAR). */
+/* 从 AAR 里解出 classes.jar、jni 原生库和它自带的 jar。
+   只在需要时重新解（产物缺失，或 AAR 更新了）。 */
 if (!mihomoClassesJar.exists() || mihomoAar.lastModified() > mihomoClassesJar.lastModified()) {
 	if (mihomoExtractDir.exists()) mihomoExtractDir.deleteDir()
 	mihomoExtractDir.mkdirs()
@@ -205,8 +201,7 @@ if (!mihomoClassesJar.exists() || mihomoAar.lastModified() > mihomoClassesJar.la
 	println "Extracted libmihomo: classes.jar + jni + ${mihomoExtraJars.size()} extra jar(s) -> ${mihomoExtractDir}"
 }
 
-/* Expose the extracted native libs to the build (in addition to any existing
-   jniLibs sources such as src/main/jniLibs). */
+/* 把解出来的原生库暴露给构建（在已有的 jniLibs 来源之外，例如 src/main/jniLibs）。 */
 android.sourceSets.main.jniLibs.srcDirs += mihomoJniDir
 
 dependencies {

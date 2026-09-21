@@ -1,9 +1,8 @@
 /*
  ============================================================================
- Name        : ServerListActivity.java
- Description : Manage the manually configured SOCKS5 servers: add, edit,
-               delete and pick which one is enabled. Enabling one makes it
-               the upstream, which overrides the subscription.
+ 文件名  : ServerListActivity.java
+ 说明    : 管理手动配置的上游服务器：新增 / 编辑 / 删除，以及选择启用哪一台。启用某台
+           后它就成为上游，并**覆盖（忽略）订阅**。
  ============================================================================
  */
 
@@ -41,7 +40,7 @@ public class ServerListActivity extends BaseActivity {
 	private TextView textview_empty;
 	private List<SocksServer> servers = new ArrayList<SocksServer>();
 	private ServerAdapter adapter;
-	/* Bounded pool for latency tests (one socket per server at once). */
+	/* 有界的测速线程池（每台服务器同一时刻一个探测）。 */
 	private final ExecutorService testPool = Executors.newFixedThreadPool(8);
 
 	@Override
@@ -119,8 +118,7 @@ public class ServerListActivity extends BaseActivity {
 			.show();
 	}
 
-	/* Drop the entry and, if it was the enabled one, hand the upstream back
-	   to the subscription. */
+	/* 删掉这条记录；如果删掉的正是启用中的那台，就把上游交还给订阅。 */
 	public static void removeServer(Preferences prefs, String id) {
 		List<SocksServer> list = prefs.getSocksServers();
 		for (int i = 0; i < list.size(); i++) {
@@ -178,8 +176,8 @@ public class ServerListActivity extends BaseActivity {
 			badge.setVisibility(active ? View.VISIBLE : View.GONE);
 			card.setCardBackgroundColor(active ? colorSelected : Color.TRANSPARENT);
 
-			/* Latency pill: mirror the subscription list's colour semantics
-			   (-1 untested, -2 unreachable, >=0 latency in ms). */
+			/* 延迟胶囊：与订阅列表的颜色语义一致
+			   （-1 未测速，-2 不可达，>=0 为延迟毫秒数）。 */
 			if (s.latency >= 0) {
 				status.setText(s.latency + " ms");
 				status.setTextColor(colorOk);
@@ -206,8 +204,7 @@ public class ServerListActivity extends BaseActivity {
 				}
 			});
 
-			/* Edit / delete move to a long-press menu, matching the
-			   subscription list's uncluttered per-row layout. */
+			/* 编辑 / 删除移到长按菜单里，与订阅列表一样保持每行清爽。 */
 			card.setOnLongClickListener(new View.OnLongClickListener() {
 				@Override
 				public boolean onLongClick(View v) {
@@ -219,8 +216,7 @@ public class ServerListActivity extends BaseActivity {
 		}
 	}
 
-	/* Long-press menu for a server row: edit or delete (the two actions that
-	   used to be inline buttons). */
+	/* 服务器行的长按菜单：编辑或删除（这两个动作以前是行内按钮）。 */
 	private void showServerMenu(final SocksServer s) {
 		new AlertDialog.Builder(this)
 			.setTitle(s.label())
@@ -237,14 +233,12 @@ public class ServerListActivity extends BaseActivity {
 			.show();
 	}
 
-	/* Speed-test a SOCKS5 (or raw) upstream the same way the subscription list
-	   tests a node: probe reachability and measure connect latency. These
-	   servers are NOT part of mihomo's proxy pool (they ARE the upstream), so a
-	   clash-api /delay is unavailable; instead we open a direct TCP connection
-	   to host:port - the app's own traffic bypasses the VPN tunnel, so this is
-	   a true end-to-end probe of the server's socket. Success => latency (ms),
-	   failure (incl. an empty host) => -2 (unreachable). This is the only
-	   availability verdict, matching ClashNode's latency semantics. */
+	/* 测这台上游服务器的速度，思路与订阅列表测节点一致：探测可达性并测连接延迟。
+	   这些服务器**不在** mihomo 的代理池里（它们本身就是上游），所以用不了
+	   clash-api 的 /delay；改为直接对 host:port 建一条 TCP 连接 —— App 自己的流量
+	   不经过 VPN 隧道，所以这是对该服务器 socket 的真实端到端探测。成功 → 延迟（ms），
+	   失败（含地址为空）→ -2（不可达）。这是唯一的可用性判定，与 ClashNode 的
+	   延迟语义保持一致。 */
 	private void testServer(final SocksServer s) {
 		testPool.execute(new Runnable() {
 			@Override

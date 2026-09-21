@@ -1,11 +1,9 @@
 /*
  ============================================================================
- Name        : Country.java
- Description : ISO-3166 alpha-2 country code -> display helpers for the UI:
-               a flag emoji (derived from the two-letter code via regional
-               indicator symbols) plus a Chinese name, with a sensible
-               fallback to the raw code when the name is unknown. The special
-               sentinels GLOBAL / AUTO / UNKNOWN get their own glyphs.
+ 文件名  : Country.java
+ 说明    : ISO-3166 两位国家码 -> UI 用的展示辅助：国旗 emoji（由两位字母码经
+           "区域指示符"字符拼出）加中文国名；国名未知时保守地退回原始国家码。
+           特殊哨兵值 GLOBAL / AUTO / UNKNOWN 各有自己的图形。
  ============================================================================
 */
 
@@ -15,11 +13,11 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class Country {
-	/* Sentinel stored in Preferences.AUTO_SELECT_COUNTRY for "fastest country
-	   picked automatically from measured latency". */
+	/* 存在 Preferences.AUTO_SELECT_COUNTRY 里的哨兵值，表示"按实测延迟自动挑最快的
+	   国家/地区"（AUTO）与"不限国家/全局"（GLOBAL）。 */
 	public static final String GLOBAL = "GLOBAL";
 	public static final String AUTO = "AUTO";
-	/* Nodes whose country could not be resolved (matches GeoIp.UNKNOWN). */
+	/* 无法解析国家的节点（与 GeoIp.UNKNOWN 一致）。 */
 	public static final String UNKNOWN = GeoIp.UNKNOWN;
 
 	private static final Map<String, String> CN = new HashMap<String, String>();
@@ -109,8 +107,8 @@ public class Country {
 		CN.put("MD", "摩尔多瓦");
 	}
 
-	/* Flag emoji for a 2-letter code (regional indicator pair). Unknown / non
-	   ISO values get a neutral glyph so the name is still readable. */
+	/* 两位国家码 → 旗帜 emoji（区域指示符组合）。未知 / 非 ISO 的值给一个中性符号，
+	   保证名字仍然可读。 */
 	public static String flag(String cc) {
 		if (cc == null)
 		  return "\u2753"; /* ❓ */
@@ -129,7 +127,7 @@ public class Country {
 		return "\uD83C\uDFF3"; /* 🏳 */
 	}
 
-	/* Chinese name for a code; falls back to the raw code when unknown. */
+	/* 国家码 → 中文名；未知时退回原始代码。 */
 	public static String name(String cc) {
 		if (cc == null || cc.isEmpty())
 		  return CN.get(UNKNOWN);
@@ -142,13 +140,12 @@ public class Country {
 		return flag(cc) + " " + name(cc);
 	}
 
-	/* Label with a trailing node count for the picker. */
+	/* 选择器用：带节点数量的标签。 */
 	public static String displayWithCount(String cc, int count) {
 		return display(cc) + " (" + count + ")";
 	}
 
-	/* Label with "usable/total" for the country chips: only latency-tested,
-	   reachable nodes count as usable (latency >= 0). */
+	/* 国家小标签用："可用/总数"。可用 = 已测速且可达（latency >= 0）。 */
 	public static String displayWithAvail(String cc, int avail, int total) {
 		return display(cc) + " (" + avail + "/" + total + ")";
 	}

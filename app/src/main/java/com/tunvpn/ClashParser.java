@@ -1,13 +1,11 @@
 /*
  ============================================================================
- Name        : ClashParser.java
- Description : Minimal clash.yml parser. Decodes base64 subscriptions and
-               extracts proxy nodes. We take every proxy (vmess / trojan /
-               ss / socks5 / vless / hysteria2 / tuic / ...) so the UI can
-               list and latency-test the whole multi-protocol subscription;
-               the embedded mihomo core does the actual protocol handling.
+ 文件名  : ClashParser.java
+ 说明    : 极简 clash.yml 解析器：解 base64 订阅、抽取代理节点。我们接收所有协议
+           （vmess / trojan / ss / socks5 / vless / hysteria2 / tuic …），这样界面
+           就能列出并给整份多协议订阅测速；真正的协议处理交给内嵌的 mihomo 内核。
  ============================================================================
- */
+*/
 
 package com.tunvpn;
 
@@ -20,15 +18,14 @@ import java.util.Map;
 
 public class ClashParser {
 
-	/* Line splitter, compiled once: extractProxies() re-splits the ORIGINAL
-	   block of every proxy (hundreds of them, several builds per launch), and
-	   String.split() recompiles its pattern on every single call. */
+	/* 行分隔符，只编译一次：extractProxies() 会对**每个节点**重新切分它那段原始文本
+	   （几百个节点、每次启动要生成多次配置），而 String.split() 每次调用都会重新编译
+	   正则。 */
 	private static final java.util.regex.Pattern LINE_BREAK =
 		java.util.regex.Pattern.compile("\\r?\\n");
 
-	/* Decode a subscription body to clash YAML. Providers may ship the YAML as
-	   a base64 blob; return the decoded form, or the original if it already
-	   looks like clash config. */
+	/* 把订阅体解码成 clash YAML。服务商可能把 YAML 以 base64 形式下发；解出来就返回
+	   解码结果，本来就像 clash 配置则原样返回。 */
 	public static String decodeRaw(String raw) {
 		if (raw == null || raw.isEmpty())
 		  return raw;
@@ -40,14 +37,13 @@ public class ClashParser {
 		return raw;
 	}
 
-	/* Every proxy node, regardless of protocol. */
+	/* 全部代理节点，不区分协议。 */
 	public static List<ClashNode> parseAll(String raw) {
 		return collect(raw);
 	}
 
-	/* One entry under "proxies:", kept as its original YAML text so that
-	   re-emitting it into the merged config cannot drop fields we do not
-	   understand (uuid / ws-opts / sni / fingerprint / ...). */
+	/* "proxies:" 下面的一条记录，保留其**原始 YAML 文本**：这样把它重新发射进合并后的
+	   配置时，不会丢掉我们不认识的字段（uuid / ws-opts / sni / fingerprint …）。 */
 	public static class ProxyDef {
 		public String name;
 		public String type;
@@ -62,7 +58,7 @@ public class ClashParser {
 		}
 	}
 
-	/* Every proxy definition of one subscription, in file order. */
+	/* 一份订阅里的全部代理定义，按文件顺序。 */
 	public static List<ProxyDef> extractProxies(String raw) {
 		List<ProxyDef> out = new ArrayList<ProxyDef>();
 		if (raw == null || raw.isEmpty())
@@ -93,7 +89,7 @@ public class ClashParser {
 			}
 			int indent = leadingSpaces(line);
 			if (indent <= 0 && !line.trim().startsWith("- "))
-			  break; /* reached the next top-level key */
+			  break; /* 遇到下一个顶层 key，说明 proxies 段结束了 */
 			if (!line.trim().startsWith("- ")) {
 				i++;
 				continue;
@@ -110,15 +106,14 @@ public class ClashParser {
 				int inner = leadingSpaces(l2) - baseIndent;
 				if (inner <= 0)
 				  break;
-				/* Re-indent relative to the "- ", not to column 0. Flattening
-				   every continuation to a single level would destroy nested
-				   maps (ws-opts / headers / reality-opts / ...) and make
-				   mihomo drop the whole proxy. */
+				/* 按相对 "- " 的缩进重排，而不是相对第 0 列。把每一层续行都压成单层会
+				   毁掉嵌套映射（ws-opts / headers / reality-opts …），内核会因此丢掉
+				   整个节点。 */
 				block.append('\n').append("  ").append(spaces(inner)).append(l2.trim());
 				i++;
 			}
-			/* Re-read the block with the same key/value helpers parseAll()
-			   uses, so the name/type line up with the node list. */
+			/* 用与 parseAll() 相同的键值解析工具再读一遍这段块，保证这里的
+			   name/type 与节点列表里的完全一致。 */
 			Map<String, String> m = new HashMap<String, String>();
 			String[] blockLines = LINE_BREAK.split(block.toString());
 			String head = blockLines[0].trim().substring(2);
@@ -172,7 +167,7 @@ public class ClashParser {
 			}
 			int indent = leadingSpaces(line);
 			if (indent <= 0 && !line.trim().startsWith("- "))
-			  break; /* reached the next top-level key */
+			  break; /* 遇到下一个顶层 key */
 			String trimmed = line.trim();
 			if (trimmed.startsWith("- ")) {
 				int baseIndent = indent;
@@ -222,9 +217,9 @@ public class ClashParser {
 			m.get("password") == null ? "" : m.get("password")));
 	}
 
-	/* A proxy may be written as a single-line YAML flow mapping, e.g.
-	   "- {name: x, server: y, port: 1234, type: vmess, ...}".  Split it into
-	   its key: value pairs so addIfMatch() can see type / server / port. */
+	/* 节点也可能写成单行 YAML 流式映射，例如
+	   "- {name: x, server: y, port: 1234, type: vmess, ...}"。这里把它拆成
+	   键值对，好让 addIfMatch() 能看到 type / server / port。 */
 	private static void parseFlowMap(Map<String, String> m, String s) {
 		String inner = s.trim();
 		if (inner.startsWith("{"))
@@ -235,7 +230,7 @@ public class ClashParser {
 		  putKV(m, part.trim());
 	}
 
-	/* Split on commas that are not inside quotes. */
+	/* 只按"不在引号内"的逗号切分。 */
 	private static List<String> splitTopLevel(String s) {
 		List<String> out = new ArrayList<String>();
 		StringBuilder cur = new StringBuilder();
@@ -249,7 +244,7 @@ public class ClashParser {
 				  inQuote = false;
 				continue;
 			}
-			/* 34 = double quote, 39 = single quote */
+			/* 34 = 双引号，39 = 单引号 */
 			if (c == 34 || c == 39) {
 				inQuote = true;
 				quote = c;
@@ -301,11 +296,9 @@ public class ClashParser {
 		return s != null && s.contains("proxies:");
 	}
 
-	/* True when the body looks like base64 (letters/digits/+/= and whitespace
-	   only). A manual scan instead of String.matches(): that compiled its
-	   pattern on EVERY call, and these bodies are hundreds of KB. It also
-	   returns on the first ':' or other YAML character, so a real clash.yml is
-	   rejected almost immediately. */
+	/* 判断内容是否"像 base64"（只含字母/数字/+/= 与空白）。用逐字符扫描替代
+	   String.matches()：后者**每次调用**都要编译正则，而订阅体有几百 KB。扫描遇到
+	   第一个 ':' 或其它 YAML 字符就返回 false，所以真正的 clash.yml 几乎立刻被排除。 */
 	private static boolean isBase64ish(String s) {
 		for (int i = 0; i < s.length(); i++) {
 			char c = s.charAt(i);

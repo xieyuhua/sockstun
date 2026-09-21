@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Adaptive icon for Android 8+. Without this the system wraps the legacy
-     bitmap in a white plate, which looks wrong against the dark palette. -->
+<!-- Android 8+ 的自适应图标。少了它，系统会把旧式位图塞进一个白色底板里，
+     在深色配色下非常违和。 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
 	<background android:drawable="@color/icon_background"/>
 	<foreground android:drawable="@mipmap/tunvpn_foreground"/>

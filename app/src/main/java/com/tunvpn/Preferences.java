@@ -1,9 +1,9 @@
 /*
  ============================================================================
- Name        : Perferences.java
- Author      : hev <r@hev.cc>
- Copyright   : Copyright (c) 2023 xyz
- Description : Perferences
+ 文件名  : Perferences.java
+ 作者    : hev <r@hev.cc>
+ 版权    : Copyright (c) 2023 xyz
+ 说明    : 应用偏好设置（按配置档保存的全部开关与参数）
  ============================================================================
  */
 
@@ -26,22 +26,22 @@ import org.json.JSONObject;
 public class Preferences
 {
 	public static final String PREFS_NAME = "SocksPrefs";
+	/* 高频写入的东西（每秒统计、连接快照、最近请求）放在**独立**文件里。主文件
+	   `SocksPrefs` 里还存着几百 KB 的订阅原文与节点 JSON，而 commit() 会重写**整份**
+	   文件 —— 每秒把这么大的 XML 重写 + fsync 纯属浪费。key 名刻意保持不变。 */
+	public static final String PREFS_STATS_NAME = "SocksStats";
 	public static final String SUB_URL = "SubUrl";
 	public static final String SUB_NODES = "SubNodes";
 	public static final String SUB_RAW = "SubRaw";
 	public static final String SUB_SELECTED = "SubSelected";
-	/* The proxy the core has ACTUALLY selected right now (written by
-	   TProxyService from the running config). SubSelected is only the wish;
-	   this is the truth the UI must show while the tunnel is up. */
+	/* 内核**当前真正选中**的节点（由 TProxyService 从运行中的配置里读出并写入）。
+	   SubSelected 只是"愿望"，这个才是隧道运行期间 UI 必须显示的**事实**。 */
 	public static final String ACTIVE_NODE = "ActiveNode";
 	public static final String SOCKS_SERVERS = "SocksServers";
 	public static final String SOCKS_ACTIVE = "SocksActive";
 	public static final String SUBSCRIPTIONS = "Subscriptions";
 	public static final String SUB_ACTIVE = "SubActive";
-	/* Subscribe-page view state, remembered across runs (sort mode,
-	   availability filter, country filter and protocol filter). */
-	public static final String SUB_SORT = "SubSort";
-	public static final String SUB_FILTER = "SubFilter";
+	/* 订阅页的视图状态，跨次启动保留（国家筛选、协议筛选）。 */
 	public static final String SUB_COUNTRY_FILTER = "SubCountryFilter";
 	public static final String SUB_PROTO_FILTER = "SubProtoFilter";
 	public static final String DNS_IPV4 = "DnsIpv4";
@@ -54,9 +54,8 @@ public class Preferences
 	public static final String APPS = "Apps";
 	public static final String RULES = "Rules";
 	public static final String RULES_DEFAULT_PROXY = "RulesDefaultProxy";
-	/* Routing strategy: rule mode applies the user's rules (and MATCH falls back
-	   to proxy/direct per RULES_DEFAULT_PROXY); the two global modes route
-	   everything one way and ignore the rule list. */
+	/* 分流策略：rule 模式执行用户的规则（最后的 MATCH 按 RULES_DEFAULT_PROXY 决定走
+	   代理还是直连）；两种 global 模式把一切按同一个方向送走并忽略规则列表。 */
 	public static final String RULES_STRATEGY = "RulesStrategy";
 	public static final String RULES_STRATEGY_RULES = "rules";
 	public static final String RULES_STRATEGY_GLOBAL = "global";
@@ -67,9 +66,8 @@ public class Preferences
 	public static final String PROFILE_COUNT = "ProfileCount";
 	public static final String SELECTED = "Selected";
 	public static final String LOG_ENABLED = "LogEnabled";
-	/* When set, the tunnel loads files/config.yaml as-is instead of rebuilding it
-	   from the app's settings on every connect (the file is then hand-edited from
-	   the config screen). */
+	/* 打开后，隧道直接加载 files/config.yaml，而不是每次连接都按 App 的设置重新生成
+	   （配置文件由用户在配置页手工编辑）。 */
 	public static final String CUSTOM_CONFIG = "CustomConfig";
 	public static final String STATS_TOTAL_TX = "StatsTotalTx";
 	public static final String STATS_TOTAL_RX = "StatsTotalRx";
@@ -77,9 +75,8 @@ public class Preferences
 	public static final String STATS_SESSION_RX = "StatsSessionRx";
 	public static final String STATS_RATE_TX = "StatsRateTx";
 	public static final String STATS_RATE_RX = "StatsRateRx";
-	/* Counters that cover only traffic which went through a node. The core
-	   reports everything it handles, direct traffic included, so these are
-	   accumulated separately from its connection list. */
+	/* 只统计"确实走了节点"的流量。内核报的是它处理过的一切（包含直连），
+	   所以这几个计数是在它的连接列表之外单独累加的。 */
 	public static final String PROXY_TOTAL_TX = "ProxyTotalTx";
 	public static final String PROXY_TOTAL_RX = "ProxyTotalRx";
 	public static final String PROXY_SESSION_TX = "ProxySessionTx";
@@ -89,88 +86,74 @@ public class Preferences
 	public static final String STATS_APP_BASE = "StatsAppBase";
 	public static final String STATS_APP_TOTAL = "StatsAppTotal";
 	public static final String THEME = "Theme";
-	/* Per-subscription caches (key + subscription id) so several
-	   subscriptions can be fetched and merged into one node pool. */
+	/* 按订阅分别缓存（键 + 订阅 id），这样多份订阅可以各自抓取再合并成一个节点池。 */
 	public static final String SUB_RAW_PREFIX = "SubRaw.";
 	public static final String SUB_NODES_PREFIX = "SubNodes.";
-	/* Auto-select: the core's url-test group picks the fastest node. */
+	/* 自动选择：由内核的 url-test 组挑出最快的节点。 */
 	public static final String AUTO_SELECT = "AutoSelect";
 	public static final String AUTO_SELECT_INTERVAL = "AutoSelectInterval";
 	public static final String AUTO_TEST_URL = "AutoTestUrl";
-	/* Latency-test timeout (seconds) for the manual "test node" pass through
-	   the clash-api /delay endpoint. The core measures a real forwarded
-	   request, so a longer timeout tolerates slow-but-usable nodes. */
+	/* 单次探测的超时秒数（走 clash-api 的 /delay 接口测一个节点）。内核量的是**真实
+	   转发**的一次请求，所以超时调大能容下"慢但可用"的节点。 */
 	public static final String PROXY_TEST_TIMEOUT = "ProxyTestTimeout";
 	public static final int DEFAULT_PROXY_TEST_TIMEOUT = 5;
 	public static final int MIN_PROXY_TEST_TIMEOUT = 1;
 	public static final int MAX_PROXY_TEST_TIMEOUT = 30;
-	/* Per-NODE wall-clock limit for one latency test (seconds), separate from
-	   the per-target timeout above. ONE node may burn several probes (the
-	   configured URL, the built-in fallbacks, a rescue probe); without a cap a
-	   node whose probes never answer cost ~36s, so a pass crawled and looked
-	   frozen. With it, a pass is bounded by nodeCount x limit. */
+	/* **单个节点**测速的总时限（秒），与上面的"单次探测超时"是两回事。一个节点可能
+	   要发好几次探测（配置的地址 + 内置兜底目标 + 救援探测）；没有这个上限时，一个
+	   永远不回包的节点能吃掉约 36 秒，整轮就爬得像卡死。有了它，一轮的上界是
+	   节点数 × 该值。**严格生效**：给内核的探测超时和本地等待都按剩余额度收紧。 */
 	public static final String NODE_TEST_LIMIT = "NodeTestLimit";
 	public static final int DEFAULT_NODE_TEST_LIMIT = 15;
 	public static final int MIN_NODE_TEST_LIMIT = 5;
 	public static final int MAX_NODE_TEST_LIMIT = 120;
-	/* When a probe gets NO answer at all (our wait expires, the core never
-	   replies), what does that mean for the node? ON (default): 不可用 - a
-	   probe that never answers is exactly what a user calls a dead node, and
-	   it is what the per-node time limit implies. OFF: only an explicit
-	   failure from the core marks a node unavailable, everything else is
-	   未测速 (the conservative mode used while chasing false negatives). */
+	/* 一次探测**完全没有响应**（我们等超时了，内核一直没回包）时，对节点意味着什么？
+	   开（默认）：判「不可用」—— 一个永远不回包的探测，正是用户口中的"死节点"，
+	   也是"每节点时限"这句话本身的含义。关：只有内核**明确**报失败才判不可用，
+	   其它情况一律「未测速」（保守模式，用于排查误杀好节点）。 */
 	public static final String PROBE_TIMEOUT_AS_FAIL = "ProbeTimeoutAsFail";
-	/* clash-api bearer token. Generated once and persisted so the secret baked
-	   into the generated config and every client request stay in sync across
-	   restarts. */
+	/* clash-api 的 bearer 令牌。只生成一次并持久化，这样"写进生成配置里的 secret"
+	   和"每个客户端请求带的 secret"跨重启始终一致。 */
 	public static final String SECRET = "ApiSecret";
-	/* Auto mode only: which country group the top group should default to.
-	   Empty / "GLOBAL" means "fastest anywhere". The value is an ISO-3166
-	   alpha-2 code, matching the per-country url-test group names built in
-	   MihomoConfig. */
+	/* 仅自动模式用：顶层组默认指向哪个国家组。空 / "GLOBAL" 表示"哪儿最快"。
+	   值是 ISO-3166 两位国家码，与 MihomoConfig 里构造的各国 url-test 组名对应。 */
 	public static final String AUTO_SELECT_COUNTRY = "AutoSelectCountry";
-	/* Persisted server -> ISO country-code map, filled by GeoIp resolution so
-	   config generation can group nodes offline (no network at tunnel start). */
+	/* 持久化的 服务器 -> ISO 国家码 映射，由 GeoIp 解析填充，好让配置生成能**离线**
+	   给节点分组（隧道启动时不依赖网络）。 */
 	public static final String SERVER_COUNTRY_MAP = "ServerCountryMap";
-	/* Local proxy port the core listens on, and whether it is exposed to the
-	   LAN. */
+	/* 内核监听的本地代理端口，以及是否把它暴露给局域网。 */
 	public static final String PROXY_PORT = "ProxyPort";
 	public static final String ALLOW_LAN = "AllowLan";
-	/* Latency-test behaviour: keep a TUN-less core alive in the app process so
-	   the core's REAL forwarding delay can be measured even when the VPN tunnel
-	   is not connected (a core never needs a TUN to test a proxy). The test core
-	   is built from the SAME pool the list is scoped to: the country filter is
-	   the scope, so "全部" tests every node and a country chip tests that
-	   country's nodes. */
+	/* 测速行为：在 App 进程里常驻一个**无 TUN** 的内核，这样即使 VPN 没连接也能量出
+	   内核的**真实转发**延迟（测一个节点本来就不需要 TUN）。这个测速内核用的是与列表
+	   **同一范围**的节点池：国家筛选就是范围，选「全部」测全部节点，选某个国家就测
+	   该国的节点。 */
 	public static final String PRELOAD_CORE = "PreloadCore";
-	/* Show every node in the subscribe list - including the ones a latency
-	   test marked unusable (-2) or never reached (-1). Off (default) lists only
-	   reachable nodes. */
+	/* 订阅列表是否列出**所有**节点 —— 包括测速判为不可用（-2）和未测速（-1）的。
+	   关（默认）时只列可用节点。 */
 	public static final String SHOW_UNAVAILABLE = "ShowUnavailable";
 	public static final int DEFAULT_PROXY_PORT = 7890;
 	public static final int MIN_PROXY_PORT = 1024;
 	public static final int MAX_PROXY_PORT = 65535;
-	/* mihomo's own default for url-test. */
+	/* mihomo 自己对 url-test 的默认间隔。 */
 	public static final int DEFAULT_AUTO_INTERVAL = 300;
-	/* Health-check target for url-test: a 204 endpoint is cheap and most
-	   networks do not intercept it. */
+	/* url-test 的健康检查地址：204 端点开销极小，而且多数网络不会劫持它。 */
 	public static final String DEFAULT_TEST_URL = "http://www.gstatic.com/generate_204";
 
 	public static final int MAX_PROFILES = 13;
 
-	/* One routing rule: "value -> proxy or direct", with an explicit type so
-	   the config builder emits exactly the clash rule the user picked. */
+	/* 一条路由规则："值 -> 代理或直连"，并带**显式类型**，好让配置生成器输出的正是
+	   用户选中的那条 clash 规则。 */
 	public static class Rule {
 		public static final int TYPE_DOMAIN = 0;   /* DOMAIN-SUFFIX */
-		public static final int TYPE_IP = 1;       /* single IP -> IP-CIDR /32|/128 */
+		public static final int TYPE_IP = 1;       /* 单个 IP -> IP-CIDR /32 或 /128 */
 		public static final int TYPE_CIDR = 2;     /* IP-CIDR / IP-CIDR6 */
 		public static final int TYPE_KEYWORD = 3;  /* DOMAIN-KEYWORD */
 		public static final int TYPE_GEOIP = 4;    /* GEOIP,<country> */
 		public static final int TYPE_PROCESS = 5;  /* PROCESS-NAME */
-		/* Added later; the numeric values must stay stable because they are what
-		   gets persisted, and the rule_types array order in strings.xml has to
-		   match them (the spinner position is the type). */
-		public static final int TYPE_DOMAIN_FULL = 6;   /* DOMAIN (exact) */
+		/* 后加的：这些数字**必须保持稳定**，因为它们是持久化下来的值；而且
+		   strings.xml 里 rule_types 数组的顺序必须与之对应（下拉框的位置就是类型）。 */
+		public static final int TYPE_DOMAIN_FULL = 6;   /* DOMAIN（精确匹配） */
 		public static final int TYPE_GEOSITE = 7;       /* GEOSITE,<name> */
 		public static final int TYPE_PROCESS_PATH = 8;  /* PROCESS-PATH */
 		public static final int TYPE_DST_PORT = 9;      /* DST-PORT */
@@ -204,24 +187,27 @@ public class Preferences
 	}
 
 	private SharedPreferences prefs;
+	/* 高频统计所在的文件（见 PREFS_STATS_NAME）。跨进程读取同样靠 MODE_MULTI_PROCESS。 */
+	private SharedPreferences statsPrefs;
 	private Context mContext;
 
 	public Preferences(Context context) {
 		mContext = context.getApplicationContext();
 		prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_MULTI_PROCESS);
+		statsPrefs = context.getSharedPreferences(PREFS_STATS_NAME, Context.MODE_MULTI_PROCESS);
 		migrate();
 		migrateSubCache();
+		migrateStats();
 	}
 
-	/* Application context, used by helpers that need assets / system services
-	   (e.g. GeoIp reading the bundled GeoLite2 database). */
+	/* Application 上下文，给需要 assets / 系统服务的辅助类用
+	   （例如 GeoIp 要读打包进来的 GeoLite2 数据库）。 */
 	public Context getContext() {
 		return mContext;
 	}
 
-	/* Older builds kept exactly one fetched subscription in a single cache.
-	   Move it onto the active subscription so the merged node list still
-	   shows what the user had before upgrading. */
+	/* 旧版本只用一个缓存保存**唯一**那份订阅。这里把它挪到当前启用的订阅名下，
+	   让升级后的合并列表还显示用户升级前的那些节点。 */
 	private void migrateSubCache() {
 		String activeId = getActiveSubId();
 		if (activeId == null || activeId.isEmpty())
@@ -231,7 +217,7 @@ public class Preferences
 		if (legacyNodes.isEmpty() && legacyRaw.isEmpty())
 		  return;
 		if (!prefs.getString(key(SUB_NODES_PREFIX + activeId), "").isEmpty())
-		  return; /* already on the per-subscription layout */
+		  return; /* 已经在用"按订阅分别缓存"的格式了 */
 		SharedPreferences.Editor editor = prefs.edit();
 		if (!legacyRaw.isEmpty())
 		  editor.putString(key(SUB_RAW_PREFIX + activeId), legacyRaw);
@@ -242,7 +228,48 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Profile-scoped key: all per-server settings live under "P<index>." */
+	/* 一次性迁移：早期版本把统计也写在主文件里。只有"新文件还没有统计、而旧文件有"时
+	   才搬（避免覆盖新数据）。key 名不变，所以本质上只是换个文件，并把主文件里的旧键
+	   删掉 —— 这样它不会再背着每秒都在变的值，"只迁一次"也自然成立。 */
+	private void migrateStats() {
+		if (statsPrefs.contains(STATS_TOTAL_TX) || !prefs.contains(STATS_TOTAL_TX))
+		  return;
+		SharedPreferences.Editor e = statsPrefs.edit();
+		e.putLong(STATS_TOTAL_TX, prefs.getLong(STATS_TOTAL_TX, 0));
+		e.putLong(STATS_TOTAL_RX, prefs.getLong(STATS_TOTAL_RX, 0));
+		e.putLong(STATS_SESSION_TX, prefs.getLong(STATS_SESSION_TX, 0));
+		e.putLong(STATS_SESSION_RX, prefs.getLong(STATS_SESSION_RX, 0));
+		e.putLong(STATS_RATE_TX, prefs.getLong(STATS_RATE_TX, 0));
+		e.putLong(STATS_RATE_RX, prefs.getLong(STATS_RATE_RX, 0));
+		e.putLong(PROXY_TOTAL_TX, prefs.getLong(PROXY_TOTAL_TX, 0));
+		e.putLong(PROXY_TOTAL_RX, prefs.getLong(PROXY_TOTAL_RX, 0));
+		e.putLong(PROXY_SESSION_TX, prefs.getLong(PROXY_SESSION_TX, 0));
+		e.putLong(PROXY_SESSION_RX, prefs.getLong(PROXY_SESSION_RX, 0));
+		e.putLong(PROXY_RATE_TX, prefs.getLong(PROXY_RATE_TX, 0));
+		e.putLong(PROXY_RATE_RX, prefs.getLong(PROXY_RATE_RX, 0));
+		e.putString(STATS_APP_BASE, prefs.getString(STATS_APP_BASE, ""));
+		e.putString(STATS_APP_TOTAL, prefs.getString(STATS_APP_TOTAL, ""));
+		/* 连接快照与最近请求是"当前状态"而不是累计量，重建即可，所以不搬。 */
+		e.commit();
+		SharedPreferences.Editor old = prefs.edit();
+		old.remove(STATS_TOTAL_TX);
+		old.remove(STATS_TOTAL_RX);
+		old.remove(STATS_SESSION_TX);
+		old.remove(STATS_SESSION_RX);
+		old.remove(STATS_RATE_TX);
+		old.remove(STATS_RATE_RX);
+		old.remove(PROXY_TOTAL_TX);
+		old.remove(PROXY_TOTAL_RX);
+		old.remove(PROXY_SESSION_TX);
+		old.remove(PROXY_SESSION_RX);
+		old.remove(PROXY_RATE_TX);
+		old.remove(PROXY_RATE_RX);
+		old.remove(STATS_APP_BASE);
+		old.remove(STATS_APP_TOTAL);
+		old.commit();
+	}
+
+	/* 按配置档分域的主键：所有"每配置档"的设置都存在 "P<序号>." 下面。 */
 	private static String key(int profile, String name) {
 		return "P" + profile + "." + name;
 	}
@@ -251,7 +278,7 @@ public class Preferences
 		return key(getSelected(), name);
 	}
 
-	/* One-time migration of legacy flat keys into profile 0. */
+	/* 一次性迁移：把早期的扁平键搬进配置档 0。 */
 	private void migrate() {
 		if (prefs.contains(PROFILE_COUNT))
 		  return;
@@ -287,9 +314,8 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Copy every per-profile key from profile src to profile dst.
-	   Reads always see the committed state, so shifting profiles
-	   in ascending order within one editor is safe. */
+	/* 把配置档 src 的所有"每配置档"键复制到 dst。
+	   读取看到的始终是**已提交**的状态，所以同一个 editor 里按升序移动配置档是安全的。 */
 	private void copyProfile(SharedPreferences.Editor editor, int src, int dst) {
 		editor.putString(key(dst, NAME), prefs.getString(key(src, NAME), "Default"));
 		editor.putString(key(dst, DNS_IPV4), prefs.getString(key(src, DNS_IPV4), "8.8.8.8"));
@@ -310,8 +336,6 @@ public class Preferences
 		editor.putString(key(dst, SOCKS_ACTIVE), prefs.getString(key(src, SOCKS_ACTIVE), ""));
 		editor.putString(key(dst, SUBSCRIPTIONS), prefs.getString(key(src, SUBSCRIPTIONS), ""));
 		editor.putString(key(dst, SUB_ACTIVE), prefs.getString(key(src, SUB_ACTIVE), ""));
-		editor.putInt(key(dst, SUB_SORT), prefs.getInt(key(src, SUB_SORT), 0));
-		editor.putInt(key(dst, SUB_FILTER), prefs.getInt(key(src, SUB_FILTER), 0));
 		editor.putString(key(dst, SUB_COUNTRY_FILTER), prefs.getString(key(src, SUB_COUNTRY_FILTER), ""));
 		editor.putString(key(dst, SUB_PROTO_FILTER), prefs.getString(key(src, SUB_PROTO_FILTER), ""));
 	}
@@ -337,8 +361,6 @@ public class Preferences
 		editor.remove(key(profile, SOCKS_ACTIVE));
 		editor.remove(key(profile, SUBSCRIPTIONS));
 		editor.remove(key(profile, SUB_ACTIVE));
-		editor.remove(key(profile, SUB_SORT));
-		editor.remove(key(profile, SUB_FILTER));
 		editor.remove(key(profile, SUB_COUNTRY_FILTER));
 		editor.remove(key(profile, SUB_PROTO_FILTER));
 	}
@@ -367,7 +389,7 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Create a new profile as a copy of the current one and select it. */
+	/* 以当前配置档为模板新建一个并切过去。 */
 	public boolean addProfile(String name) {
 		int count = getProfileCount();
 		if (count >= MAX_PROFILES)
@@ -382,7 +404,7 @@ public class Preferences
 		return true;
 	}
 
-	/* Delete the current profile, shifting the following ones down. */
+	/* 删除当前配置档，并把后面的配置档依次前移。 */
 	public boolean deleteProfile() {
 		int count = getProfileCount();
 		if (count <= 1)
@@ -400,8 +422,8 @@ public class Preferences
 		return true;
 	}
 
-	/* The stored clash.yml subscriptions, and which one is enabled. The
-	   enabled one is what the subscribe page fetches. */
+	/* 已保存的 clash.yml 订阅，以及当前启用的是哪一个。
+	   启用中的那个才是订阅页会去抓取的。 */
 	public List<Subscription> getSubscriptions() {
 		return Subscription.decode(prefs.getString(key(SUBSCRIPTIONS), ""));
 	}
@@ -409,9 +431,8 @@ public class Preferences
 	public void setSubscriptions(List<Subscription> list) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(SUBSCRIPTIONS), Subscription.encode(list));
-		/* There is no "default subscription" any more: every subscription is
-		   fetched and merged. Keep the first one recorded as the active id so
-		   the few callers that ask for "the" subscription still work. */
+		/* 已经不存在"默认订阅"了：每份订阅都会被抓取并合并。这里仍把第一个记为
+		   活动 id，好让少数"要那份订阅"的调用方继续能用。 */
 		String active = getActiveSubId();
 		boolean present = false;
 		for (Subscription s : list) {
@@ -447,7 +468,7 @@ public class Preferences
 		return null;
 	}
 
-	/* Remote clash.yml subscription (per profile). */
+	/* 远程 clash.yml 订阅地址（按配置档保存）。 */
 	public String getSubUrl() {
 		return prefs.getString(key(SUB_URL), "");
 	}
@@ -468,7 +489,7 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* The node the running core is really using (empty when unknown / down). */
+	/* 运行中的内核**真正在用**的节点（未知 / 隧道已断开时为空）。 */
 	public String getActiveNode() {
 		String s = prefs.getString(key(ACTIVE_NODE), "");
 		return s == null ? "" : s;
@@ -481,8 +502,8 @@ public class Preferences
 	}
 
 	public boolean hasSubscription() {
-		/* Only an enabled subscription counts as a usable upstream: a disabled
-		   one is kept but never merged, so it must not satisfy "configured". */
+		/* 只有**启用中**的订阅才算可用上游：停用的订阅会被保留但从不合并，
+		   所以不能让"已配置"成立。 */
 		Subscription active = getActiveSubscription();
 		if (active != null && active.enabled) {
 			String raw = getSubRaw(active.id);
@@ -499,8 +520,8 @@ public class Preferences
 		return false;
 	}
 
-	/* The manually configured SOCKS5 servers, plus which one is enabled.
-	   An enabled server takes over from the subscription. */
+	/* 手动配置的 SOCKS5 服务器，以及当前启用的是哪一个。
+	   启用了服务器就由它取代订阅。 */
 	public List<SocksServer> getSocksServers() {
 		return SocksServer.decode(prefs.getString(key(SOCKS_SERVERS), ""));
 	}
@@ -521,7 +542,7 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* The enabled server, or null when the subscription is in charge. */
+	/* 启用中的服务器；由订阅负责时返回 null。 */
 	public SocksServer getActiveSocksServer() {
 		String id = getActiveSocksId();
 		if (id == null || id.isEmpty())
@@ -533,12 +554,10 @@ public class Preferences
 		return null;
 	}
 
-	/* Which node the tunnel is using. Empty means "let the subscription decide
-	   for itself". While the tunnel is UP this reports the node the core has
-	   ACTUALLY selected (recorded by TProxyService, which reads it from the
-	   running config); the pick alone is only a wish, and showing it made the
-	   home page and the notification claim a node the traffic was not using
-	   (e.g. after a country switch, which needs a config rebuild). */
+	/* 隧道在用的节点。为空表示"交给订阅自己决定"。隧道**已连接**时这里报的是内核
+	   **真正选中**的节点（由 TProxyService 从运行中的配置读出后记录）；单纯的选择只是
+	   "愿望"，拿它显示会让首页和通知栏宣称一个流量根本没走的节点（例如切换国家之后 ——
+	   那需要重建配置才生效）。 */
 	public String getCurrentNode() {
 		SocksServer s = getActiveSocksServer();
 		if (s != null)
@@ -559,8 +578,8 @@ public class Preferences
 		return "socks5://" + addr + ":" + s.port;
 	}
 
-	/* Raw clash.yml text of the active subscription (already base64-decoded
-	   if the provider shipped it that way). */
+	/* 当前启用订阅的原始 clash.yml 文本（如果机场是用 base64 下发的，这里已经是
+	   解码后的内容）。 */
 	public String getSubRaw() {
 		Subscription sub = getActiveSubscription();
 		if (sub != null)
@@ -568,8 +587,8 @@ public class Preferences
 		return prefs.getString(key(SUB_RAW), "");
 	}
 
-	/* Per-subscription cache: each subscription keeps its own fetched YAML
-	   and node list, so several can be pulled and merged into one pool. */
+	/* 按订阅分别缓存：每份订阅保存自己抓下来的 YAML 与节点列表，
+	   这样多份订阅可以各自拉取再合并成一个池。 */
 	public String getSubRaw(String id) {
 		if (id == null || id.isEmpty())
 		  return "";
@@ -598,6 +617,22 @@ public class Preferences
 		editor.commit();
 	}
 
+	/* 一次写入**多份**订阅的节点缓存。一轮测速每 15 个节点就增量保存一次，而每次
+	   commit() 都会把整份主文件重写一遍（里面还有几百 KB 的订阅原文）—— 逐份订阅
+	   commit 等于成倍写盘，所以这里合并成一次。 */
+	public void setSubNodesAll(Map<String, String> nodesById) {
+		if (nodesById == null || nodesById.isEmpty())
+		  return;
+		SharedPreferences.Editor editor = prefs.edit();
+		for (Map.Entry<String, String> e : nodesById.entrySet()) {
+			if (e.getKey() == null || e.getKey().isEmpty())
+			  continue;
+			editor.putString(key(SUB_NODES_PREFIX + e.getKey()),
+				e.getValue() == null ? "" : e.getValue());
+		}
+		editor.commit();
+	}
+
 	public void clearSubCache(String id) {
 		if (id == null || id.isEmpty())
 		  return;
@@ -607,9 +642,8 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Auto-select: the core's url-test group picks the fastest node by
-	   itself, re-testing every `interval` seconds. Off means "use exactly
-	   the node the user tapped". */
+	/* 自动选择：由内核的 url-test 组自己挑最快节点，每 `interval` 秒重测一次。
+	   关闭表示"严格使用用户点的那个节点"。 */
 	public boolean getAutoSelect() {
 		return prefs.getBoolean(key(AUTO_SELECT), true);
 	}
@@ -630,7 +664,7 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* url-test health-check target. Empty means "use the default". */
+	/* url-test 的健康检查地址。为空表示"用默认值"。 */
 	public String getAutoTestUrl() {
 		String url = prefs.getString(key(AUTO_TEST_URL), "");
 		if (url == null || url.trim().isEmpty())
@@ -644,7 +678,7 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Latency-test timeout for the manual node pass (seconds). Clamped 1..30. */
+	/* 手动测速时**单次探测**的超时秒数，限定在 1~30。 */
 	public int getProxyTestTimeout() {
 		int t = prefs.getInt(key(PROXY_TEST_TIMEOUT), DEFAULT_PROXY_TEST_TIMEOUT);
 		return Math.max(MIN_PROXY_TEST_TIMEOUT, Math.min(MAX_PROXY_TEST_TIMEOUT, t));
@@ -657,7 +691,7 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Whether a probe with no answer means "node unavailable". */
+	/* 探测完全没有响应时，是否判该节点"不可用"。 */
 	public boolean getProbeTimeoutAsFail() {
 		return prefs.getBoolean(key(PROBE_TIMEOUT_AS_FAIL), true);
 	}
@@ -668,7 +702,7 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* How long ONE node may take in total (seconds). Clamped 5..120. */
+	/* **单个节点**测速总共可以花多久（秒），限定在 5~120。 */
 	public int getNodeTestLimit() {
 		int t = prefs.getInt(key(NODE_TEST_LIMIT), DEFAULT_NODE_TEST_LIMIT);
 		return Math.max(MIN_NODE_TEST_LIMIT, Math.min(MAX_NODE_TEST_LIMIT, t));
@@ -681,11 +715,10 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* clash-api bearer token. Generated once and persisted, then injected into
-	   the core config and carried by every control request (Authorization:
-	   Bearer). mihomo rejects unauthenticated calls with 401 once `secret:` is
-	   set, so the client and the config must agree - this single source keeps
-	   them aligned across restarts. */
+	/* clash-api 的 bearer 令牌。只生成一次并持久化，然后既注入到内核配置里，
+	   又由每个控制请求携带（Authorization: Bearer）。配置里一旦设了 `secret:`，
+	   mihomo 就会用 401 拒绝未鉴权的调用，所以客户端和配置必须一致 ——
+	   这个唯一的来源让两者跨重启始终对齐。 */
 	public String getSecret() {
 		String s = prefs.getString(key(SECRET), null);
 		if (s == null || s.isEmpty()) {
@@ -697,23 +730,23 @@ public class Preferences
 		return s;
 	}
 
-	/* Persist a specific secret (used to adopt one the user set in a custom
-	   config) so the client authenticates with the same token the core uses. */
+	/* 持久化一个指定的 secret（用于采用用户在自定义配置里设的那个），
+	   这样客户端用的令牌和内核用的就是同一个。 */
 	public void setSecret(String s) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(SECRET), s == null ? "" : s.trim());
 		editor.commit();
 	}
 
-	/* Regenerate the clash-api bearer token. The running core only learns the
-	   new secret after the tunnel (re)starts, so callers must re-apply. */
+	/* 重新生成 clash-api 的 bearer 令牌。运行中的内核要等隧道**重新启动**才会知道新的
+	   secret，所以调用方必须重新应用一次。 */
 	public void resetSecret() {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(SECRET), randomSecret());
 		editor.commit();
 	}
 
-	/* 32 chars of [A-Za-z0-9]: safe in YAML without escaping and unguessable. */
+	/* 32 个 [A-Za-z0-9] 字符：在 YAML 里无需转义就安全，而且猜不出来。 */
 	private static String randomSecret() {
 		final String chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 		java.security.SecureRandom rnd = new java.security.SecureRandom();
@@ -723,8 +756,8 @@ public class Preferences
 		return sb.toString();
 	}
 
-	/* Auto mode: the country whose url-test group the top group defaults to.
-	   "" or "GLOBAL" => fastest node anywhere. */
+	/* 自动模式：顶层组默认指向哪个国家的 url-test 组。
+	   "" 或 "GLOBAL" => 哪儿最快就用哪儿。 */
 	public String getAutoSelectCountry() {
 		return prefs.getString(key(AUTO_SELECT_COUNTRY), "");
 	}
@@ -732,31 +765,6 @@ public class Preferences
 	public void setAutoSelectCountry(String cc) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(AUTO_SELECT_COUNTRY), cc == null ? "" : cc);
-		editor.commit();
-	}
-
-	/* Subscribe-page view state (sort / availability / country / protocol),
-	   so reopening the page keeps the user's last choice instead of resetting
-	   to "all". */
-	/* Index 0 is "by latency" (see sub_sort_options): fastest first is the
-	   useful default, and it is also what the previously stored 0 now means. */
-	public int getSubSort() {
-		return prefs.getInt(key(SUB_SORT), 0);
-	}
-
-	public void setSubSort(int mode) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putInt(key(SUB_SORT), mode);
-		editor.commit();
-	}
-
-	public int getSubFilter() {
-		return prefs.getInt(key(SUB_FILTER), 0);
-	}
-
-	public void setSubFilter(int mode) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putInt(key(SUB_FILTER), mode);
 		editor.commit();
 	}
 
@@ -780,8 +788,8 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Country of a proxy's server, resolved earlier by GeoIp. "" means not yet
-	   known (treated as "OTHER" at config build time). */
+	/* 某个节点服务器所属的国家，由 GeoIp 事先解析。"" 表示还不清楚
+	   （配置生成时按"其它"处理）。 */
 	public String getServerCountry(String server) {
 		synchronized (COUNTRY_MAP_LOCK) {
 			JSONObject map = loadCountryMap();
@@ -789,10 +797,9 @@ public class Preferences
 		}
 	}
 
-	/* Merge one resolution into the map. The write is COALESCED: GeoIp resolves
-	   a whole subscription node by node, and rewriting (and fsync-ing) the full
-	   preferences file per node was O(n^2) IO. The map itself stays complete in
-	   memory - flushCountryMap() pushes it out at the end of a pass. */
+	/* 把一次解析结果合并进映射表。写入是**合并式（coalesced）**的：GeoIp 会逐个节点
+	   解析整份订阅，而每解析一个节点就重写（并 fsync）整个 preferences 文件是 O(n²)
+	   的 IO。映射在内存里始终是完整的 —— flushCountryMap() 在一轮结束时把它落盘。 */
 	public void setServerCountry(String server, String cc) {
 		if (server == null || server.isEmpty() || cc == null || cc.isEmpty())
 		  return;
@@ -800,7 +807,7 @@ public class Preferences
 			JSONObject map = loadCountryMap();
 			try {
 				if (cc.equals(map.optString(server, "")))
-				  return;               /* nothing changed */
+				  return;               /* 没有任何变化 */
 				map.put(server, cc);
 			} catch (JSONException e) {
 				return;
@@ -813,8 +820,8 @@ public class Preferences
 		}
 	}
 
-	/* Persist anything the coalescing above left pending. Called when a latency
-	   pass ends, so the country grouping is complete for the next config build. */
+	/* 把上面"合并写入"还挂着的改动落盘。一轮延迟测试结束时调用，
+	   这样下次生成配置时国家分组是完整的。 */
 	public void flushCountryMap() {
 		synchronized (COUNTRY_MAP_LOCK) {
 			if (countryMapDirty && countryMapCache != null)
@@ -822,11 +829,11 @@ public class Preferences
 		}
 	}
 
-	/* Caller must hold COUNTRY_MAP_LOCK. */
+	/* 调用方必须持有 COUNTRY_MAP_LOCK。 */
 	private void writeCountryMap(JSONObject map) {
 		String s = map.toString();
-		/* Keep the cache in step with what we wrote, so the next loadCountryMap()
-		   does not treat our own write as an external change and re-parse. */
+		/* 让缓存与我们刚写出的内容保持一致，否则下一次 loadCountryMap() 会把自己
+		   这次的写入当成"外部改动"而重新解析一遍。 */
 		countryMapRaw = s;
 		countryMapCache = map;
 		countryMapDirty = false;
@@ -836,12 +843,10 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Parsed copy of SERVER_COUNTRY_MAP. It is read once per proxy at EVERY
-	   config build (hundreds of nodes, several builds per launch), so parsing
-	   the JSON each time was O(n^2). The raw string is re-read on every call
-	   (SharedPreferences serves it from memory) and compared first: a write from
-	   the other process is still noticed, and nothing is re-parsed when it has
-	   not changed. */
+	/* SERVER_COUNTRY_MAP 的**已解析副本**。每次生成配置时都要对每个节点读一次
+	   （几百个节点、每次启动要生成好几次），每次都重新解析 JSON 就是 O(n²)。这里改为
+	   每次都重新读原始字符串（SharedPreferences 从内存返回它）并**先比较**：
+	   另一个进程的写入仍能被发现，而内容没变时一次都不重新解析。 */
 	private String countryMapRaw = null;
 	private JSONObject countryMapCache = null;
 	private boolean countryMapDirty = false;
@@ -870,7 +875,7 @@ public class Preferences
 		return o;
 	}
 
-	/* The core's local HTTP/SOCKS port. Out of range means "never set". */
+	/* 内核的本地 HTTP/SOCKS 端口。超出范围表示"从未设置过"。 */
 	public int getProxyPort() {
 		int port = prefs.getInt(key(PROXY_PORT), DEFAULT_PROXY_PORT);
 		if (port < MIN_PROXY_PORT || port > MAX_PROXY_PORT)
@@ -884,8 +889,8 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Expose the port to the whole LAN (mihomo's allow-lan). Off by default:
-	   an open proxy on a shared Wi-Fi lets anyone on it use the tunnel. */
+	/* 把端口暴露给整个局域网（mihomo 的 allow-lan）。默认关闭：
+	   在共享 Wi-Fi 上开一个开放代理，等于同网段谁都能用你的隧道。 */
 	public boolean getAllowLan() {
 		return prefs.getBoolean(key(ALLOW_LAN), false);
 	}
@@ -896,8 +901,7 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Use the core's real forwarding delay for the latency test even when the
-	   VPN is not connected (loads a TUN-less core in the app process). */
+	/* VPN 没连接时也用内核的**真实转发延迟**测速（在 App 进程里加载一个无 TUN 的内核）。 */
 	public boolean getPreloadCore() {
 		return prefs.getBoolean(key(PRELOAD_CORE), true);
 	}
@@ -910,7 +914,7 @@ public class Preferences
 
 
 
-	/* List unusable / untested nodes in the subscribe page too. */
+	/* 订阅页是否也列出「不可用 / 未测速」的节点。 */
 	public boolean getShowUnavailable() {
 		return prefs.getBoolean(key(SHOW_UNAVAILABLE), false);
 	}
@@ -1001,7 +1005,7 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Routing rules, in the order they were added (first match wins). */
+	/* 路由规则，按添加顺序（先匹配到的先生效）。 */
 	public List<Rule> getRules() {
 		List<Rule> rules = new ArrayList<Rule>();
 		String value = prefs.getString(key(RULES), "");
@@ -1027,7 +1031,7 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* What happens to traffic that matches no rule. */
+	/* 没有匹配任何规则的流量怎么走。 */
 	public boolean getRulesDefaultProxy() {
 		return prefs.getBoolean(key(RULES_DEFAULT_PROXY), true);
 	}
@@ -1053,9 +1057,8 @@ public class Preferences
 		return prefs.getBoolean(ENABLE, false);
 	}
 
-	/* Why the last start attempt failed. TProxyService writes it together with
-	   Enable=false, so the UI can tell "never started" from "started and died"
-	   instead of showing a stuck "connected". */
+	/* 上一次启动失败的原因。TProxyService 会把它和 Enable=false 一起写入，
+	   这样 UI 就能区分"从没启动过"和"启动后又挂了"，而不是一直显示"已连接"。 */
 	public String getLastError() {
 		return prefs.getString(LAST_ERROR, "");
 	}
@@ -1086,8 +1089,7 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Use the on-disk config.yaml verbatim instead of regenerating it from the
-	   current settings on every connect. */
+	/* 直接使用磁盘上的 config.yaml，而不是每次连接都按当前设置重新生成。 */
 	public boolean getCustomConfig() {
 		return prefs.getBoolean(CUSTOM_CONFIG, false);
 	}
@@ -1098,19 +1100,19 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Traffic accumulated over every session (global, not per-profile).
-	   Written with commit() because the writer runs in the :native process
-	   and MODE_MULTI_PROCESS only re-reads on commit. */
+	/* 累计所有会话的流量（全局量，不按配置档分）。写入用 commit()，因为写入方跑在
+	   :native 进程里，而 MODE_MULTI_PROCESS 只在 commit 时才会重新读取。
+	   以下统计类读写全部走 `statsPrefs`（独立的 SocksStats 文件），原因见 PREFS_STATS_NAME。 */
 	public long getTotalTx() {
-		return prefs.getLong(STATS_TOTAL_TX, 0);
+		return statsPrefs.getLong(STATS_TOTAL_TX, 0);
 	}
 
 	public long getTotalRx() {
-		return prefs.getLong(STATS_TOTAL_RX, 0);
+		return statsPrefs.getLong(STATS_TOTAL_RX, 0);
 	}
 
 	public void setTotalTraffic(long tx, long rx) {
-		SharedPreferences.Editor editor = prefs.edit();
+		SharedPreferences.Editor editor = statsPrefs.edit();
 		editor.putLong(STATS_TOTAL_TX, tx);
 		editor.putLong(STATS_TOTAL_RX, rx);
 		editor.commit();
@@ -1120,50 +1122,50 @@ public class Preferences
 		setTotalTraffic(0, 0);
 	}
 
-	/* Everything the :native service knows, written in one commit. */
+	/* :native 服务那边知道的一切，一次 commit 全部写出。 */
 	public long getSessionTx() {
-		return prefs.getLong(STATS_SESSION_TX, 0);
+		return statsPrefs.getLong(STATS_SESSION_TX, 0);
 	}
 
 	public long getSessionRx() {
-		return prefs.getLong(STATS_SESSION_RX, 0);
+		return statsPrefs.getLong(STATS_SESSION_RX, 0);
 	}
 
 	public long getRateTx() {
-		return prefs.getLong(STATS_RATE_TX, 0);
+		return statsPrefs.getLong(STATS_RATE_TX, 0);
 	}
 
 	public long getRateRx() {
-		return prefs.getLong(STATS_RATE_RX, 0);
+		return statsPrefs.getLong(STATS_RATE_RX, 0);
 	}
 
 	public long getProxyTotalTx() {
-		return prefs.getLong(PROXY_TOTAL_TX, 0);
+		return statsPrefs.getLong(PROXY_TOTAL_TX, 0);
 	}
 
 	public long getProxyTotalRx() {
-		return prefs.getLong(PROXY_TOTAL_RX, 0);
+		return statsPrefs.getLong(PROXY_TOTAL_RX, 0);
 	}
 
 	public long getProxySessionTx() {
-		return prefs.getLong(PROXY_SESSION_TX, 0);
+		return statsPrefs.getLong(PROXY_SESSION_TX, 0);
 	}
 
 	public long getProxySessionRx() {
-		return prefs.getLong(PROXY_SESSION_RX, 0);
+		return statsPrefs.getLong(PROXY_SESSION_RX, 0);
 	}
 
 	public long getProxyRateTx() {
-		return prefs.getLong(PROXY_RATE_TX, 0);
+		return statsPrefs.getLong(PROXY_RATE_TX, 0);
 	}
 
 	public long getProxyRateRx() {
-		return prefs.getLong(PROXY_RATE_RX, 0);
+		return statsPrefs.getLong(PROXY_RATE_RX, 0);
 	}
 
 	public void setProxyStats(long totalTx, long totalRx, long sessionTx, long sessionRx,
 			long rateTx, long rateRx) {
-		SharedPreferences.Editor editor = prefs.edit();
+		SharedPreferences.Editor editor = statsPrefs.edit();
 		editor.putLong(PROXY_TOTAL_TX, totalTx);
 		editor.putLong(PROXY_TOTAL_RX, totalRx);
 		editor.putLong(PROXY_SESSION_TX, sessionTx);
@@ -1179,7 +1181,7 @@ public class Preferences
 
 	public void setStats(long totalTx, long totalRx, long sessionTx, long sessionRx,
 			long rateTx, long rateRx) {
-		SharedPreferences.Editor editor = prefs.edit();
+		SharedPreferences.Editor editor = statsPrefs.edit();
 		editor.putLong(STATS_TOTAL_TX, totalTx);
 		editor.putLong(STATS_TOTAL_RX, totalRx);
 		editor.putLong(STATS_SESSION_TX, sessionTx);
@@ -1189,15 +1191,14 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Both counter sets in ONE editor/commit. The sampler publishes them
-	   together every second; two commits meant two full preferences writes per
-	   tick, plus a window where the UI could read the tunnel totals but not the
-	   proxy ones (they are shown side by side). */
+	/* 两套计数**在同一个 editor/commit** 里写入。采样器每秒把它们一起发布；
+	   分两次 commit 意味着每拍要写两遍完整的 preferences，而且中间还存在一个窗口：
+	   UI 读到了隧道总量却读不到代理量（而它们是并排显示的）。 */
 	public void setAllStats(long totalTx, long totalRx, long sessionTx, long sessionRx,
 			long rateTx, long rateRx,
 			long pTotalTx, long pTotalRx, long pSessionTx, long pSessionRx,
 			long pRateTx, long pRateRx) {
-		SharedPreferences.Editor editor = prefs.edit();
+		SharedPreferences.Editor editor = statsPrefs.edit();
 		editor.putLong(STATS_TOTAL_TX, totalTx);
 		editor.putLong(STATS_TOTAL_RX, totalRx);
 		editor.putLong(STATS_SESSION_TX, sessionTx);
@@ -1213,50 +1214,47 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* Recent requests: a JSON array of compact objects recorded by TProxyService
-	   each time a connection closes, so the UI can show "what went where" after
-	   the fact. Keeping it as JSON (not a packed "k:v;..." string) preserves the
-	   field names and makes the reader trivial. */
+	/* 最近请求：TProxyService 在每条连接关闭时记录下来的紧凑对象 JSON 数组，
+	   让 UI 事后还能看到"什么流量去了哪里"。保持 JSON 形式（而不是压成
+	   "k:v;..." 字符串）可以保留字段名，读起来也简单。 */
 	private static final String RECENT_REQUESTS = "recentRequests";
 	public void setRecentRequests(String json) {
-		prefs.edit().putString(RECENT_REQUESTS, json).apply();
+		statsPrefs.edit().putString(RECENT_REQUESTS, json).apply();
 	}
 	public String getRecentRequests() {
-		return prefs.getString(RECENT_REQUESTS, "");
+		return statsPrefs.getString(RECENT_REQUESTS, "");
 	}
 
-	/* Live /connections snapshot, published by TProxyService (the :native
-	   process) so the connections screen - which runs in the MAIN process and
-	   cannot reach the in-process action bridge or the service instance - can
-	   read it. A JSON array of compact objects {t,r,p,u,d,s}. commit() (not
-	   apply()) because MODE_MULTI_PROCESS only re-reads cross-process on a
-	   committed write. */
+	/* 实时的 /connections 快照，由 TProxyService（:native 进程）发布，好让"连接"页面
+	   能读到它 —— 那个页面跑在**主进程**，既够不到进程内的动作桥，也拿不到服务实例。
+	   内容是紧凑对象 {t,r,p,u,d,s} 的 JSON 数组。这里用 commit() 而不是 apply()，
+	   因为 MODE_MULTI_PROCESS 只在**已提交**的写入上才会跨进程重新读取。 */
 	private static final String CONN_SNAPSHOT = "connSnapshot";
 	public void setConnSnapshot(String json) {
-		prefs.edit().putString(CONN_SNAPSHOT, json).commit();
+		statsPrefs.edit().putString(CONN_SNAPSHOT, json).commit();
 	}
 	public String getConnSnapshot() {
-		return prefs.getString(CONN_SNAPSHOT, "");
+		return statsPrefs.getString(CONN_SNAPSHOT, "");
 	}
 
-	/* Per-app snapshots: "pkg:tx:rx;pkg:tx:rx;...". */
+	/* 按应用的快照："包名:上行:下行;包名:上行:下行;..."。 */
 	public String getAppBase() {
-		return prefs.getString(STATS_APP_BASE, "");
+		return statsPrefs.getString(STATS_APP_BASE, "");
 	}
 
 	public String getAppTotal() {
-		return prefs.getString(STATS_APP_TOTAL, "");
+		return statsPrefs.getString(STATS_APP_TOTAL, "");
 	}
 
 	public void setAppStats(String base, String total) {
-		SharedPreferences.Editor editor = prefs.edit();
+		SharedPreferences.Editor editor = statsPrefs.edit();
 		editor.putString(STATS_APP_BASE, base);
 		editor.putString(STATS_APP_TOTAL, total);
 		editor.commit();
 	}
 
 	public void resetStats() {
-		SharedPreferences.Editor editor = prefs.edit();
+		SharedPreferences.Editor editor = statsPrefs.edit();
 		editor.putLong(STATS_TOTAL_TX, 0);
 		editor.putLong(STATS_TOTAL_RX, 0);
 		editor.putLong(STATS_SESSION_TX, 0);
@@ -1295,10 +1293,9 @@ public class Preferences
 		return sb.toString();
 	}
 
-	/* The set of packages whose traffic goes through the tunnel:
-	   the selected apps, or every app with INTERNET when no allow-list is
-	   set. An empty allow-list means "everything but this app", which is
-	   exactly what VpnService does, so it must be expanded here too. */
+	/* 走隧道的是哪些包：用户选中的应用；没设白名单时则是所有带 INTERNET 权限的应用。
+	   空白名单的含义是"除了本 App 之外的一切"，这正是 VpnService 的行为，
+	   所以这里也必须展开成同样的集合。 */
 	public Set<String> getRoutedApps(Context context) {
 		Set<String> apps = new HashSet<String>();
 		if (!getGlobal()) {
@@ -1328,7 +1325,7 @@ public class Preferences
 		prefs.unregisterOnSharedPreferenceChangeListener(listener);
 	}
 
-	/* Which palette to use (ThemeManager.*). */
+	/* 用哪套配色（见 ThemeManager.*）。 */
 	public static int getTheme(Context context) {
 		SharedPreferences sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_MULTI_PROCESS);
 		return sp.getInt(THEME, ThemeManager.NEON);
@@ -1344,10 +1341,9 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* VPN interface MTU. This used to be 8500 - a jumbo-frame value - which
-	   is far above the 1500 the physical link actually carries. Small packets
-	   (the TCP handshake, DNS) still get through, so the tunnel looks
-	   connected, while every real data transfer is silently dropped. */
+	/* VPN 网卡的 MTU。以前是 8500（巨型帧的数值），远高于物理链路实际能承载的
+	   1500。小包（TCP 握手、DNS）还是能过去，所以隧道看起来"已连接"，而一切真正的
+	   数据传输都被静默丢弃。 */
 	public int getTunnelMtu() {
 		return 1500;
 	}

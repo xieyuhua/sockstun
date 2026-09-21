@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One row of the recent-requests list: target host, the rule/chain it
-     matched, the originating app plus how long it lasted, and its traffic.
-     Mirror of connection_item so the two screens read as one family. -->
+<!-- 「最近请求」列表的一行：目标主机、命中的规则/链路、发起它的应用与持续时长，
+     以及流量。布局与 connection_item 对称，让两个页面看起来是一家人。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
 	android:layout_width="match_parent"
 	android:layout_height="wrap_content"

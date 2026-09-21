@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One node row: country flag avatar, name + protocol/country/address, a
-     latency pill and two actions. Kept flat so a long list scrolls cheaply. -->
+<!-- 一行节点：国旗头像、名字 + 协议/国家/地址、延迟胶囊和两个操作。
+     层级刻意做得很扁平，好让长列表滚动得便宜。 -->
 <com.google.android.material.card.MaterialCardView
 	xmlns:android="http://schemas.android.com/apk/res/android"
 	xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -23,7 +23,7 @@
 			android:layout_height="wrap_content"
 			android:gravity="center_vertical">
 
-			<!-- Country flag as a circular avatar, so a row is identifiable at a glance. -->
+			<!-- 国旗做成圆形头像，让每一行一眼就能认出来。 -->
 			<TextView
 				android:id="@+id/item_flag"
 				android:layout_width="44dp"
@@ -71,8 +71,8 @@
 						android:visibility="gone"/>
 				</LinearLayout>
 
-				<!-- Protocol tag and "国家 · host:port"; the address is the part
-				     that ellipsizes, never the protocol. -->
+				<!-- 协议标签与 "国家 · host:port"；被省略号截断的是**地址**，
+				     绝不会是协议。 -->
 				<LinearLayout
 					android:orientation="horizontal"
 					android:layout_width="match_parent"
@@ -120,7 +120,7 @@
 				</LinearLayout>
 			</LinearLayout>
 
-			<!-- Latency (or 未测速/失败) in a pill; its text colour is set in code. -->
+			<!-- 胶囊里的延迟（或「未测速 / 失败」）；文字颜色由代码设置。 -->
 			<TextView
 				android:id="@+id/item_status"
 				android:layout_width="wrap_content"

@@ -1,10 +1,9 @@
 /*
  ============================================================================
- Name        : ServerEditActivity.java
- Description : Add or edit one manually configured proxy server. SOCKS5 keeps
-               the original form-based entry; other clash protocols
-               (hysteria2 / vmess / vless / trojan / ss) are entered as a raw
-               clash proxy block, which MihomoConfig emits verbatim.
+ 文件名  : ServerEditActivity.java
+ 说明    : 新增 / 编辑一台手动上游服务器。SOCKS5 沿用原来的表单录入；其它 clash 协议
+           （hysteria2 / vmess / vless / trojan / ss）则粘贴一段原始 clash 节点定义，
+           由 MihomoConfig 原样发射。
  ============================================================================
  */
 
@@ -40,8 +39,8 @@ public class ServerEditActivity extends BaseActivity {
 	private LinearLayout socksFields;
 	private TextInputLayout rawLayout;
 
-	/* Position 0 is SOCKS5 (the original behaviour); the rest are clash proxy
-	   types entered as a raw YAML block in edit_raw. */
+	/* 第 0 项是 SOCKS5（原来的行为）；其余是用 edit_raw 里的原始 YAML 块录入的
+	   clash 代理类型。 */
 	private static final String[] TYPES = {
 		"socks5", "hysteria2", "vmess", "vless", "trojan", "ss"
 	};
@@ -105,8 +104,7 @@ public class ServerEditActivity extends BaseActivity {
 		}
 	}
 
-	/* Toggle between the SOCKS5 form and the raw-block editor, and pre-fill a
-	   template the first time a non-SOCKS5 type is chosen. */
+	/* 在 SOCKS5 表单与"原始块"编辑器之间切换；第一次选择非 SOCKS5 类型时预填一份模板。 */
 	private void applyTypeView(String type) {
 		boolean socks = "socks5".equals(type);
 		socksFields.setVisibility(socks ? View.VISIBLE : View.GONE);
@@ -183,9 +181,8 @@ public class ServerEditActivity extends BaseActivity {
 				Toast.makeText(this, R.string.server_raw_required, Toast.LENGTH_SHORT).show();
 				return;
 			}
-			/* The raw block is the real config (emitted verbatim by
-			   MihomoConfig); addr/port/user/pass are only best-effort hints for
-			   the list display. */
+			/* 原始块才是真正的配置（由 MihomoConfig 原样发射）；addr/port/user/pass
+			   只是给列表显示用的尽力而为的提示。 */
 			put(list, new SocksServer(id.isEmpty() ? SocksServer.newId() : id,
 				name, addr, port, user, pass, type, raw));
 		}
@@ -195,7 +192,7 @@ public class ServerEditActivity extends BaseActivity {
 		finish();
 	}
 
-	/* Insert or replace by id, so editing keeps the same entry. */
+	/* 按 id 插入或替换，编辑时不会变成新增一条。 */
 	private void put(List<SocksServer> list, SocksServer s) {
 		for (int i = 0; i < list.size(); i++) {
 			if (s.id.equals(list.get(i).id)) {

@@ -1,9 +1,9 @@
 /*
  ============================================================================
- Name        : AppListActivity.java
- Author      : hev <r@hev.cc>
- Copyright   : Copyright (c) 2025 xyz
- Description : App List Activity
+ 文件名  : AppListActivity.java
+ 作者    : hev <r@hev.cc>
+ 版权    : Copyright (c) 2025 xyz
+ 说明    : 「部分应用」模式下的应用勾选页（只列出声明了联网权限的应用，可搜索）。
  ============================================================================
  */
 
@@ -51,8 +51,8 @@ public class AppListActivity extends BaseActivity {
 		public PackageInfo info;
 		public boolean selected;
 		public String label;
-		/* Resolved once while the list is built: loadIcon()/loadLabel() hit the
-		   PackageManager and are far too slow to call from getView(). */
+		/* 在构建列表时解析一次：loadIcon()/loadLabel() 会访问 PackageManager，
+		   在 getView() 里调用太慢。 */
 		public Drawable icon;
 
 		public Package(PackageInfo info, boolean selected, String label, Drawable icon) {
@@ -89,9 +89,8 @@ public class AppListActivity extends BaseActivity {
 
 		@Override
 		public void sort(Comparator<? super Package> cmp) {
-			/* List.sort takes Comparator<? super E> directly - the raw
-			   (Comparator) cast that used to be here was an unchecked
-			   operation the compiler warned about. */
+			/* List.sort 本身就接受 Comparator<? super E>；以前的写法先强转成原始
+			   (Comparator)，那是一次未经检查的转换，编译器会告警。 */
 			allPackages.sort(cmp);
 			applyFilter(lastFilter);
 		}
@@ -140,7 +139,7 @@ public class AppListActivity extends BaseActivity {
 			notifyDataSetChanged();
 		}
 
-		/* Bulk swap, used because the list is assembled off the UI thread. */
+		/* 整体换入：因为列表是在 UI 线程之外拼装好的。 */
 		public void setAll(List<Package> list) {
 			allPackages.clear();
 			allPackages.addAll(list);
@@ -148,7 +147,7 @@ public class AppListActivity extends BaseActivity {
 			applyFilter(lastFilter);
 		}
 
-		/* Selected apps first, then alphabetically. */
+		/* 已选中的应用排前面，其余按字母序。 */
 		public void sortPackages() {
 			allPackages.sort(new Comparator<Package>() {
 				@Override
@@ -229,9 +228,8 @@ public class AppListActivity extends BaseActivity {
 		});
 	}
 
-	/* Walking every installed package - and loading its icon and label - takes
-	   long enough to jank onCreate, so build the list on a worker thread and
-	   swap it in once. */
+	/* 遍历所有已安装应用（还要加载图标和名称）耗时足够把 onCreate 卡住，所以在工作
+	   线程里构建，一次性换入。 */
 	private void loadApps() {
 		toolbar.setSubtitle(R.string.app_list_loading);
 		new Thread(new Runnable() {
@@ -281,11 +279,10 @@ public class AppListActivity extends BaseActivity {
 			}
 
 			prefs.setApps(apps);
-			/* The per-app allow-list is only read when the VPN tunnel is
-			   established (VpnService.Builder.addAllowedApplication). If the
-			   tunnel is already up, saving alone leaves the old scope in place,
-			   so the selection looks "not working" until a reconnect. Rebuild
-			   the tunnel so the new app scope takes effect immediately. */
+			/* 分应用白名单只在**建立**隧道时被读取（VpnService.Builder.
+			   addAllowedApplication）。隧道已经起来时，只保存等于沿用旧作用域，
+			   用户会觉得"选了没用"，直到重连。所以这里直接重建隧道，让新的应用范围
+			   立刻生效。 */
 			if (prefs.getEnable()) {
 				startService(new Intent(this, TProxyService.class)
 					.setAction(TProxyService.ACTION_RECONNECT));

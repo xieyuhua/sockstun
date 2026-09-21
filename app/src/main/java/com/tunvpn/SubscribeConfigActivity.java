@@ -1,8 +1,8 @@
 /*
  ============================================================================
- Name        : SubscribeConfigActivity.java
- Description : Manage the clash.yml subscriptions: add, edit, delete and pick
-               which one is the default (the one the subscribe page fetches).
+ 文件名  : SubscribeConfigActivity.java
+ 说明    : 管理 clash.yml 订阅地址：新增 / 编辑 / 删除 / 启用。启用的订阅会被**合并**
+           成一个节点池（当前实现没有"默认订阅"的概念）。
  ============================================================================
  */
 
@@ -111,8 +111,8 @@ public class SubscribeConfigActivity extends BaseActivity {
 						}
 					}
 					prefs.setSubscriptions(list);
-					/* Drop this subscription's fetched YAML + node cache,
-					   otherwise a recreate with the same id would inherit it. */
+					/* 一并丢掉该订阅已拉取的 YAML 与节点缓存，否则用同一个 id 重新
+					   创建时会继承旧内容。 */
 					prefs.clearSubCache(s.id);
 					if (s.id.equals(prefs.getActiveSubId())) {
 						prefs.setActiveSubId("");
@@ -126,7 +126,7 @@ public class SubscribeConfigActivity extends BaseActivity {
 			.show();
 	}
 
-	/* Add (existing == null) or edit one subscription. */
+	/* 新增（existing == null）或编辑一条订阅。 */
 	private void showEditDialog(final Subscription existing) {
 		final boolean add = (existing == null);
 
@@ -148,7 +148,7 @@ public class SubscribeConfigActivity extends BaseActivity {
 		}
 		final SwitchMaterial switchEnabled = new SwitchMaterial(this);
 		switchEnabled.setText(R.string.subs_enabled);
-		/* New subscriptions default to enabled; existing ones keep their flag. */
+		/* 新增的订阅默认启用；已有的保持它原来的开关状态。 */
 		switchEnabled.setChecked(add || existing.enabled);
 		container.addView(editName);
 		container.addView(editUrl);
@@ -208,7 +208,7 @@ public class SubscribeConfigActivity extends BaseActivity {
 			name.setText(s.label());
 			detail.setText(buildDetail(s));
 
-			/* Toggle enabled straight from the list, no need to open the dialog. */
+			/* 直接在列表里切换启用状态，不必打开对话框。 */
 			sw.setOnCheckedChangeListener(null);
 			sw.setChecked(s.enabled);
 			sw.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
@@ -236,8 +236,7 @@ public class SubscribeConfigActivity extends BaseActivity {
 		}
 	}
 
-	/* Detail line: cached node count, plus a "disabled" marker so the state is
-	   visible without expanding the item. */
+	/* 详情行：已缓存的节点数量，外加"已停用"标记，不展开也能看出状态。 */
 	private String buildDetail(Subscription s) {
 		int cached = ClashNode.decode(prefs.getSubNodes(s.id)).size();
 		String detailStr = cached > 0
@@ -248,9 +247,8 @@ public class SubscribeConfigActivity extends BaseActivity {
 		return detailStr;
 	}
 
-	/* Pull every (enabled) subscription's clash.yml, parse it and store the raw
-	   YAML + node list per subscription. Disabled ones are skipped, mirroring the
-	   merge logic. Refreshes the list afterwards so cached node counts update. */
+	/* 拉取每条（已启用的）订阅的 clash.yml，解析后按订阅分别存下原始 YAML 与节点列表。
+	   停用的会跳过，与合并逻辑保持一致。拉完刷新列表，让缓存节点数跟着更新。 */
 	private void fetchAll() {
 		final List<Subscription> subs = prefs.getSubscriptions();
 		if (subs.isEmpty()) {
@@ -266,7 +264,7 @@ public class SubscribeConfigActivity extends BaseActivity {
 				String firstError = null;
 				try {
 					for (Subscription sub : subs) {
-						/* No point fetching a subscription we will not merge. */
+						/* 不会合并进来的订阅，就没必要去拉它。 */
 						if (!sub.enabled)
 						  continue;
 						String url = sub.url == null ? "" : sub.url.trim();

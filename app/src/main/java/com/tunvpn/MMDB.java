@@ -1,10 +1,9 @@
 /*
  ============================================================================
- Name        : MMDB.java
- Description : Minimal, dependency-free reader for the MaxMind DB (mmdb)
-               binary format, enough to resolve an IP address to its data
-               record (a Map). Used by GeoIp to look up a proxy server's
-               country from a bundled GeoLite2-Country.mmdb, fully offline.
+ 文件名  : MMDB.java
+ 说明    : 极简、无第三方依赖的 MaxMind DB（mmdb）二进制格式读取器，够用即可 ——
+           能把一个 IP 解析成它的数据记录（一个 Map）。GeoIp 用它从打包进来的
+           GeoLite2-Country.mmdb 里**完全离线**地查出代理服务器所在国家。
  ============================================================================
 */
 
@@ -22,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 public final class MMDB {
-	/* Metadata marker: 3 bytes 0xAB 0xCD 0xEF followed by "MaxMind.com". */
+	/* 元数据标记：3 个字节 0xAB 0xCD 0xEF，后面紧跟 "MaxMind.com"。 */
 	private static final byte[] MAGIC = {
 		(byte) 0xAB, (byte) 0xCD, (byte) 0xEF,
 		'M', 'a', 'x', 'M', 'i', 'n', 'd', '.', 'c', 'o', 'm'
@@ -59,7 +58,7 @@ public final class MMDB {
 		this.dataSectionStart = (int) sts + 16;
 	}
 
-	/* Resolve an IP to its record (a Map), or null if not found / unsupported. */
+	/* 把 IP 解析成它的记录（一个 Map）；找不到或不支持则返回 null。 */
 	public Object get(InetAddress addr) {
 		if (addr == null)
 		  return null;
@@ -72,7 +71,7 @@ public final class MMDB {
 			  bits = Arrays.copyOfRange(a, 12, 16);
 			else
 			  return null;
-		} else { /* IPv6 / unified database */
+		} else { /* IPv6 / 统一数据库 */
 			if (a.length == 16)
 			  bits = a;
 			else if (a.length == 4) { /* map IPv4 into ::ffff:0:0/96 */
@@ -94,17 +93,16 @@ public final class MMDB {
 				node = (int) rec;
 				continue;
 			}
-			/* Data records resolve against the start of the data section, which is
-			   searchTreeSize + 16 (the same base used for pointers inside
-			   decodeField). Using searchTreeSize here instead would read every
-			   record 16 bytes too early and decode the wrong country. */
+			/* 数据记录是相对数据段起点寻址的，而数据段起点 = searchTreeSize + 16
+			   （与 decodeField 里处理指针时用的基准相同）。这里若直接用 searchTreeSize，
+			   每条记录都会提前 16 字节开始读，解出来的国家就全错了。 */
 			long off = (long) dataSectionStart + (rec - nodeCount);
 			return decodeField(new int[] { (int) off }, dataSectionStart, 0);
 		}
 		return null;
 	}
 
-	/* --- search tree --- */
+	/* --- 搜索树 --- */
 
 	private long readRecord(int node, int bit) {
 		int baseBit = node * 2 * recordSize + (bit == 0 ? 0 : recordSize);
@@ -121,7 +119,7 @@ public final class MMDB {
 		return result;
 	}
 
-	/* --- data section decoder --- */
+	/* --- 数据段解码 --- */
 
 	private Object decodeField(int[] p, int dataSectionStart, int depth) {
 		if (depth > 256)
@@ -225,7 +223,7 @@ public final class MMDB {
 			p[0] = pos;
 			return f;
 		}
-		case 10: /* uint128: not needed here */
+		case 10: /* uint128：这里用不到 */
 		default:
 			pos += length;
 			p[0] = pos;
@@ -282,7 +280,7 @@ public final class MMDB {
 		return -1;
 	}
 
-	/* Read an entire InputStream into a byte array (API-level safe). */
+	/* 把整个 InputStream 读进字节数组（兼容各 API 级别的写法）。 */
 	public static byte[] readAll(InputStream in) throws IOException {
 		ByteArrayOutputStream out = new ByteArrayOutputStream();
 		byte[] buf = new byte[8192];

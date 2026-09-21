@@ -1,11 +1,12 @@
 /*
  ============================================================================
- Name        : TProxyService.java
- Author      : hev <r@hev.cc>
- Copyright   : Copyright (c) 2024 xyz
- Description : TProxy Service (mihomo / clash.meta core)
+ 文件名  : TProxyService.java
+ 作者    : hev <r@hev.cc>
+ 版权    : Copyright (c) 2024 xyz
+ 说明    : 隧道服务（VpnService）：建 TUN、拉起 mihomo 内核、生成配置、统计流量、
+           维护常驻通知。运行在独立的 :native 进程里。
  ============================================================================
- */
+*/
 
 package com.tunvpn;
 
@@ -70,60 +71,56 @@ public class TProxyService extends VpnService {
 	public static final String ACTION_CONNECT = "tunvpn.CONNECT";
 	public static final String ACTION_DISCONNECT = "tunvpn.DISCONNECT";
 	public static final String ACTION_RECONNECT = "tunvpn.RECONNECT";
-	/* Switch the selected node while the tunnel keeps running. */
+	/* 隧道保持运行的情况下切换所选节点。 */
 	public static final String ACTION_SELECT = "tunvpn.SELECT";
 
-	/* Traffic statistics */
+	/* 流量统计 */
 	private static final int NOTIFY_ID = 1;
 	private static final String NOTIFY_CHANNEL = "socks5";
 	private static final long STATS_INTERVAL = 1000;
 
 	private Handler statsHandler = null;
 	private Runnable statsTask = null;
-	/* The polling loop must run off the main thread: accumulateProxy() does a
-	   synchronous httpGet() to the core's control API, and the main thread
-	   throws NetworkOnMainThreadException on any network call. That exception
-	   was being swallowed by httpGet's catch, leaving body null and the proxied
-	   traffic counters stuck at 0 forever - exactly the "stats always 0" report. */
+	/* 采样循环必须离开主线程：accumulateProxy() 会同步访问内核控制接口，而主线程
+	   上任何网络调用都会抛 NetworkOnMainThreadException。该异常以前被吞掉，body 为
+	   null，"代理专属流量"永远是 0 —— 这正是当初"统计一直不动"的原因。 */
 	private HandlerThread statsThread = null;
-	/* Written by statsThread, read by the notification / test / selector threads:
-	   volatile so a reader never sees a half-published value. */
+	/* 由 statsThread 写、由通知 / 测速 / 选择器线程读：加 volatile，避免读到写了一半的值。 */
 	private volatile Preferences statsPrefs = null;
-	/* Loopback HTTP control API hosted by the app (libmihomo never binds its
-	   own external-controller). Lives for the lifetime of the tunnel. */
+	/* App 自建的回环 HTTP 控制接口（libmihomo 自己从不绑定 external-controller）。
+	   生命周期与隧道一致。 */
 	private ClashApiServer clashApiServer = null;
 	private Preferences prefs = null;
 	private long lastTx, lastRx, lastTime;
-	/* These four groups are written by statsThread and read by OTHER threads
-	   (buildNotification from the test/selector threads, the activity-facing
-	   getters): volatile, so a reader never sees a torn long or a stale value. */
+	/* 下面两组由 statsThread 写、由**其它线程**读（测试/选择器线程调用的
+	   buildNotification、以及给 Activity 用的 getter）：加 volatile，避免 long 撕裂或读到旧值。 */
 	private volatile long sessionTx, sessionRx;
-	private long sessionBaseTx, sessionBaseRx; /* core cumulative at session start */
+	private long sessionBaseTx, sessionBaseRx; /* 会话开始时的内核累计值 */
 	private long baseTx, baseRx;
 	private volatile long totalTx, totalRx;
 	private volatile long txRate, rxRate;
-	private boolean trafficPrimed = false; /* first valid sample primes baselines; avoids a 9G/s spike */
+	private boolean trafficPrimed = false; /* 首个有效样本用来定基准，避免 9G/s 的假尖峰 */
 	private String lastNotifyText = null;
+	/* 通知栏那两个跳转目标的内容是固定的，而通知每秒都会重建；
+	   这里只创建一次，省掉每秒两次跨 Binder 的 PendingIntent 创建（见 buildNotification）。 */
+	private volatile PendingIntent notifyContentPi = null;
+	private volatile PendingIntent notifyStopPi = null;
 	private int trafficSamples = 0;
 
-	/* --- proxied-traffic accounting ---------------------------------------
-	   The core's own counters cover everything it handles, direct traffic
-	   included. To report what actually went through a node we poll its
-	   connection list and accumulate the per-connection counters of the ones
-	   whose chain is not DIRECT. A connection that opens and finishes between
-	   two polls is missed, so this is a close approximation, not an exact
-	   figure. */
+	/* --- 代理专属流量统计 ---------------------------------------------------
+	   内核自己的计数器包含它处理的一切（含直连）。要报"真正经节点走了多少"，就得
+	   轮询连接列表，把链路上不是 DIRECT 的连接增量累加起来。两次轮询之间建立又结束的
+	   连接会被漏掉，所以这是近似值，不是精确值。 */
 	private final Map<String, long[]> connSeen = new HashMap<String, long[]>();
-	/* Recent-requests recorder: when a connection disappears from /connections
-	   we log it here so the UI can show "what went where" historically. connInfo
-	   tracks each live connection's metadata + last counters; recentRequests is
-	   the bounded history serialized to Preferences. */
+	/* "最近请求"记录器：一条连接从 /connections 里消失时就记到这里，让 UI 事后也能
+	   看到"什么流量去了哪里"。connInfo 跟踪每条活动连接的元信息与最新计数；
+	   recentRequests 是**有上限**的历史，序列化后写进 Preferences。 */
 	private final Map<String, ConnInfo> connInfo = new HashMap<String, ConnInfo>();
 	private final List<RecentRequest> recentRequests = new ArrayList<RecentRequest>();
 	private long lastRecentFlush = 0;
 	private static final int MAX_RECENT_REQUESTS = 200;
 
-	/* One live connection we are tracking for history. */
+	/* 正在为"历史记录"跟踪的一条活动连接。 */
 	private static class ConnInfo {
 		long startMs;
 		String target;
@@ -133,7 +130,7 @@ public class TProxyService extends VpnService {
 		long up;
 		long down;
 	}
-	/* One closed connection, ready to be shown. */
+	/* 一条已关闭、可以直接展示的连接。 */
 	private static class RecentRequest {
 		long startMs;
 		long endMs;
@@ -144,27 +141,25 @@ public class TProxyService extends VpnService {
 		long up;
 		long down;
 	}
-	/* Consecutive failed /connections polls, so the "stats are stuck at 0"
-	   case is reported instead of being invisible. */
+	/* /connections 连续轮询失败的次数：这样"统计一直卡在 0"这种情况会被报出来，
+	   而不是无声无息。 */
 	private int connFailStreak = 0;
-	/* Consecutive failures while PARSING the snapshot (as opposed to fetching
-	   it): also reported once, because the counters stay 0 either way. */
+	/* **解析**快照（而非抓取快照）的连续失败次数：同样只报一次 —— 两种情况的结果
+	   都是计数器为 0。 */
 	private int proxyParseFails = 0;
-	/* Last exception seen while probing the control API, so a failed probe says
-	   whether nothing is listening (refused) or it is up but not answering. */
+	/* 探测控制接口时最后见到的异常：这样探测失败能区分"根本没人监听（拒绝连接）"
+	   还是"在跑但不回应"。 */
 	private volatile String lastControllerError = null;
-	/* Host the clash-api actually answers on, resolved by isControllerUp(). */
+	/* clash-api **实际**应答的主机地址，由 isControllerUp() 解析出来。 */
 	private volatile String controllerHost = "127.0.0.1";
 	private volatile String proxyTestStatus = "";
-	/* Debounce for an automatic config rebuild after a failed selector PUT
-	   (see rebuildForSelection), and the tick counter of the periodic
-	   "which node is actually active" refresh (see sampleStats). */
+	/* 选择器 PUT 失败后自动重建配置的去抖时间（见 rebuildForSelection），
+	   以及周期性刷新"当前真正在用哪个节点"的计数（见 sampleStats）。 */
 	private volatile long lastSelectRebuildMs = 0;
 	private int nodeSyncTick = 0;
-	/* True while applying a node the USER just picked (ACTION_SELECT), false
-	   for the apply that runs as part of starting the tunnel. Only the former
-	   justifies a config rebuild when the node is missing from the running
-	   config (see rebuildForSelection). */
+	/* 正在应用**用户刚点选**的节点（ACTION_SELECT）时为 true；隧道启动过程中那次
+	   自动应用为 false。只有前者在"节点不在运行配置里"时才值得重建配置
+	   （见 rebuildForSelection）。 */
 	private volatile boolean selectUserAction = false;
 	private static final String PROXY_TEST_URL = "http://www.gstatic.com/generate_204";
 	/* 延迟测试候选地址：节点只要能通任意一个，就给出干净的“可用”。Clash 自己的
@@ -182,32 +177,28 @@ public class TProxyService extends VpnService {
 	private long lastProxyTx, lastProxyRx;
 	private long proxyRateTx, proxyRateRx;
 	private long lastProxyTime;
-	private boolean proxyPrimed = false; /* first valid proxied sample primes baselines */
+	private boolean proxyPrimed = false; /* 第一个有效的代理样本用来定基准 */
 
-	/* Append a line to the log file directly (bypassing the fd-1/2
-	   redirection), so startup diagnostics are always captured even if the
-	   native library fails to load or redirect. The actual file handling lives
-	   in TestLog, which classes without a Service handle also write through. */
+	/* 直接往日志文件追加一行（绕过 fd 1/2 的重定向），这样即使原生库加载失败或重定向
+	   没成功，启动阶段的诊断信息也一定能被记下来。真正的文件处理在 TestLog 里，
+	   那些拿不到 Service 的类也通过它写日志。 */
 	private void appendLog(String s) {
 		TestLog.append(s);
 	}
 
-	/* Log from a static context (e.g. ClashApiServer, which has no Service
-	   reference) into the same file. Safe when nothing is bound yet: lines are
-	   still mirrored to logcat. */
+	/* 从静态上下文打日志（例如没有 Service 引用的 ClashApiServer）到同一个文件。
+	   还没有任何东西绑定到服务时也是安全的：日志行仍然会同步到 logcat。 */
 	static void log(String s) {
 		TestLog.append(s);
 	}
 
-	/* Redirect process stdout/stderr (fd 1/2) to a file so we can capture
-	   the native tunnel's printf/fprintf logs on Android (where they would
-	   otherwise be discarded).
+	/* 把进程的 stdout/stderr（fd 1/2）重定向到文件，好让原生隧道里的 printf/fprintf
+	   日志在 Android 上也能被捕获（否则它们会被直接丢掉）。
 
-	   The signatures of android.system.Os differ across SDK/device builds
-	   (open() may return int or FileDescriptor; dup2()/close() may take int
-	   or FileDescriptor), so we resolve the real methods via reflection and
-	   adapt the argument types at runtime. This compiles and runs regardless
-	   of which variant is present. */
+	   android.system.Os 的方法签名在不同 SDK / 设备构建上不一样（open() 可能返回
+	   int 也可能返回 FileDescriptor；dup2()/close() 可能收 int 也可能收
+	   FileDescriptor），所以这里用反射取到**实际存在**的那个方法，并在运行时适配参数
+	   类型。这样无论设备上是哪种变体，代码都能编译并运行。 */
 	private void redirectStdioToLog(File log) {
 		try {
 			int flags = OsConstants.O_WRONLY | OsConstants.O_CREAT | OsConstants.O_APPEND;
@@ -244,35 +235,30 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* Profile handed to the core, kept so that a rejected proxy can be dropped
-	   and the profile re-applied (see retryWithoutRejectedProxy). */
+	/* 交给内核的配置参数，保留下来是为了在内核拒绝某个节点时能把它剔掉再重新应用
+	   （见 retryWithoutRejectedProxy）。 */
 	private volatile String coreInitParams = null;
 	private volatile String coreSetupParams = null;
 	private volatile File coreConfigFile = null;
 	private volatile boolean coreCustomConfig = false;
-	/* Node names the core has refused. Excluded from every later rebuild, and
-	   remembered for the life of the process. */
+	/* 内核拒绝过的节点名。之后每次重建都会排除它们，并在进程生命周期内一直记住。 */
 	private final java.util.Set<String> rejectedNodes =
 		java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
 	private volatile int configRetry = 0;
-	/* True while a retry is rebuilding the profile, so the synchronous
-	   "config is broken" check does not race it. */
+	/* 正在重建配置进行重试时为 true，避免同步的"配置坏了"检查与它抢跑。 */
 	private volatile boolean configRetryRunning = false;
 	private static final int MAX_CONFIG_RETRIES = 8;
 
 	private ParcelFileDescriptor tunFd = null;
-	/* Non-empty when the core reported a problem while loading the generated
-	   config. The control API never binds in that case, so the error is kept
-	   around to be logged (and surfaced) instead of the failure being mute. */
+	/* 内核在加载生成的配置时报了问题就非空。这种情况下控制接口**永远不会**绑定成功，
+	   所以把这个错误留着记日志（并暴露给界面），而不是让失败悄无声息。 */
 	private volatile String quickSetupError = null;
-	/* Set once a startup abort has been handled, so the asynchronous
-	   quickSetup callback and the synchronous check cannot both fire it. */
+	/* 启动失败已被处理过就置位：这样异步的 quickSetup 回调与同步检查不会**都**去触发
+	   一次中止。 */
 	private volatile boolean startupAborted = false;
-	/* Set while the tunnel is being torn down. The helper threads that can
-	   otherwise run for MINUTES (selector retry loop, controller verification,
-	   the reachability probe, the delayed clash-api kick) check it, so a
-	   disconnect stops them instead of leaving them working - and holding this
-	   Service - long after the VPN is gone. */
+	/* 隧道正在拆除时置位。那些否则会跑上**好几分钟**的辅助线程（选择器重试循环、
+	   控制接口校验、连通性探测、延迟启动 clash-api）都会检查它，所以断开连接能把它们
+	   停掉，而不是让它们在 VPN 早已消失之后还在干活、还占着这个 Service。 */
 	private volatile boolean tunnelStopping = false;
 
 	@Override
@@ -282,21 +268,18 @@ public class TProxyService extends VpnService {
 			stopService();
 			return START_NOT_STICKY;
 		}
-		/* A live change to a setting read only at establish() time (per-app
-		   scope, global mode): stop the old fd without destroying the service
-		   and rebuild, as one action - avoids the DISCONNECT-then-CONNECT race
-		   where the new tunnel gets torn down by the pending stopSelf(). */
+		/* 只在 establish() 时读取的设置（按应用分流范围、全局模式）被实时修改时：
+		   用一个动作"停掉旧 fd + 重建"，而不销毁服务 —— 避免 DISCONNECT-then-CONNECT
+		   的竞态（新隧道被还在排队的 stopSelf() 拆掉）。 */
 		if (intent != null && ACTION_RECONNECT.equals(intent.getAction())) {
 			rebuildTunnel();
 			return START_STICKY;
 		}
-		/* mihomo can change a selector while running, so a newly picked node
-		   takes effect immediately instead of waiting for a restart. */
+		/* mihomo 支持运行中切换选择器，所以新选的节点**立即**生效，不必等重启。 */
 		if (intent != null && ACTION_SELECT.equals(intent.getAction())) {
 			if (tunFd != null) {
-				/* Mark it as the user's own pick: only then is a config
-				   rebuild (see rebuildForSelection) the right fallback when
-				   the node is absent from the running config. */
+				/* 标记为"用户自己的选择"：只有这种情况，节点不在运行配置里时才该
+				   用重建配置来兜底（见 rebuildForSelection）。 */
 				selectUserAction = true;
 				applySelectedNode(new Preferences(this));
 			}
@@ -309,9 +292,8 @@ public class TProxyService extends VpnService {
 	@Override
 	public void onDestroy() {
 		tunnelStopping = true;
-		/* The system can tear the service down without a disconnect command,
-		   so make sure the stats poller does not outlive it. stopStats() is
-		   idempotent, so this is harmless after a normal stop. */
+		/* 系统可以在没有断开指令的情况下把服务拆掉，所以必须确保统计轮询不会比服务活得更久。
+		   stopStats() 是幂等的，因此正常停止之后再调一次也无害。 */
 		stopStats();
 		stopEmbeddedApi();
 		sInstance = null;
@@ -328,15 +310,13 @@ public class TProxyService extends VpnService {
 	public void startService() {
 		if (tunFd != null)
 		  return;
-		/* Fresh tunnel: let the helper threads run again after a previous stop. */
+		/* 全新隧道：让辅助线程在上一次停止之后能重新跑起来。 */
 		tunnelStopping = false;
 
 		prefs = new Preferences(this);
 
-		/* Logging. Bind the shared log file first, then start a fresh file for
-		   this session; every later append (including the ones from
-		   ClashApiServer and the Activities) lands in the same file the
-		   日志 page reads. */
+		/* 日志：先绑定共享日志文件，再为本会话起一份新文件；之后所有追加
+		   （包括来自 ClashApiServer 和各个 Activity 的）都写进「日志」页读的那个文件。 */
 		TestLog.init(this);
 		File tproxy_log = new File(getCacheDir(), "tproxy.log");
 		if (tproxy_log.exists())
@@ -347,7 +327,7 @@ public class TProxyService extends VpnService {
 			redirectStdioToLog(tproxy_log);
 		}
 
-		/* Load the embedded mihomo core (libclash.so + libmihomo-jni.so). */
+		/* 加载内嵌的 mihomo 内核（libclash.so + libmihomo-jni.so）。 */
 		try {
 			Clash.INSTANCE.load(getApplicationInfo().nativeLibraryDir);
 			appendLog("mihomo core loaded OK (bridge ABI " + Clash.INSTANCE.bridgeABI() + ")");
@@ -356,45 +336,41 @@ public class TProxyService extends VpnService {
 			return;
 		}
 
-		/* Pick a free loopback port for the clash-api BEFORE writing config: a
-		   port already held by another process (stale tunnel, another proxy, an
-		   ADB forward, an emulator) makes mihomo silently fail to bind the
-		   control API, which reads as "connected but /connections refuses and
-		   every counter stays 0". */
+		/* 写配置**之前**先给 clash-api 挑一个空闲的回环端口：端口被别的进程占着
+		   （残留隧道、别的代理、adb forward、模拟器）会让 mihomo 绑定控制接口时
+		   **静默失败**，症状就是"已连接，但 /connections 连接被拒、所有计数恒为 0"。 */
 		int apiPort = MihomoConfig.pickApiPort();
 		appendLog("config: clash-api port = " + apiPort);
 
-		/* Config: either the file the user edited by hand (custom mode) or a
-		   fresh one generated from the current settings. */
+		/* 配置：要么是用户手工编辑的那份（自定义模式），要么是按当前设置新生成的。 */
 		File configFile = new File(getFilesDir(), "config.yaml");
 		try {
 			if (prefs.getCustomConfig() && configFile.exists()) {
 				appendLog("config: 使用自定义 config.yaml（已关闭自动生成）");
 				ensureControlApi(configFile, prefs);
 			} else {
-				/* Nodes the core already refused must not come back on a
-				   reconnect, or the profile would fail again every time. */
+				/* 内核已经拒绝过的节点**不能**在重连时带回来，
+				   否则每次都会因为同样的原因把配置搞失败。 */
 				configFile = MihomoConfig.build(this, prefs, rejectedNodes);
 				appendLog("config: " + configFile.getAbsolutePath());
 				appendLog("routing: " + MihomoConfig.describe(prefs)
 					+ (rejectedNodes.isEmpty() ? ""
 						: ("（已排除内核拒绝的节点 " + rejectedNodes.size() + " 个）")));
 			}
-			/* One line, not the whole file: these keys decide whether the node
-			   picker and the traffic counters can reach the core at all. */
+			/* 只记一行而不是整个文件：这几个键决定节点选择器和流量统计到底能不能够到
+			   内核。 */
 			appendLog("config: " + configKeySummary(configFile));
 		} catch (Throwable e) {
 			failStartup("生成配置失败：" + e.getMessage());
 			return;
 		}
 
-		/* VPN interface. mihomo owns all routing, so we send every packet into
-		   the tunnel and let its rule engine decide proxy vs direct. */
+		/* VPN 网卡。路由全部由 mihomo 接管，所以我们把每个包都送进隧道，
+		   由它的规则引擎决定走代理还是直连。 */
 		boolean ipv4 = prefs.getIpv4();
 		boolean ipv6 = prefs.getIpv6();
-		/* Keep the interface address outside the fake-ip pool (198.18.0.0/16),
-		   otherwise a domain can be handed an address that is already the
-		   tunnel's own. */
+		/* 网卡地址要放在 fake-ip 池（198.18.0.0/16）之外，
+		   否则某个域名可能被分配到一个**就是隧道自己**的地址。 */
 		String tunAddr = "172.19.0.1";
 		String tunAddr6 = "fc00::1";
 		int tunPrefix = 30;
@@ -413,28 +389,20 @@ public class TProxyService extends VpnService {
 			builder.addRoute("::", 0);
 		}
 
-		/* The controller app must never have its own traffic routed into the
-		   tunnel it creates. It reaches mihomo's loopback listeners - the
-		   external-controller API on 127.0.0.1:9090 (node selection, the
-		   home-screen connection counters) and the mixed-port used by the
-		   home-screen "is it proxied?" probe - and if those sockets get
-		   captured by the VPN they never reach the local listeners. The
-		   symptom is exactly what was reported: the selected apps proxy fine
-		   (their traffic is the tunnel's job) yet the UI shows no traffic stats
-		   and reports "代理不通". Always exclude ourselves, in both global and
-		   per-app scope. */
-		/* VpnService forbids mixing addAllowedApplication and
-		   addDisallowedApplication on one builder, so the two scopes use
-		   different calls:
-		   - global: disallow only ourselves, every other app goes through;
-		   - per-app: allow exactly the selected apps. We are simply NOT in
-		     that list, so our own traffic (external-controller, mixed-port)
-		     naturally bypasses the tunnel - no explicit disallow is needed,
-		     and adding one would throw IllegalArgumentException and drop the
-		     whole app scope. */
+		/* 控制端 App 自己的流量**绝不能**被送进它自己建的隧道。它要访问 mihomo 的回环
+		   监听：127.0.0.1:9090 上的 external-controller API（选节点、首页的连接计数）
+		   以及首页"是否走代理"探测用的 mixed-port —— 这些 socket 一旦被 VPN 抓走，就
+		   永远到不了本地监听。症状正是当初反馈的那样：被选中的应用代理正常（那是隧道的
+		   本职工作），但界面没有任何流量统计、还报"代理不通"。所以无论全局还是部分应用
+		   模式，都要把自己排除在外。 */
+		/* VpnService 禁止在同一个 builder 上混用 addAllowedApplication 与
+		   addDisallowedApplication，所以两种范围用不同的调用：
+		   - 全局：只把我们自己排除掉，其它应用全部走隧道；
+		   - 部分应用：只允许选中的应用。我们本来就**不在**这个列表里，所以自己的流量
+		     （external-controller、mixed-port）天然绕过隧道 —— 不需要显式排除，
+		     而且一旦加了会抛 IllegalArgumentException，把整个应用范围设置废掉。 */
 		if (prefs.getGlobal()) {
-			/* Default: all other apps through the tunnel; keep our own
-			   sockets out of it. */
+			/* 默认：其它应用全部走隧道，只把我们自己的 socket 排除在外。 */
 			try {
 				builder.addDisallowedApplication(getApplicationContext().getPackageName());
 			} catch (NameNotFoundException e) {
@@ -448,14 +416,14 @@ public class TProxyService extends VpnService {
 			}
 		}
 		builder.setSession("tunVPN/mihomo");
-		/* Worth logging: if ipv4/ipv6 are both off there is no route into the
-		   tunnel at all, and if the scope is "N app(s)" only those apps are
-		   captured - both look exactly like "connected but not proxied". */
+		/* 值得记一行：如果 ipv4/ipv6 都关着，就根本没有路由进隧道；而如果范围是
+		   "N 个应用"，就只有这些应用会被抓 —— 这两种情况看起来都跟"已连接但没走代理"
+		   一模一样。 */
 		appendLog("vpn: ipv4=" + ipv4 + " ipv6=" + ipv6 + " mtu=" + prefs.getTunnelMtu()
 			+ " scope=" + (prefs.getGlobal() ? "all apps" : prefs.getApps().size() + " app(s)")
 			+ " excludeSelf=" + prefs.getGlobal());
-		/* Per-app mode with no apps selected captures nothing: the tunnel comes
-		   up "connected" but proxies zero traffic. Spell it out in the log. */
+		/* 部分应用模式下一个应用都没勾，等于什么都不抓：隧道会显示"已连接"，
+		   但实际代理流量为零。这种情况要在日志里写明白。 */
 		if (!prefs.getGlobal() && prefs.getApps().isEmpty())
 		  appendLog("WARN: 部分应用模式未选择任何应用，将没有任何流量进入隧道（等于不代理）。"
 			+ "请到「规则 → 应用」勾选程序，或开启「全局模式」。");
@@ -465,21 +433,19 @@ public class TProxyService extends VpnService {
 			return;
 		}
 
-		/* Initialise mihomo. It loads <homeDir>/config.yaml, and the picked
-		   node can already be applied here via selected-map.
-		   InitParams uses "home-dir"; keep "homeDir" too so an older core
-		   still understands it (unknown fields are ignored). */
+		/* 初始化 mihomo。它会加载 <homeDir>/config.yaml，而选中的节点本可以在这里用
+		   selected-map 直接应用。
+		   InitParams 用的是 "home-dir"；同时也带上 "homeDir"，好让老版本内核也能认识
+		   （未知字段会被忽略）。 */
 		String homeDir = getFilesDir().getAbsolutePath();
-		/* Where the clash-api comes from: on this SDK build (libmihomo-android
-		   v0.3.3) the InitParams struct only carries HomeDir/Version - any
-		   external-controller/secret we put in initParams is IGNORED, so the
-		   API MUST be supplied by the profile (config.yaml), which we already
-		   write at MihomoConfig.build(). Empirically the mixed-port (also from
-		   the profile) comes up, but some builds skip the external-controller
-		   listener on quickSetup; when that happens kickClashApi() re-applies
-		   external-controller via the UpdateConfig action to start it. Keep
-		   home-dir/homeDir (and the ignored external-controller/secret) for
-		   core compat with builds that do read them. */
+		/* clash-api 到底从哪来：在这个 SDK 构建（libmihomo-android v0.3.3）上，
+		   InitParams 结构体只带 HomeDir/Version —— 放进 initParams 的
+		   external-controller/secret 一律**被忽略**，所以控制接口**必须**由配置
+		   （config.yaml）提供，而我们本来就在 MihomoConfig.build() 里写了。实测
+		   mixed-port（同样来自配置）能起，但某些构建在 quickSetup 时会跳过
+		   external-controller 的监听；遇到这种情况 kickClashApi() 会用 UpdateConfig
+		   动作重新应用 external-controller 把它拉起来。这里仍保留 home-dir/homeDir
+		   （以及会被忽略的 external-controller/secret），以兼容那些确实会读它们的构建。 */
 		String secret = prefs.getSecret();
 		String initParams = "{\"home-dir\":\"" + homeDir + "\"," +
 			"\"homeDir\":\"" + homeDir + "\"," +
@@ -492,13 +458,11 @@ public class TProxyService extends VpnService {
 		   节点改在下面用 REST API 选择，全程标准 UTF-8，名字能精确匹配。 */
 		String setupParams = "{\"selected-map\":{}," +
 			"\"profile\":\"" + configFile.getAbsolutePath() + "\"}";
-		/* Forward mihomo's log/event stream into our log file BEFORE quickSetup,
-		   so the core's own message about why the control API (external-
-		   controller) failed to bind - e.g. "failed to start clash api:
-		   listen tcp 127.0.0.1:9090: bind: address already in use" - lands in
-		   tproxy.log instead of being silently dropped. The listener used to be
-		   attached only AFTER quickSetup, by which point the bind had already
-		   happened and the error with it. */
+		/* 在 quickSetup **之前**就把 mihomo 的日志/事件流接进我们的日志文件，这样内核
+		   关于"控制接口为何绑定失败"的原话（例如 "failed to start clash api:
+		   listen tcp 127.0.0.1:9090: bind: address already in use"）会落进
+		   tproxy.log，而不是被静默丢掉。以前监听器是在 quickSetup **之后**才挂上的，
+		   那时绑定早就发生、错误也早就过去了。 */
 		try {
 			Clash.INSTANCE.setEventListener(new InvokeInterface() {
 				@Override
@@ -510,7 +474,7 @@ public class TProxyService extends VpnService {
 		} catch (Throwable e) {
 		}
 
-		/* Kept for the drop-and-retry path (see retryWithoutRejectedProxy). */
+		/* 留给"剔掉坏节点再重试"那条路径用（见 retryWithoutRejectedProxy）。 */
 		coreInitParams = initParams;
 		coreSetupParams = setupParams;
 		coreConfigFile = configFile;
@@ -522,10 +486,9 @@ public class TProxyService extends VpnService {
 			failStartup("启动内核失败：" + e.getMessage());
 			return;
 		}
-		/* quickSetup may run its callback on the calling thread; when it did and
-		   the profile is broken, the retry path has already handled it (or
-		   scheduled the abort), so startTUN is never reached with a dead config.
-		   A retry that is still running on another thread is left to finish. */
+		/* quickSetup 的回调可能就在**调用线程**上跑；如果它跑了、而且配置确实坏了，
+		   那么重试路径已经处理掉了（或已安排好中止），所以绝不会带着一份死配置走到
+		   startTUN。如果重试还在另一个线程上跑，就让它跑完。 */
 		if (quickSetupError != null && looksLikeError(quickSetupError)
 				&& !configRetryRunning) {
 			startupAborted = true;
@@ -533,9 +496,8 @@ public class TProxyService extends VpnService {
 			return;
 		}
 
-		/* Bring the TUN up on the VPN fd we just established. The TunInterface
-		   forwards socket protection to VpnService.protect() so the core's
-		   outbound traffic never loops back into the VPN. */
+		/* 在刚建好的 VPN fd 上把 TUN 拉起来。TunInterface 会把 socket 保护转发给
+		   VpnService.protect()，这样内核自己的对外流量永远不会绕回 VPN。 */
 		String address = (ipv4 ? tunAddr + "/" + tunPrefix : "") +
 			(ipv6 ? (ipv4 ? "," : "") + tunAddr6 + "/64" : "");
 		String dns = "223.5.5.5,119.29.29.29";
@@ -550,10 +512,9 @@ public class TProxyService extends VpnService {
 			}
 		};
 
-		/* gvisor first: it keeps the whole stack in userspace and is what the
-		   other Android clients ship by default. The system stack leans on
-		   tun features that are not dependable on every Android kernel, so
-		   fall back to it instead of failing the whole tunnel. */
+		/* 先用 gvisor：整个协议栈都在用户态，也是其它 Android 客户端默认自带的。
+		   system 栈依赖一些并非每个 Android 内核都可靠的 tun 特性，所以把它作为兜底，
+		   而不是让整条隧道直接失败。 */
 		String[] stacks = { "gvisor", "system" };
 		String started = null;
 		Throwable lastError = null;
@@ -575,34 +536,29 @@ public class TProxyService extends VpnService {
 		appendLog("Clash.startTUN OK (fd=" + tunFd.getFd() + ", stack=" + started
 			+ ", addr=" + address + ", mtu=" + prefs.getTunnelMtu() + ")");
 
-		/* A brand-new tunnel has not selected anything yet: drop the node
-		   recorded by the previous run, so the home page / notification cannot
-		   show a stale name until the pick below has actually landed. */
+		/* 全新的隧道还没选中任何节点：先清掉上一次运行记下的节点，这样在下面那次
+		   选择真正生效之前，首页 / 通知栏不会显示一个过期名字。 */
 		prefs.setActiveNode("");
-		/* Best-effort: apply the node the user picked in the subscription. This
-		   is NOT a user action of its own: the config was just built from the
-		   same preferences (see rebuildForSelection). */
+		/* 尽力而为：应用用户在订阅里选中的节点。这**不算**一次用户操作 —— 配置刚刚
+		   就是按同一份偏好生成的（见 rebuildForSelection）。 */
 		selectUserAction = false;
 		applySelectedNode(prefs);
-		/* Independent of the selection: confirm the control API really answers,
-		   and record why it does not when it does not. Without this the core's
-		   config error only exists in its own log stream, which is easy to
-		   miss - the tunnel looks connected while 9090 is dead. */
+		/* 与选择无关：确认控制接口**真的**能应答，不能的话把原因记下来。没有这一步，
+		   内核的配置错误只存在于它自己的日志流里、很容易被漏掉 —— 隧道看着已连接，
+		   9090 却已经死了。 */
 		verifyController();
-		/* Proactively nudge the clash-api. quickSetup brings the mixed-port up
-		   but on some builds skips the external-controller listener, so the
-		   RESTful API (selectors, /connections, node switching) stays dead
-		   even though the tunnel proxies fine. kickClashApi() re-applies
-		   external-controller via the UpdateConfig action to (re)start it. */
+		/* 主动去催一下 clash-api。quickSetup 会把 mixed-port 起起来，但某些构建会跳过
+		   external-controller 的监听，于是即便隧道代理正常，REST API（选择器、
+		   /connections、切节点）仍然是死的。kickClashApi() 用 UpdateConfig 动作重新
+		   应用 external-controller，把它（重新）拉起来。 */
 		new Thread(() -> {
 			try { Thread.sleep(3000); } catch (InterruptedException e) { return; }
 			if (tunnelStopping)
 			  return;              /* the tunnel was torn down meanwhile */
 			kickClashApi();
 		}).start();
-		/* FlClash-style real reachability: actually push a request through the
-		   selected node and measure latency, rather than only checking the API
-		   answers (which can be green while no traffic flows). */
+		/* FlClash 式的真实连通性：真的通过选中节点推一个请求并测延迟，而不是只看
+		   "API 有应答"（那种检查可能是绿的，流量却一点没走）。 */
 		testProxyConnectivity(prefs);
 
 		prefs.clearLastError();
@@ -612,17 +568,14 @@ public class TProxyService extends VpnService {
 		initNotificationChannel(NOTIFY_CHANNEL);
 		createNotification();
 		startStats(prefs);
-		/* Expose the control API on loopback (the core does not bind it). */
+		/* 在回环上暴露控制接口（内核自己**不**绑它）。 */
 		startEmbeddedApi();
 	}
 
-	/* Every startup failure funnels through here. Two things matter beyond
-	   stopping the service:
-	     - Enable must go back to false. MainActivity flips it to true before
-	       asking us to start, so without this the UI would happily keep showing
-	       "connected" for a tunnel that never came up.
-	     - The reason is persisted so the UI can say *why* it failed instead of
-	       silently returning to "disconnected". */
+	/* 所有启动失败都汇总到这里。除了停掉服务，还有两件事很重要：
+	     - Enable 必须改回 false。MainActivity 是先把 Enable 置 true 再来要求我们启动的，
+	       所以少了这一步，UI 会一直显示一条**从没起来**的隧道为"已连接"。
+	     - 失败原因要持久化，让 UI 能说出**为什么**失败，而不是默默回到"未连接"。 */
 	private void failStartup(String reason) {
 		appendLog("FATAL: " + reason);
 		Preferences p = new Preferences(this);
@@ -630,9 +583,8 @@ public class TProxyService extends VpnService {
 		p.setEnable(false);
 		QSTileService.requestUpdate(this);
 
-		/* A config error is reported asynchronously - i.e. after the VPN fd has
-		   been established - so tear that down too, otherwise the system keeps
-		   a dead VPN up. */
+		/* 配置错误是**异步**报出来的 —— 也就是在 VPN fd 已经建好之后 —— 所以这里也要
+		   把它拆掉，否则系统会一直挂着一条已经死掉的 VPN。 */
 		if (tunFd != null) {
 			try {
 				Clash.INSTANCE.stopTun();
@@ -650,9 +602,8 @@ public class TProxyService extends VpnService {
 		stopSelf();
 	}
 
-	/* Whether the core's quickSetup result describes an error. The bridge returns
-	   an empty result on success, but stay defensive so a status string is never
-	   mistaken for a fatal config error. */
+	/* 内核的 quickSetup 结果是否表示出错了。成功时桥返回空结果，但这里仍保持保守，
+	   免得某个状态字符串被误当成致命的配置错误。 */
 	private static boolean looksLikeError(String s) {
 		if (s == null || s.isEmpty())
 		  return false;
@@ -663,8 +614,7 @@ public class TProxyService extends VpnService {
 			|| t.contains("proxy") || t.contains("group");
 	}
 
-	/* Hand the current profile to the core. Factored out because a rejected
-	   proxy makes us rewrite the profile and call it again. */
+	/* 把当前配置交给内核。单独抽出来是因为"节点被拒"时要重写配置再调一次。 */
 	private void quickSetupCore() {
 		final String init = coreInitParams;
 		final String setup = coreSetupParams;
@@ -679,11 +629,10 @@ public class TProxyService extends VpnService {
 					configRetryRunning = false;
 					return;
 				}
-				/* A non-empty result is the core reporting a problem with the
-				   config it was handed (unknown proxy / group, bad rule, ...).
-				   Nothing about the session can work then - no group, no rules,
-				   no control API - so keep the text, and try to recover if the
-				   core named a specific proxy. */
+				/* 非空结果 = 内核在报告它拿到的那份配置有问题（未知的节点 / 组、
+				   规则不对 ……）。这种情况下整个会话都没法工作 —— 没有组、没有规则、
+				   也没有控制接口 —— 所以把文本留下来，如果内核点明了某个具体节点，
+				   就尝试恢复。 */
 				quickSetupError = result;
 				appendLog("mihomo quickSetup: " + result);
 				if (looksLikeError(result))
@@ -692,12 +641,10 @@ public class TProxyService extends VpnService {
 		});
 	}
 
-	/* mihomo validates the whole profile in ONE pass: a single invalid proxy
-	   ("proxy 645: invalid REALITY short ID") makes it refuse the entire file -
-	   the tunnel never comes up, and so does every latency test. Before giving
-	   up, drop exactly that node, rewrite the profile and hand it back.
-	   Bounded, and only for generated profiles: a hand-edited custom config is
-	   never touched. */
+	/* mihomo 是**一次性**校验整份配置的：只要有一个非法节点
+	   （"proxy 645: invalid REALITY short ID"），它就会拒绝**整份**文件 —— 隧道起不来，
+	   所有延迟测试也一起废。所以在放弃之前，精确地剔掉那个节点、重写配置再交一次。
+	   有次数上限，且只对**自动生成**的配置生效：手工编辑的自定义配置绝不去动。 */
 	private void retryWithoutRejectedProxy(final String err) {
 		if (coreCustomConfig || configRetry >= MAX_CONFIG_RETRIES) {
 			abortOnConfigError(err);
@@ -724,12 +671,11 @@ public class TProxyService extends VpnService {
 		quickSetupCore();
 	}
 
-	/* Whole-file read for the profile we just wrote (small, UTF-8). */
+	/* 整份读取我们刚写出的配置（不大、UTF-8）。 */
 	private static String readTextFile(File f) {
 		if (f == null || !f.exists())
 		  return null;
-		/* try-with-resources: a read that throws used to leak the fd, and this
-		   runs on every config retry. */
+		/* 用 try-with-resources：以前读取抛异常会泄漏 fd，而这段在每次配置重试时都跑。 */
 		try (java.io.FileInputStream in = new java.io.FileInputStream(f)) {
 			java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
 			byte[] buf = new byte[8192];
@@ -742,9 +688,8 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* Stop the service with the core's own message. Runs on the main thread
-	   because the quickSetup callback may arrive on a background thread while
-	   failStartup shows a Toast, and is guarded so it fires at most once. */
+	/* 带着内核自己的报错信息停掉服务。必须在**主线程**跑，因为 quickSetup 回调可能来自
+	   后台线程，而 failStartup 会弹 Toast；同时做了保护，最多只触发一次。 */
 	private void abortOnConfigError(final String reason) {
 		new Handler(Looper.getMainLooper()).post(new Runnable() {
 			@Override
@@ -757,10 +702,9 @@ public class TProxyService extends VpnService {
 		});
 	}
 
-	/* Turn the core's config error into something actionable. A broken
-	   hand-edited config is the common case: it references a proxy/group that
-	   does not exist, so stop using it - otherwise every reconnect fails the
-	   same way - and let the next connect regenerate a working file. */
+	/* 把内核的配置错误变成"可以采取行动"的信息。最常见的情况是手工编辑的配置坏了：
+	   它引用了不存在的节点/组，于是就别再继续用它（否则每次重连都以同样方式失败），
+	   让下次连接自动重新生成一份可用的文件。 */
 	private String configErrorReason(String reason) {
 		String msg = reason;
 		Preferences p = new Preferences(this);
@@ -771,12 +715,9 @@ public class TProxyService extends VpnService {
 		return msg;
 	}
 
-	/* The node picker, the proxy-traffic counters and the "is it proxied" check
-	   all talk to the core over the loopback control API, so the loaded config
-	   must expose it. A hand-edited custom config often does not - which is
-	   exactly why the tunnel can carry traffic while the home-screen counters
-	   stay at zero. Add the missing keys (and say so) rather than silently
-	   reporting 0. */
+	/* 节点选择器、代理流量统计、"是否走代理"的检查都要通过回环控制接口找内核，所以
+	   加载的配置必须把它暴露出来。手工编辑的自定义配置常常没有 —— 这正是"隧道明明在
+	   跑，首页计数却一直是 0"的原因。这里把缺的键补上（并记一笔），而不是默默报 0。 */
 	private void ensureControlApi(File configFile, Preferences prefs) {
 		try {
 			byte[] buf = new byte[(int) configFile.length()];
@@ -787,26 +728,24 @@ public class TProxyService extends VpnService {
 			String text = new String(buf, 0, n, "UTF-8");
 
 			String ec = topLevelLine(text, "external-controller:");
-			/* The listener must be loopback: on this build mihomo silently
-			   fails to bind 0.0.0.0 ("9090 never listens" - the browser cannot
-			   reach it either), while 127.0.0.1 binds fine. Align any
-			   non-loopback / wrong-port line to 127.0.0.1:<port>. */
+			/* 监听地址必须是回环：在本构建上 mihomo 绑 0.0.0.0 会**静默失败**
+			   （"9090 从没监听"，浏览器也连不上），而绑 127.0.0.1 却正常。
+			   所以任何非回环 / 端口不对的行都改写成 127.0.0.1:<端口>。 */
 			boolean needEc = (ec == null)
 				|| !ec.contains("127.0.0.1:" + MihomoConfig.API_PORT);
 			boolean needMp = !hasTopLevelKey(text, "mixed-port:")
 				&& !hasTopLevelKey(text, "port:");
-			/* Adopt a hand-set secret from the custom config so the app's control
-			   requests authenticate against it; otherwise inject the app's own
-			   generated token. Either way the config and the client agree on the
-			   same bearer token. */
+			/* 采用自定义配置里手工设的 secret，好让 App 的控制请求能用它通过鉴权；
+			   没有的话就注入 App 自己生成的那个令牌。两种情况都保证**配置与客户端用同一
+			   个 bearer 令牌**。 */
 			String existingSecret = topLevelLine(text, "secret:");
 			String secretVal = null;
 			if (existingSecret != null) {
 				String v = existingSecret.trim();
-				/* Strip the "secret:" key prefix first, then any surrounding
-				   quotes, so "secret: \"\"" yields null (empty) instead of the
-				   corrupted value "secret: \"", which would otherwise persist
-				   into Preferences and break every later auth check. */
+				/* 先去掉 "secret:" 这个键名前缀，再去掉两边的引号，这样
+				   "secret: \"\"" 会得到 null（空），而不是那个被截坏的值
+				   "secret: \"" —— 后者会被持久化进 Preferences，
+				   让之后每一次鉴权都失败。 */
 				if (v.startsWith("secret:")) v = v.substring("secret:".length());
 				v = v.trim();
 				if (v.startsWith("\"")) v = v.substring(1);
@@ -820,10 +759,9 @@ public class TProxyService extends VpnService {
 			if (!needEc && !needMp && !needSecret)
 				return;
 
-			/* Rebuild the file once: rewrite the external-controller line to the
-			   chosen loopback port (or append it), align the secret (or append it),
-			   then append mixed-port if missing. A duplicate top-level key would be
-			   invalid YAML, so we replace in place (see docs/内核接口参考.md §5). */
+			/* 只重建一次文件：把 external-controller 行改写成选定的回环端口（没有就追加），
+			   对齐 secret（没有就追加），最后在缺 mixed-port 时补上。重复的顶层键会让
+			   YAML 非法，所以一律**原地替换**（见 docs/内核接口参考.md §5）。 */
 			StringBuilder out = new StringBuilder();
 			boolean ecWritten = false;
 			boolean secretWritten = false;
@@ -860,8 +798,8 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* A one-line summary of the keys the app itself depends on, so "the tunnel
-	   works but the counters/pickers are dead" is traceable to the config. */
+	/* App 自己依赖的那几个键的一行摘要：这样"隧道能跑但计数/选择器是死的"就能追溯到
+	   配置上。 */
 	private static String configKeySummary(File configFile) {
 		try {
 			byte[] buf = new byte[(int) configFile.length()];
@@ -882,12 +820,12 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* True when "key" appears as a top-level YAML key (column 0). */
+	/* "key" 作为**顶层** YAML 键（第 0 列）出现时为 true。 */
 	private static boolean hasTopLevelKey(String text, String key) {
 		return topLevelLine(text, key) != null;
 	}
 
-	/* The whole top-level line that starts with `key`, or null. */
+	/* 以 `key` 开头的整行顶层内容；没有则返回 null。 */
 	private static String topLevelLine(String text, String key) {
 		int idx = 0;
 		while ((idx = text.indexOf(key, idx)) >= 0) {
@@ -902,24 +840,21 @@ public class TProxyService extends VpnService {
 		return null;
 	}
 
-	/* The url-test subgroup the top select group should default to, or null when
-	   there is nothing to select because the config already picked it. */
+	/* 顶层 select 组应默认指向的 url-test 子组；配置里已经选好了、无需再选时返回 null。 */
 	private static String autoTargetGroup(Preferences prefs) {
-		/* The generated config already defaults the top group to GLOBAL_GROUP,
-		   which is the url-test group of the whole (country-filtered) pool, so
-		   there is nothing to select in auto mode. */
+		/* 生成的配置已经把顶层组默认指向 GLOBAL_GROUP（即整个"按国家筛选后的"池的
+		   url-test 组），所以自动模式下没有什么需要再选的。 */
 		return null;
 	}
 
-	/* Ask mihomo to select the chosen proxy/group inside the group we built.
-	   In auto mode we select the country url-test subgroup (whose own
-	   health-check then keeps picking the fastest node within that country);
-	   in manual mode we select the exact node the user tapped. */
+	/* 让 mihomo 在我们自建的组里选中指定的节点/子组。自动模式下选的是该国 url-test
+	   子组（之后由它自己的健康检查持续挑出该国最快的节点）；手动模式下用户点哪个就
+	   选哪个。 */
 	private void applySelectedNode(Preferences prefs) {
 		if (prefs.getAutoSelect()) {
 			String target = autoTargetGroup(prefs);
-			/* null = "auto best country": the generated config already lists that
-			   country's url-test group first, so there is nothing to select. */
+			/* null = "自动选最佳国家"：生成的配置已经把该国的 url-test 组排在第一位，
+			   所以无需再选。 */
 			if (target != null)
 			  selectInGroup(MihomoConfig.GROUP, target);
 			return;
@@ -930,30 +865,19 @@ public class TProxyService extends VpnService {
 		selectInGroup(MihomoConfig.GROUP, sel);
 	}
 
-	/* Ask mihomo to select the chosen proxy/group inside the group we built.
-	   We use the external-controller REST API (loopback :9090) instead of the
-	   JNI invokeAction bridge: the bridge hands Java strings to the core as
-	   "modified UTF-8", which corrupts supplementary-plane characters such as
-	   flag emoji in a node name, so changeProxy then reports "proxy not
-	   exist". REST carries standard UTF-8 end to end, so the name matches
-	   exactly what the config registered. */
+	/* 让 mihomo 在我们自建的组里选中指定的节点/组。这里走 external-controller 的
+	   REST API（回环 :9090），**不用** JNI 的 invokeAction 桥：桥把 Java 字符串按
+	   "modified UTF-8" 交给内核，会破坏补充平面字符（节点名里的国旗 emoji），于是
+	   changeProxy 报 "proxy not exist"。REST 全程标准 UTF-8，名字与配置注册的完全一致。 */
 	private void selectInGroup(String group, String proxy) {
 		appendLog("selected: " + proxy + " in group " + group);
-		/* Best-effort and network-bound, so run off the calling thread. */
+		/* 尽力而为且有网络等待，所以放到别的线程上跑。 */
 		new Thread(() -> {
-			/* The core brings the TUN up before its external-controller HTTP
-			   listener is bound, and with a large subscription the config parse
-			   can keep that listener closed for several seconds longer. A single
-			   early probe would then report "未就绪" and silently drop the user's
-			   pick — yet the tunnel is already proxying, so the failure is easy
-			   to miss (proxy traffic keeps flowing via the default node). Retry
-			   the whole apply so the selector lands once the control API is
-			   actually listening. */
-			/* The core brings the TUN up before its external-controller HTTP
-			   listener binds, and a large subscription can keep that listener
-			   closed for many seconds. Keep retrying until it answers (or the
-			   tunnel is torn down), instead of giving up after one short window
-			   and silently dropping the user's pick. */
+			/* 内核是先起 TUN、之后才绑 external-controller 的 HTTP 监听；订阅很大时
+			   解析配置会让那个监听多关好几秒。只探一次就会报"未就绪"并**静默丢掉**
+			   用户的选择 —— 而隧道其实已经在代理了（流量会继续走默认节点），所以这种
+			   失败极不容易被察觉。因此这里一直重试到控制接口真的在监听（或隧道被拆掉）
+			   为止，而不是探一小会儿就放弃。 */
 			for (int attempt = 1; attempt <= 120; attempt++) {
 				if (startupAborted || tunnelStopping)
 				  return;
@@ -980,9 +904,8 @@ public class TProxyService extends VpnService {
 		}).start();
 	}
 
-	/* PUT the chosen proxy into `group` once the control API is reachable.
-	   Extracted so selectInGroup can retry it without re-duplicating the
-	   resolve-and-PUT logic. */
+	/* 控制接口可达之后，把选中的节点 PUT 进 `group`。抽成独立方法是为了让
+	   selectInGroup 能重试它，而不必重复一遍"解析 + PUT"的逻辑。 */
 	private void applySelector(String group, String proxy) {
 		try {
 			String target = null;
@@ -991,7 +914,7 @@ public class TProxyService extends VpnService {
 			} catch (Throwable ignore) {
 			}
 			if (target == null)
-			  target = proxy; /* last-ditch: try the raw name */
+			  target = proxy; /* 最后的办法：直接用原始名字试一次 */
 			int code = putSelector(group, target);
 			boolean ok = (code >= 200 && code < 300);
 			String note = ok ? "ok" : ("http " + code);
@@ -999,18 +922,14 @@ public class TProxyService extends VpnService {
 			  note += " (resolved to " + target + ")";
 			appendLog("selector set: " + note);
 			if (ok) {
-				/* The pick IS in force now: record what the core really uses,
-				   so the home page / notification cannot keep showing a stale
-				   node. */
+				/* 这次选择**已经生效**：记下内核真正在用的节点，这样首页 / 通知栏
+				   就不会继续显示一个过期节点。 */
 				syncActiveNode(group);
 			} else {
-				/* The node is not a member of the group the core is running -
-				   typically because the pool was baked in earlier (the user
-				   just changed the country filter, or the config predates the
-				   pick). mihomo cannot switch to it, so the ONLY way to make
-				   the selection real is to rebuild the config: writing the
-				   preference alone left the old node carrying the traffic
-				   while the UI showed the new one. */
+				/* 这个节点不在内核当前运行的组里 —— 通常是因为节点池是更早烘焙进去的
+				   （用户刚改过国家筛选，或者配置早于这次选择）。mihomo 切不过去，
+				   所以让这次选择真正生效的**唯一**办法是重建配置：只改偏好等于让旧节点
+				   继续承载流量，而界面显示的是新节点。 */
 				rebuildForSelection("目标节点不在当前内核配置的组里");
 			}
 			testProxyConnectivity(new Preferences(this));
@@ -1019,9 +938,9 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* Record the proxy the core has ACTUALLY selected for `group` (and, in auto
-	   mode, the node behind the country url-test group). Stored in Preferences
-	   so both the UI process and this service's notification show the truth. */
+	/* 记录内核为 `group` **真正选中**的节点（自动模式下还会往下钻到该国
+	   url-test 组背后的那个节点）。存进 Preferences，这样 UI 进程和本服务的通知栏
+	   显示的都是事实。 */
 	private void syncActiveNode(String group) {
 		try {
 			String secret = new Preferences(this).getSecret();
@@ -1039,9 +958,8 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* GET /proxies/{group} and follow `now`, descending into nested groups
-	   (auto mode selects a country url-test group, whose own health check picks
-	   the real node). Returns null when the API cannot be read. */
+	/* GET /proxies/{group} 并顺着 `now` 往下钻（自动模式选中的是某个国家的
+	   url-test 组，真正干活的节点在它下面由健康检查决定）。API 读不到时返回 null。 */
 	private String nowOf(String group, int depth, String secret) throws IOException {
 		ApiResult r = bridgeApi("GET", apiHost, MihomoConfig.API_PORT,
 			"/proxies/" + encodePath(group), null, secret);
@@ -1056,7 +974,7 @@ public class TProxyService extends VpnService {
 		String now = o.optString("now", "");
 		if (now.isEmpty())
 		  return "";
-		/* A group answers with `all`; a real proxy does not. */
+		/* 代理组的应答里有 `all` 字段，真正的节点没有。 */
 		if (depth < 2 && o.has("all")) {
 			String inner = nowOf(now, depth + 1, secret);
 			if (inner != null && !inner.isEmpty())
@@ -1065,16 +983,13 @@ public class TProxyService extends VpnService {
 		return now;
 	}
 
-	/* A selection could not be applied to the running core: rebuild the config
-	   once (it is baked at start time, so the new pick/country only exists in a
-	   fresh one). Debounced, because a rebuild runs applySelectedNode again and
-	   a genuinely impossible pick would otherwise loop forever. */
+	/* 这次选择没法应用到运行中的内核上：重建一次配置（配置是启动时烘焙好的，
+	   新的选择/国家只存在于**新生成**的那份里）。有去抖，因为重建会再次调用
+	   applySelectedNode —— 否则一个根本不可能生效的选择会无限循环下去。 */
 	private void rebuildForSelection(final String why) {
 		long now = System.currentTimeMillis();
-		/* Only a user-initiated pick is worth a rebuild: the STARTUP apply
-		   reads a config that was just built from the very same preferences, so
-		   rebuilding would change nothing and would tear down a working tunnel
-		   for nothing. */
+		/* 只有**用户主动**的选择才值得重建：启动时那次自动应用读的就是刚刚用同一份
+		   偏好生成的配置，重建什么都不会变，只会白白拆掉一条正在工作的隧道。 */
 		if (!selectUserAction) {
 			appendLog("selector: " + why + "（启动时自动应用，重建无意义，仅提示）");
 			return;
@@ -1094,8 +1009,8 @@ public class TProxyService extends VpnService {
 		}
 		lastSelectRebuildMs = now;
 		appendLog("selector: " + why + " → 自动重建隧道配置，使这次选择立即生效");
-		/* rebuildTunnel() tears the fd down and re-establishes, so it must run
-		   where onStartCommand's own work runs: the main thread. */
+		/* rebuildTunnel() 会拆掉 fd 再重建，所以必须跑在 onStartCommand 干活的那个
+		   线程上：主线程。 */
 		new Handler(Looper.getMainLooper()).post(new Runnable() {
 			@Override
 			public void run() {
@@ -1105,10 +1020,9 @@ public class TProxyService extends VpnService {
 		});
 	}
 
-	/* Poll the core's control API until it answers, so a selector PUT right
-	   after startup does not race the core's own HTTP listener. Returns false
-	   when it never came up within the window (then the log says so, instead
-	   of the failure being invisible). */
+	/* 轮询内核的控制接口直到它应答，这样启动后紧接着的选择器 PUT 就不会和内核自己的
+	   HTTP 监听抢跑。窗口期内始终没起来则返回 false（此时日志会写明原因，
+	   而不是让这次失败无声无息）。 */
 	private boolean waitForController() {
 		for (int i = 0; i < 24; i++) {
 			if (isControllerUp())
@@ -1122,11 +1036,10 @@ public class TProxyService extends VpnService {
 		return false;
 	}
 
-	/* Confirm the control API is up. mihomo binds the clash-api HTTP listener
-	   only after it has finished bringing the TUN up and parsing a possibly
-	   large config, so poll for a bounded 90s instead of giving up in 6s - a
-	   too-early "NOT ready" is exactly the misleading signal we keep hitting.
-	   When it truly never listens, say so and point at the core's own log. */
+	/* 确认控制接口已就绪。mihomo 只有在把 TUN 拉起来、并解析完（可能很大的）配置之后
+	   才会绑定 clash-api 的 HTTP 监听，所以这里**轮询 90 秒**，而不是 6 秒就放弃 ——
+	   过早地报"未就绪"正是我们反复遇到的误导信号。如果它真的从没监听，就明确说出来，
+	   并指向内核自己的日志。 */
 	private void verifyController() {
 		new Thread(() -> {
 			boolean ok = false;
@@ -1134,7 +1047,7 @@ public class TProxyService extends VpnService {
 				if (isControllerUp())
 				  { ok = true; break; }
 				if (tunnelStopping)
-				  return;           /* a disconnect must end this poll, not the user */
+				  return;           /* 断开连接必须能结束这个轮询，而不是让用户干等 */
 				try { Thread.sleep(1000); } catch (InterruptedException e) { return; }
 			}
 			if (ok) {
@@ -1143,9 +1056,9 @@ public class TProxyService extends VpnService {
 			}
 			if (tunnelStopping)
 			  return;
-			/* The core brought mixed-port up but skipped the external-controller
-			   listener. Try to force it via the UpdateConfig action, then re-poll;
-			   if that brings it up we skip the alarming "never ready" dump. */
+			/* 内核把 mixed-port 起起来了，却跳过了 external-controller 的监听。
+			   先用 UpdateConfig 动作强推一次，然后再轮询一遍；如果这样就起来了，
+			   就不必输出那堆吓人的"never ready"转储。 */
 			kickClashApi();
 			boolean recovered = false;
 			for (int i = 0; i < 30; i++) {
@@ -1165,16 +1078,15 @@ public class TProxyService extends VpnService {
 			  appendLog("controller: 最后一次探测：" + lastControllerError);
 			if (quickSetupError != null && !quickSetupError.isEmpty())
 			  appendLog("controller: 内核配置加载报错：" + quickSetupError);
-			/* Some Android builds only expose the IPv6 loopback to the app
-			   process; if mihomo bound [::1] the IPv4 probe fails even though
-			   the API is alive - probe it so we can tell the two apart. */
+			/* 某些 Android 构建只把 IPv6 回环暴露给 App 进程；如果 mihomo 绑的是 [::1]，
+			   那么即使 API 活着，IPv4 探测也会失败 —— 所以也探一下它，好把两种情况
+			   区分开。 */
 			if (probeHost("::1"))
 			  appendLog("controller: 但 [::1]:" + MihomoConfig.API_PORT
 				  + " 通了 —— 核心绑在 IPv6 回环，App 走 IPv4 才失败");
-			/* Pin down whether the chosen API port is genuinely still occupied
-			   (a stale tunnel / adb forward / emulator holding 9090) or free but
-			   mihomo refused to bind it (config / permission issue). This single
-			   line is the most useful one for "9090 起不来" debugging. */
+			/* 确定到底是"选的 API 端口确实还被占着"（残留隧道 / adb forward / 模拟器
+			   占着 9090），还是"端口空着但 mihomo 拒绝绑定"（配置 / 权限问题）。
+			   排"9090 起不来"时，这一行信息量最大。 */
 			boolean portFree = false;
 			java.net.ServerSocket probe = null;
 			try {
@@ -1206,21 +1118,19 @@ public class TProxyService extends VpnService {
 			}).start();
 			}
 
-			/* Force the clash-api (external-controller) listener to start. On some
-			   libmihomo-android builds quickSetup brings mixed-port up but never
-			   starts the external-controller listener, even though the profile
-			   carries external-controller + secret - so the RESTful API (selectors,
-			   /connections, node switching) stays dead while the tunnel proxies
-			   fine. mihomo's UpdateConfig action re-applies the general config and
-			   (re)starts that listener. Called both proactively after startup and
-			   as a fallback from verifyController; harmless if it was already up. */
+			/* 强制把 clash-api（external-controller）的监听拉起来。在某些
+			   libmihomo-android 构建上，quickSetup 会把 mixed-port 起起来，却从不启动
+			   external-controller 的监听 —— 即便配置里明明有 external-controller + secret
+			   —— 于是隧道代理正常，而 REST API（选择器、/connections、切节点）却是死的。
+			   mihomo 的 UpdateConfig 动作会重新应用通用配置并（重新）启动那个监听。
+			   启动后主动调用一次，verifyController 里也作为兜底调用；本来就已经起来的话
+			   没有任何副作用。 */
 			private void kickClashApi() {
-				/* Best-effort: (re)start the core's listeners via the in-process
-				   startListener action. On libmihomo-android v0.3.3 quickSetup brings
-				   the mixed-port up but leaves the clash-api (9090) unbound; startListener
-				   recreates every listener, including external-controller, so the REST API
-				   (selectors, /connections, node switching) comes up for external clients
-				   too. In-app stats already work through the apiAction bridge regardless. */
+				/* 尽力而为：用进程内的 startListener 动作（重新）启动内核的各个监听。
+				   在 libmihomo-android v0.3.3 上，quickSetup 会起 mixed-port，却把
+				   clash-api（9090）丢下不管；startListener 会重建每一个监听（含
+				   external-controller），这样 REST API（选择器、/connections、切节点）
+				   对外部客户端也可用。当然，App 内的统计一直都能走 apiAction 桥，与此无关。 */
 				try {
 					String json = "{\"id\":\"\",\"method\":\"startListener\",\"data\":null}";
 					appendLog("clash-api: 尝试用 startListener 拉起监听（含 external-controller 9090）");
@@ -1236,10 +1146,9 @@ public class TProxyService extends VpnService {
 				}
 			}
 
-			/* Definitive: read /proc/net/tcp[6] and report which of our ports (API 9090,
-			mixed 7890) are actually LISTEN-ing and on which address. Settles whether
-			mihomo bound the clash-api at all (the "9090 never listens" symptom) vs a
-			pure reachability problem, and shows the exact bound address. */
+		/* 一锤定音：读 /proc/net/tcp[6]，报出我们关心的端口（API 9090、mixed 7890）
+		   到底有没有在 LISTEN、绑在哪个地址。这样就能确定是"mihomo 压根没绑 clash-api"
+		   （即"9090 从没监听"那个症状）还是纯粹的连通性问题，并给出确切绑定地址。 */
 			private void dumpListeningPorts() {
 			for (String file : new String[] { "/proc/net/tcp", "/proc/net/tcp6" }) {
 				java.io.File f = new java.io.File(file);
@@ -1265,8 +1174,8 @@ public class TProxyService extends VpnService {
 			appendLog("listen: 以上为 9090/7890 的实际 LISTEN 状态（无条目=该端口未监听）");
 			}
 
-			/* Quick TCP connect probe to host:API_PORT, used to tell an IPv4-only
-	   failure apart from "the API is up but on a different loopback". */
+			/* 对 host:API_PORT 做一次快速 TCP 连接探测，用来区分"只是 IPv4 失败"和
+	   "API 起来了但在另一个回环地址上"。 */
 	private boolean probeHost(String host) {
 		java.net.Socket s = null;
 		try {
@@ -1283,11 +1192,10 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* When the API never binds, the generated config is the first thing to
-	   suspect (a malformed external-controller line, a stray duplicate key, an
-	   indentation slip). Dump the tail of config.yaml - the sections the app
-	   appends (dns/log/tun/external-controller/...) - so the log is
-	   self-contained for diagnosis without pulling the file off the device. */
+	/* API 始终绑不上时，第一个该怀疑的就是生成的配置（external-controller 行写坏、
+	   多出一个重复键、缩进错位）。这里把 config.yaml 的尾部转储出来 —— 也就是 App
+	   追加的那些段（dns/log/tun/external-controller/...）—— 这样日志本身就够诊断，
+	   不必再从设备里把文件捞出来。 */
 	private void dumpConfigTail() {
 		File f = new File(getFilesDir(), "config.yaml");
 		if (!f.exists()) {
@@ -1312,21 +1220,18 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* One quick reachability probe of the control API (no retries). Used by
-	   verifyController; the selector/test loops use waitForController which
-	   retries internally. */
-	/* The clash-api binds the loopback (external-controller: 127.0.0.1) and, with
-	   allow-lan off, only serves loopback clients - so the device IP is never a
-	   valid controller address. Probing it as a fallback used to latch onto a
-	   host with no listener and report every test as failed; keep it 127.0.0.1. */
+	/* 对控制接口做一次快速可达性探测（不重试）。verifyController 用它；选择器 /
+	   测速的循环用的是内部会重试的 waitForController。 */
+	/* clash-api 绑的是回环（external-controller: 127.0.0.1），而且在 allow-lan 关闭时
+	   只服务回环客户端 —— 所以设备 IP **永远**不是有效的控制器地址。以前把它当兜底
+	   去探，结果会 latch 到一个根本没有监听的地址上，导致每次测试都判失败；这里固定
+	   用 127.0.0.1。 */
 	private boolean isControllerUp() {
-		/* Primary signal: the in-process action bridge reaches the core without
-		   any HTTP listener, so the controller is "ready" the moment
-		   getConnections answers - regardless of whether mihomo ever bound
-		   external-controller on 9090 (on this build it does not). The HTTP probe
-		   below is only a best-effort fallback that resolves the exact bound host
-		   for external clients; if it never connects we no longer treat that as a
-		   failure, which removes the misleading "9090 NOT ready" dump. */
+		/* 主判据：进程内的动作桥**不需要**任何 HTTP 监听就能到达内核，所以只要
+		   getConnections 有应答，控制端就算"就绪" —— 不管 mihomo 到底有没有在 9090 上
+		   绑 external-controller（这个构建上就没有）。下面的 HTTP 探测只是尽力而为的
+		   兜底，用来给**外部客户端**解析出确切的绑定地址；连不上也不再算失败，
+		   这样就消除了那个误导性的"9090 NOT ready"大转储。 */
 		if (isCoreReachable())
 		  return true;
 		for (String h : new String[] { "127.0.0.1", deviceHost(), "::1" }) {
@@ -1341,15 +1246,14 @@ public class TProxyService extends VpnService {
 		return false;
 	}
 
-	/* === Local control API over a VPN-bypassing socket =========================
-	   The VPN this service creates would capture the app's own sockets and they
-	   would never reach mihomo's loopback listeners (the "9090 never listens"
-	   symptom). protect() pulls each socket out of the VPN routing so the app
-	   can talk to its own core. Activities reuse localApi() via the static hook. */
+	/* === 走"绕过 VPN"的 socket 访问本地控制接口 ==============================
+	   本服务创建的 VPN 会把 App 自己的 socket 也抓走，它们就永远到不了 mihomo 的回环
+	   监听（也就是"9090 从没监听"那个症状）。protect() 把每个 socket 从 VPN 路由里
+	   摘出来，App 才能和自己的内核通话。各个 Activity 通过静态钩子复用 localApi()。 */
 	private static TProxyService sInstance;
-	/* Host mihomo's clash-api actually bound to (127.0.0.1 / LAN IP / [::1]),
-	   resolved at startup by isControllerUp so every localApi call reaches it
-	   wherever the core decided to listen. */
+	/* mihomo 的 clash-api **实际**绑定到的主机（127.0.0.1 / 局域网 IP / [::1]），
+	   启动时由 isControllerUp 解析出来，这样无论内核决定在哪监听，每次 localApi
+	   调用都能找到它。 */
 	private String apiHost = "127.0.0.1";
 	static String apiBaseHost() {
 		return sInstance != null ? sInstance.apiHost : "127.0.0.1";
@@ -1357,11 +1261,9 @@ public class TProxyService extends VpnService {
 	static boolean protectLocalSocket(java.net.Socket s) {
 		return sInstance != null && sInstance.protect(s);
 	}
-	/* Clear all recorded recent requests from both the in-memory list and the
-	   persisted store. Called by the Recent Requests screen's "清空" action;
-	   without clearing memory the background flush would rewrite the list on
-	   its next tick. lastRecentFlush is reset so the subsequent flush is not
-	   skipped by the 2s throttle. */
+	/* 把记录下来的"最近请求"从内存列表和持久化存储里一起清空。由「最近请求」页的
+	   "清空"操作调用；不清内存的话，后台的下一次落盘就会把列表又写回来。
+	   lastRecentFlush 也一并重置，免得随后那次落盘被 2 秒的节流跳过。 */
 	public static void clearRecentRequests() {
 		if (sInstance == null)
 		  return;
@@ -1371,34 +1273,30 @@ public class TProxyService extends VpnService {
 		}
 		sInstance.flushRecentRequests(android.os.SystemClock.elapsedRealtime());
 	}
-	/* Latest /connections snapshot the stats poll captured, or null when the
-	   tunnel is not running / has not polled yet. The connections screen reads
-	   this so it never has to issue its own bridge call. */
+	/* 统计轮询抓到的**最新** /connections 快照；隧道没运行 / 还没轮询过时为 null。
+	   「连接」页面读它，从而不必自己发一次桥调用。 */
 	static String lastConnectionsSnapshot() {
 		return sInstance != null ? sInstance.connSnapshot : null;
 	}
 	static final class ApiResult {
-		int code = -1;   /* -1 = transport failure (API unreachable) */
+		int code = -1;   /* -1 = 传输失败（够不到 API） */
 		String body;
 		long rtt;
-		/* Exception detail when code == -1: distinguishes "nothing listening
-		   yet" (Connection refused during warmup) from "socket captured by the
-		   VPN / protect failed" (timeout). Used to word the error accurately. */
+		/* code == -1 时的异常细节：用来区分"还没人监听"（预热阶段的连接被拒）和
+		   "socket 被 VPN 抓走了 / protect 没生效"（超时）。据此才能把错误说准。 */
 		String error;
 	}
-	/* GET/PUT on host:port over a socket that BYPASSES the VPN. protect() is the
-	   documented way to keep the app's own socket out of the tunnel it created.
-	   Body reading is byte-based so multi-byte (Chinese) JSON isn't truncated by
-	   Content-Length. */
+	/* 在 host:port 上做 GET/PUT，socket **绕过 VPN**。protect() 是官方推荐的、
+	   把 App 自己的 socket 从它自建的隧道里摘出去的办法。读 body 是按**字节**读的，
+	   这样多字节（中文）JSON 不会被 Content-Length 截断。 */
 	static ApiResult localApi(String method, String host, int port, String path,
 			String body, String secret) {
 		return localApi(method, host, port, path, body, secret, 6000);
 	}
 
-	/* Same, with an explicit socket timeout. Some replies legitimately take
-	   longer than the default 6s - GET /proxies/{name}/delay runs the probe
-	   inside the core for as long as its own `timeout` - and cutting it off
-	   leaves a working-but-slow node with no verdict at all. */
+	/* 同上，但显式指定 socket 超时。有些回包合理地会超过默认的 6 秒 ——
+	   GET /proxies/{name}/delay 会在内核里跑满它自己的 `timeout` ——
+	   提前掐断会让一个"能用但慢"的节点完全拿不到判定。 */
 	static ApiResult localApi(String method, String host, int port, String path,
 			String body, String secret, int timeoutMs) {
 		ApiResult r = new ApiResult();
@@ -1408,8 +1306,8 @@ public class TProxyService extends VpnService {
 		try {
 			s = new java.net.Socket();
 			prot = protectLocalSocket(s);
-			/* Dialing is either quick or hopeless, so keep a short connect
-			   timeout and spend the caller's budget waiting for the reply. */
+			/* 连接要么很快成立、要么根本没戏，所以连接超时给短一点，
+			   把调用方的额度留给"等回包"。 */
 			s.connect(new java.net.InetSocketAddress(host, port),
 				Math.min(6000, Math.max(2000, timeoutMs)));
 			s.setSoTimeout(Math.max(2000, timeoutMs));
@@ -1452,7 +1350,7 @@ public class TProxyService extends VpnService {
 					byte[] buf = new byte[len]; int got = 0;
 					while (got < len) { int n = is.read(buf, got, len - got); if (n < 0) break; got += n; }
 					bos.write(buf, 0, got);
-					readLineBytes(is); /* trailing CRLF after chunk */
+					readLineBytes(is); /* 每个分块后面跟着的 CRLF */
 				}
 			} else if (contentLength >= 0) {
 				byte[] buf = new byte[2048]; int total = 0;
@@ -1477,47 +1375,42 @@ public class TProxyService extends VpnService {
 		return r;
 	}
 
-	/* Serialises every apiAction() bridge call - the native bridge supports
-	   only one in-flight callback, so concurrent calls lose results (see
-	   apiAction). Static because callers are spread across the service, the
-	   Activities and the embedded clash-api server. */
+	/* 把所有 apiAction() 桥调用**串行化** —— 原生桥一次只支持一个在途回调，
+	   并发调用会丢结果（见 apiAction）。用 static 是因为调用方散落在服务、各个
+	   Activity 和内嵌的 clash-api 服务里。 */
 	private static final Object API_LOCK = new Object();
-	/* Whether the action bridge wants `data` as a JSON STRING (FlClash's shape)
-	   or as an inline JSON object: -1 unknown, 1 string, 0 object. Decided once,
-	   empirically, by apiActionRaw - see the note there. */
+	/* 动作桥要的 `data` 是**字符串形式的 JSON**（FlClash 那种形状）还是内联的 JSON
+	   对象：-1 未知、1 字符串、0 对象。由 apiActionRaw 实测一次后定下来 ——
+	   见那里的说明。 */
 	private static volatile int dataAsString = -1;
-	/* Serialises that one-shot decision (see apiActionRaw). */
+	/* 串行化那个"只决定一次"的过程（见 apiActionRaw）。 */
 	private static final Object DETECT_LOCK = new Object();
-	/* Latest /connections snapshot fetched by accumulateProxy() on statsThread
-	   (kept for in-process callers). */
+	/* accumulateProxy() 在 statsThread 上抓到的**最新** /connections 快照
+	   （留给进程内的调用方用）。 */
 	private volatile String connSnapshot = null;
-	/* Compact form of that snapshot, published to SharedPreferences so the
-	   connections screen - which runs in the MAIN process and cannot reach the
-	   bridge or sInstance - can read it cross-process. Capped and only
-	   rewritten when it actually changed. */
+	/* 那份快照的**紧凑形式**，发布到 SharedPreferences，好让「连接」页跨进程读到它 ——
+	   那个页面跑在**主进程**，够不到桥，也拿不到 sInstance。有长度上限，
+	   而且只在内容真的变化时才重写。 */
 	private static final int MAX_CONN_SNAPSHOT = 200;
 	private volatile String lastConnSnapshotJson = "";
 
-	/* === In-process control bridge ============================================
-	   libmihomo-android v0.3.3's quickSetup brings the mixed-port (7890) up but
-	   often never binds the external-controller (clash-api) HTTP listener on 9090
-	   ("9090 never listens") - even though the profile carries external-controller
-	   + secret. Every REST endpoint (/connections, /proxies, selector switching)
-	   then dies while the tunnel proxies fine. The SDK also exposes the SAME
-	   actions the REST endpoints use through Clash.INSTANCE.invokeAction (the
-	   "action" mechanism): {"id","method","data"} in, ActionResult
-	   {"id","method","data","code"} back. Those run IN-PROCESS and need no HTTP
-	   listener at all, so connections/proxies/traffic are reachable regardless of
-	   9090. We block on the async callback (it fires on a JNI thread, no deadlock). */
+	/* === 进程内的控制桥 ======================================================
+	   libmihomo-android v0.3.3 的 quickSetup 会把 mixed-port（7890）起起来，却常常
+	   根本不绑 external-controller（clash-api）在 9090 上的 HTTP 监听
+	   （"9090 从没监听"）—— 哪怕配置里明明有 external-controller + secret。于是隧道
+	   代理正常，而所有 REST 端点（/connections、/proxies、切选择器）全废。
+	   该 SDK 还通过 Clash.INSTANCE.invokeAction（"action" 机制）暴露了**同一批**动作：
+	   传入 {"id","method","data"}，返回 ActionResult {"id","method","data","code"}。
+	   这些都在**进程内**跑、完全不需要 HTTP 监听，所以无论 9090 如何，连接 / 节点 /
+	   流量都够得到。我们在异步回调上阻塞等待（回调在 JNI 线程上触发，不会死锁）。 */
 	static String apiAction(String method, String data) {
 		return apiAction(method, data, 6000);
 	}
 
-	/* Same, with an explicit callback wait. Some actions legitimately take
-	   longer than the default 6s - the isolated node delay probe runs for its
-	   own `timeout` (up to 30s) - and giving up early used to lose the answer
-	   entirely (the caller then falls back or reports the node untested), so
-	   such callers must extend the wait past the action's own deadline. */
+	/* 同上，但显式指定回调等待时长。有些动作合理地会超过默认的 6 秒 —— 隔离式节点
+	   延迟探测会跑满它自己的 `timeout`（最长 30 秒）—— 过早放弃以前会**完全丢掉**
+	   答案（调用方于是退回兜底或把节点报成未测速），所以这类调用方必须把等待延长到
+	   动作自身期限之后。 */
 	static String apiAction(String method, String data, long waitMs) {
 		String raw = apiActionRaw(method, data, waitMs);
 		if (raw == null)
@@ -1533,47 +1426,40 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* The RAW {"id","method","data","code"} reply, or null when there was no
-	   reply at all. Needed to tell "the core REFUSED these parameters"
-	   (code != 0, e.g. "invalid data type" for a field with the wrong JSON
-	   type) from "no answer" - the convenience wrapper above cannot express
-	   the difference, since both surface as null.
-	   The native action bridge keeps a SINGLE in-flight callback: two
-	   overlapping invokeAction() calls make the earlier result get delivered
-	   to the wrong waiter, so that waiter never wakes and times out with null.
-	   The traffic poll (every 1s) and an Activity's own poll (every 1.5s)
-	   overlap constantly, which is why the connections screen once came back
-	   empty while the background stats saw connections. Serialise here. */
+	/* **原始**的 {"id","method","data","code"} 应答；完全没有应答时为 null。
+	   需要它才能区分"内核**拒绝**了这组参数"（code != 0，例如字段 JSON 类型不对时的
+	   "invalid data type"）和"没有应答" —— 上面那个便利封装表达不了这个区别，
+	   因为两者都表现为 null。
+	   原生动作桥只保留**一个**在途回调：两次重叠的 invokeAction() 会让先到的结果被
+	   投递给错误的等待者，于是那个等待者永远醒不来、最后超时返回 null。流量轮询
+	   （每 1 秒）与某个 Activity 自己的轮询（每 1.5 秒）一直在重叠 —— 这正是"连接页
+	   返回空、而后台统计却看得到连接"的原因。所以在这里串行化。 */
 	static String apiActionRaw(String method, String data, long waitMs) {
 		if (!Clash.INSTANCE.isLoaded())
-		  return null;   /* no core here (e.g. the main process) - not an error */
+		  return null;   /* 本进程没有内核（例如主进程）—— 这不是错误 */
 		if (data == null)
 		  return invokeAction(method, null, false, waitMs);
-		/* How `data` must be carried is NOT documented, and the core validates
-		   the container BEFORE dispatching: the wrong one is answered with
-		   code=-1 "invalid data type". Getting it wrong silently broke EVERY
-		   action that takes parameters - the delay test and node switching -
-		   while the parameterless ones (getConnections / getProxies) kept
-		   working, which is exactly what made this so hard to see. Try the
-		   string form first (what FlClash sends: the core unmarshals the string
-		   itself), fall back to the inline object, and remember the winner. */
+		/* `data` 该怎么携带**没有任何文档**，而内核在分发之前会先校验容器：装错了就回
+		   code=-1 "invalid data type"。装错会**静默地**弄坏**每一个带参数**的动作 ——
+		   延迟测试、切节点 —— 而不带参数的（getConnections / getProxies）照常工作，
+		   这正是它极难被发现的原因。所以先试字符串形式（FlClash 就是这么发的：内核自己
+		   反序列化字符串），失败再退回内联对象，并把成功的那种记住。 */
 		if (dataAsString == 1)
 		  return invokeAction(method, data, true, waitMs);
 		if (dataAsString == 0)
 		  return invokeAction(method, data, false, waitMs);
-		/* Undecided: settle it on ONE thread. This latch is shared by every
-		   probe, and 16 concurrent ones racing it could latch the WRONG form and
-		   then fail at once - the "单个测速能用、测速全部全废" symptom. */
+		/* 还没定：由**单线程**定下来。这个闩锁是所有探测共享的，多个并发探测抢它可能
+		   锁住**错误的**那种形式，然后全体一起失败 —— 也就是"单个测速能用、测速全部
+		   全废"那个现象。 */
 		synchronized (DETECT_LOCK) {
 			if (dataAsString == 1)
 			  return invokeAction(method, data, true, waitMs);
 			if (dataAsString == 0)
 			  return invokeAction(method, data, false, waitMs);
 			String raw = invokeAction(method, data, true, waitMs);
-			/* Only a DEFINITE rejection proves the string form wrong. "No answer
-			   at all" (null) is not evidence: latching the object form on it
-			   would break every later call - including a later SINGLE test -
-			   until the process restarts. */
+			/* 只有**确定的拒绝**才能证明字符串形式不对。"完全没有应答"（null）不是证据：
+			   据此锁死成对象形式会让之后**每一次**调用都失败（包括后来的单节点测试），
+			   直到进程重启。 */
 			if (raw == null || !badDataType(raw)) {
 				if (raw != null) {
 					dataAsString = 1;
@@ -1587,23 +1473,21 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* The core refused the payload container rather than the node. */
+	/* 内核拒绝的是**参数容器**，而不是这个节点。 */
 	private static boolean badDataType(String raw) {
 		return raw != null && raw.contains("invalid data type");
 	}
 
-	/* One bridge call. `asString` carries `data` as a JSON string (the core
-	   unmarshals it) instead of an inline JSON object. Serialised on API_LOCK:
-	   the native action bridge keeps a SINGLE in-flight callback, so
-	   overlapping invokeAction() calls make the earlier result get delivered to
-	   the wrong waiter, which then never wakes and times out with null. */
+	/* 一次桥调用。`asString` 为真时把 `data` 作为 **JSON 字符串**携带（由内核自己
+	   反序列化），而不是内联 JSON 对象。用 API_LOCK 串行化：原生动作桥只保留**一个**
+	   在途回调，重叠的 invokeAction() 会让先到的结果投递给错误的等待者，后者于是永远
+	   醒不来、超时返回 null。 */
 	private static String invokeAction(String method, String data, boolean asString,
 			long waitMs) {
 		synchronized (API_LOCK) {
 			final boolean[] done = { false };
-			/* Kept for the diagnosis log below: "no answer at all" (timeout)
-			   and "the core answered with an error code" are very different
-			   failures, and the return value alone cannot tell them apart. */
+			/* 留给下面的诊断日志用："完全没有应答"（超时）和"内核回了错误码"是两种
+			   很不一样的失败，而只看返回值区分不开。 */
 			final int[] code = { Integer.MIN_VALUE };
 			final String[] raw = { null };
 			try {
@@ -1650,7 +1534,7 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* Short form of a raw bridge reply for the log. */
+	/* 原始桥应答的短形式，给日志用。 */
 	private static String truncate(String s) {
 		if (s == null)
 		  return "null";
@@ -1658,28 +1542,24 @@ public class TProxyService extends VpnService {
 		return s.length() > 200 ? s.substring(0, 200) + "…" : s;
 	}
 
-	/* Mirrors localApi()'s signature but routes through the in-process bridge.
-	   The action's `data` is byte-identical to the REST response body, so callers
-	   parse it exactly as before. Paths we cannot express as an action fall back
-	   to the HTTP listener, leaving behaviour unchanged when 9090 IS up. */
+	/* 签名与 localApi() 一致，但走**进程内桥**。动作返回的 `data` 与 REST 的响应体
+	   逐字节相同，所以调用方照旧解析即可。无法表达成动作的路径会退回 HTTP 监听 ——
+	   这样在 9090 **确实**可用时行为完全不变。 */
 	static ApiResult bridgeApi(String method, String host, int port, String path,
 			String body, String secret) {
 		return bridgeApi(method, host, port, path, body, secret, 6000);
 	}
 
-	/* Same, with an explicit HTTP timeout for the paths that fall through to
-	   the listener - notably /delay, whose reply arrives only after the core's
-	   own probe finishes. */
+	/* 同上，但为那些会**落到 HTTP 监听**的路径显式指定超时 —— 尤其是 /delay，
+	   它的回包要等内核自己的探测跑完才来。 */
 	static ApiResult bridgeApi(String method, String host, int port, String path,
 			String body, String secret, int timeoutMs) {
 		ApiResult r = new ApiResult();
 		r.code = -1;
 		try {
-			/* Each action-mapped path FALLS THROUGH to the HTTP listener when
-			   the in-process bridge returns nothing - which is always the case
-			   in the MAIN process, where the core is not loaded. That is what
-			   makes these calls work from Activities (e.g. the manual latency
-			   test), while the :native process keeps using the bridge. */
+			/* 每个映射成动作的路径，在进程内桥**什么都没返回**时都会**落到** HTTP
+			   监听上 —— 在**主进程**里永远如此，因为那里没有加载内核。正因如此，这些
+			   调用才能从 Activity 里发出（例如手动测速），而 :native 进程继续走桥。 */
 			if ("GET".equals(method) && "/connections".equals(path)) {
 				String d = apiAction("getConnections", null);
 				if (d != null) { r.code = 200; r.body = d; return r; }
@@ -1691,8 +1571,7 @@ public class TProxyService extends VpnService {
 				if (d != null) { r.code = 200; r.body = d; return r; }
 			} else if ("GET".equals(method) && path.startsWith("/proxies/")
 					&& path.indexOf("/delay") > 0) {
-				/* /delay is async in the core and has no bridge action: always
-				   use the HTTP listener. */
+				/* /delay 在内核里是异步的，也没有对应的桥动作：只能走 HTTP 监听。 */
 				return localApi(method, host, port, path, body, secret, timeoutMs);
 			} else if ("GET".equals(method) && path.startsWith("/proxies/")) {
 				String group = path.substring("/proxies/".length());
@@ -1719,9 +1598,8 @@ public class TProxyService extends VpnService {
 		return localApi(method, host, port, path, body, secret, timeoutMs);
 	}
 
-	/* Core reachable via the in-process bridge (no 9090 needed). Used as the
-	   reachability gate so selector/speed-test logic proceeds even when the HTTP
-	   listener never bound. */
+	/* 内核能否通过进程内桥够到（不需要 9090）。用它作为"可达性闸门"，
+	   这样即使 HTTP 监听从没绑上，选择器 / 测速逻辑也能继续往下走。 */
 	static boolean isCoreReachable() {
 		return apiAction("getConnections", null) != null;
 	}
@@ -1740,10 +1618,9 @@ public class TProxyService extends VpnService {
 				bos.write(b);
 			}
 		}
-		/* null = "the stream ended and nothing was read": real EOF, the same
-		   convention ClashApiServer.readLine uses. Returning "" instead made the
-		   callers' null checks dead code and turned "the peer closed without
-		   answering" into an ArrayIndexOutOfBounds on split(" ")[1]. */
+		/* null = "流已结束且什么都没读到"：真正的 EOF，与 ClashApiServer.readLine
+		   的约定一致。以前返回 "" 会让调用方的 null 判断变成死代码，并把
+		   "对端没应答就关了连接"变成 split(" ")[1] 上的数组越界。 */
 		if (b == -1 && bos.size() == 0)
 		  return null;
 		return new String(bos.toByteArray(), StandardCharsets.UTF_8);
@@ -1753,10 +1630,9 @@ public class TProxyService extends VpnService {
 		ApiResult r = localApi("GET", host, MihomoConfig.API_PORT,
 			"/version", null, prefs.getSecret());
 		if (r.code == -1) {
-			/* Word the error by its real cause instead of always blaming the
-			   VPN: a refused connect means the API simply has not bound yet
-			   (warmup), a timeout means the socket was likely captured (or
-			   protect failed), anything else is surfaced verbatim. */
+			/* 按**真实原因**措辞，而不是一律甩锅给 VPN：连接被拒说明 API 还没绑上
+			   （预热中），超时说明 socket 多半被抓走了（或 protect 没生效），
+			   其它情况原样带出来。 */
 			String d = r.error == null ? "" : r.error;
 			if (d.contains("refused") || d.contains("ECONNREFUSED"))
 			  lastControllerError = "控制接口尚未监听（核心预热中，clash-api 还没 bind）";
@@ -1767,14 +1643,13 @@ public class TProxyService extends VpnService {
 			  lastControllerError = "transport error（" + d + "）";
 			return false;
 		}
-		/* 2xx = healthy; 401 = listener up but auth wrong, still reachable. */
+		/* 2xx = 健康；401 = 监听起来了但鉴权不对，仍算**可达**。 */
 		return (r.code >= 200 && r.code < 300) || r.code == 401;
 	}
 
-	/* First non-loopback, non-TUN IPv4 of the device, kept as a fallback in case
-	   the 127.0.0.1 loopback is ever captured by the TUN. The VPN tunnel
-	   interface (tun*) is skipped so we never pick the captured tunnel. Falls
-	   back to 127.0.0.1. */
+	/* 设备上第一个"非回环、非 TUN"的 IPv4，留作兜底 —— 以防 127.0.0.1 回环哪天被 TUN
+	   捕获。VPN 隧道网卡（tun*）会被跳过，免得选中那条被捕获的隧道。
+	   都没有时退回 127.0.0.1。 */
 	private String deviceHost() {
 		try {
 			java.util.Enumeration<java.net.NetworkInterface> en =
@@ -1798,14 +1673,13 @@ public class TProxyService extends VpnService {
 		return "127.0.0.1";
 	}
 
-	/* mihomo's startup/bind lines go to STDOUT (captured in tproxy.log by the
-	   dup2 redirect at startup), NOT to cache/mihomo.log (this build never
-	   creates it) and NOT through setEventListener (which stays silent about
-	   the API). So the clash-api bind failure - e.g. "Failed to start API:
-	   listen tcp 127.0.0.1:9090: bind: ..." - lives in tproxy.log as a raw
-	   line, not as a "mihomo:" event and not as a "corelog:"/"mihomolog:" line.
-	   Dump the tail verbatim AND surface every api/controller/bind line on its
-	   own "rawlog-api:" prefix so the reason is unmissable. */
+	/* mihomo 的启动 / 绑定行走的是 **STDOUT**（启动时由 dup2 重定向抓进 tproxy.log），
+	   **不**写 cache/mihomo.log（这个构建从没创建过它），也**不**经过
+	   setEventListener（它对 API 相关的事一言不发）。所以 clash-api 绑定失败
+	   （例如 "Failed to start API: listen tcp 127.0.0.1:9090: bind: ..."）是以**原始行**
+	   的形式躺在 tproxy.log 里，既不是 "mihomo:" 事件，也不是
+	   "corelog:"/"mihomolog:" 行。这里把尾部原样转储出来，**并且**把所有
+	   api/controller/bind 行单独以 "rawlog-api:" 前缀再报一遍，让原因无法被忽略。 */
 	private void dumpRawLog() {
 		File f = new File(getCacheDir(), "tproxy.log");
 		if (!f.exists()) return;
@@ -1817,10 +1691,10 @@ public class TProxyService extends VpnService {
 			int start = Math.max(0, all.size() - 60);
 			for (int i = start; i < all.size(); i++)
 			  appendLog("rawlog: " + all.get(i));
-			/* Re-scan the WHOLE file for the core's API/controller/bind chatter
-			   and print it under a distinct prefix, so a single decisive line
-			   ("Failed to start API", "listen tcp ... bind: ...", "RESTful API
-			   listening at ...") is not lost among 60 unrelated raw lines. */
+			/* 把**整个文件**再扫一遍，找出内核关于 API / controller / bind 的只言片语，
+			   用专属前缀单独打印 —— 免得那一句决定性的行（"Failed to start API"、
+			   "listen tcp ... bind: ..."、"RESTful API listening at ..."）
+			   淹没在 60 行无关的原始日志里。 */
 			java.util.Set<String> seen = new java.util.LinkedHashSet<String>();
 			for (String l : all) {
 				String low = l.toLowerCase();
@@ -1839,9 +1713,8 @@ public class TProxyService extends VpnService {
 	}
 
 	private void dumpControllerLog() {
-		/* mihomo writes its startup/bind lines to the file named by log.file
-		   (cache/mihomo.log), not to tproxy.log - read that first so a silent
-		   controller bind failure actually shows up. */
+		/* mihomo 把启动 / 绑定行写进 log.file 指定的文件（cache/mihomo.log），
+		   而不是 tproxy.log —— 所以先读它，好让控制接口"静默绑定失败"真的现形。 */
 		boolean found = dumpLog(new File(getCacheDir(), "mihomo.log"));
 		if (!found)
 		  dumpLog(new File(getCacheDir(), "tproxy.log"));
@@ -1866,9 +1739,9 @@ public class TProxyService extends VpnService {
 		return shown > 0;
 	}
 
-	/* mihomo writes its own log (incl. clash-api start/bind lines and any panic)
-	   to <cacheDir>/mihomo.log once the config sets log.file. Surface the lines
-	   that explain why the control API never came up. */
+	/* 一旦配置里设了 log.file，mihomo 就把自己的日志（含 clash-api 的启动 / 绑定行、
+	   以及任何 panic）写进 <cacheDir>/mihomo.log。这里把能解释"控制接口为何起不来"的
+	   行挑出来。 */
 	private void dumpMihomoLog() {
 		File f = new File(getCacheDir(), "mihomo.log");
 		if (!f.exists()) {
@@ -1891,10 +1764,9 @@ public class TProxyService extends VpnService {
 					shown++;
 				}
 			}
-			/* Always surface the tail verbatim: the filtered view above can be
-			   empty even when the core logged a plain "Started API server" or a
-			   startup line, and that line is the missing clue for why 9090 did
-			   or didn't come up. */
+			/* 尾部始终原样输出：上面那个"筛选视图"可能是空的，即使内核确实打了
+			   "Started API server" 之类的启动行 —— 而那一行恰恰是判断 9090 到底有没有
+			   起来的**缺失线索**。 */
 			int from = Math.max(0, all.size() - 30);
 			appendLog("mihomolog-tail: 末尾 " + (all.size() - from) + " 行（共 " + all.size() + " 行）");
 			for (int i = from; i < all.size(); i++)
@@ -1906,14 +1778,12 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* FlClash-style real reachability WITHOUT the control API: drive a request
-	   through the core's own local mixed-port (127.0.0.1:<proxyPort>) so the
-	   bytes actually leave via the selected node and come back. Semantics match
-	   Clash's own /delay test - getting *any* HTTP response from the proxy means
-	   the node pipeline is alive (tunnel up); a 5xx only means the chosen test
-	   target is blocked at the node's egress, not that the proxy is dead. So a
-	   response => 可达/可用 with measured latency; only a connection-level
-	   failure (no response at all) => 不可用. */
+	/* FlClash 式的真实连通性检查，**不依赖控制接口**：把请求打进内核自己的本地
+	   mixed-port（127.0.0.1:<代理端口>），让字节真的从选中节点出去再回来。语义与
+	   Clash 自己的 /delay 一致 —— 从代理拿到**任何** HTTP 响应就说明节点管线是活的
+	   （隧道已通）；5xx 只说明所选测试目标被节点出口拦了，并不代表代理死了。
+	   所以：有响应 => 可达/可用，并带实测延迟；只有**连接级**失败（完全没有响应）
+	   才 => 不可用。 */
 	private void testProxyConnectivity(Preferences prefs) {
 		final int port = prefs.getProxyPort();
 		new Thread(() -> {
@@ -1971,9 +1841,8 @@ public class TProxyService extends VpnService {
 		return new int[] { -1, -1 };
 	}
 
-	/* Send an absolute-form GET to the local mixed-port acting as an HTTP proxy,
-	   over a socket that bypasses the VPN (otherwise the app's own socket is
-	   captured by the tunnel). Returns the proxy's response code and rtt. */
+	/* 向充当 HTTP 代理的本地 mixed-port 发一个 **absolute-form** 的 GET，走的是绕过
+	   VPN 的 socket（否则 App 自己的 socket 会被隧道抓走）。返回代理的响应码与 rtt。 */
 	static ApiResult proxyFetch(int port, String url) {
 		ApiResult r = new ApiResult();
 		long t0 = System.currentTimeMillis();
@@ -1997,7 +1866,7 @@ public class TProxyService extends VpnService {
 				try { r.code = Integer.parseInt(status.split(" ")[1]); } catch (Throwable ignore) {}
 			}
 			byte[] buf = new byte[2048];
-			while (is.read(buf) != -1) ; /* drain body */
+			while (is.read(buf) != -1) ; /* 把 body 读完丢掉 */
 		} catch (Throwable e) {
 			r.code = -1;
 		} finally {
@@ -2007,19 +1876,16 @@ public class TProxyService extends VpnService {
 		return r;
 	}
 
-	/* Trailing " (N)" de-duplication suffix the config may have added when two
-	   subscriptions shipped the same node label. Compiled once: resolveMember
-	   compares it against every member of the group. */
+	/* 配置在两份订阅带了同一个节点名时可能补上的 " (N)" 去重后缀。只编译一次：
+	   resolveMember 要拿它跟组里**每个**成员比对。 */
 	private static final Pattern DEDUP_SUFFIX = Pattern.compile(" \\(\\d+\\)$");
 
 	private static String dedupBase(String name) {
 		return name == null ? "" : DEDUP_SUFFIX.matcher(name).replaceAll("");
 	}
 
-	/* Resolve `wanted` to a real member name of `group`, tolerating the
-	   trailing " (N)" de-duplication suffix the config may have added when two
-	   subscriptions shipped the same node label. Returns null when the group
-	   cannot be read. */
+	/* 把 `wanted` 解析成 `group` 里真实存在的成员名，并容忍配置可能补上的
+	   " (N)" 去重后缀（两份订阅带了同一个节点名时会出现）。组读不到时返回 null。 */
 	private String resolveMember(String group, String wanted) throws IOException {
 		ApiResult r = bridgeApi("GET", apiHost, MihomoConfig.API_PORT,
 			"/proxies/" + encodePath(group), null, prefs.getSecret());
@@ -2043,7 +1909,7 @@ public class TProxyService extends VpnService {
 		return fallback;
 	}
 
-	/* PUT /proxies/{group} {"name": proxy} to move the selector. */
+	/* PUT /proxies/{group} {"name": proxy}，用来移动选择器。 */
 	private int putSelector(String group, String proxy) throws IOException {
 		ApiResult r = bridgeApi("PUT", apiHost, MihomoConfig.API_PORT,
 			"/proxies/" + encodePath(group),
@@ -2089,16 +1955,14 @@ public class TProxyService extends VpnService {
 	}
 
 	public void stopService() {
-		/* Tell every long-running helper thread to wind down (selector retries,
-		   controller polls, the reachability probe, the delayed clash-api kick):
-		   they otherwise keep working - and keep this Service alive - for up to
-		   minutes after the tunnel is gone. */
+		/* 通知所有长时间运行的辅助线程收工（选择器重试、控制器轮询、连通性探测、
+		   延迟启动 clash-api）：否则它们会在隧道消失之后还继续干活、还占着这个 Service，
+		   最长可达好几分钟。 */
 		tunnelStopping = true;
 		if (tunFd == null) {
-			/* Already down, but the service itself was still STARTED (a
-			   DISCONNECT while disconnected, or a revoke after a failed start):
-			   release it here, otherwise it lingers as a live service with
-			   sInstance set and nothing to do. */
+			/* 隧道已经断了，但**服务本身**还是启动状态（未连接时又收到 DISCONNECT，
+			   或启动失败后被 revoke）：这里要把它释放掉，否则它会一直以"sInstance
+			   还在、却无事可做"的活服务形式挂着。 */
 			stopStats();
 			stopEmbeddedApi();
 			new Preferences(this).setEnable(false);
@@ -2108,20 +1972,20 @@ public class TProxyService extends VpnService {
 			return;
 		}
 
-		/* Flush the traffic counters before the tunnel goes away. */
+		/* 赶在隧道消失之前把流量计数落盘。 */
 		stopStats();
 		stopEmbeddedApi();
 
 		Preferences p = new Preferences(this);
 		p.setEnable(false);
-		/* The recorded node belongs to the tunnel that has just been torn down:
-		   keeping it would make the UI show a node that is no longer in use. */
+		/* 记录下来的节点属于**刚刚被拆掉**的那条隧道：留着它会让界面显示一个已经
+		   不再使用的节点。 */
 		p.setActiveNode("");
 		QSTileService.requestUpdate(this);
 
 		stopForeground(true);
 
-		/* Tear the tunnel down before releasing the fd. */
+		/* 先拆隧道，再释放 fd。 */
 		try {
 			Clash.INSTANCE.stopTun();
 		} catch (Throwable e) {
@@ -2136,14 +2000,12 @@ public class TProxyService extends VpnService {
 		stopSelf();
 	}
 
-	/* Tear the live tunnel down and bring it straight back up, as a single
-	   onStartCommand action. Used when a setting that only applies at
-	   establish() time changes while connected (per-app scope, global mode).
-	   Sending DISCONNECT then CONNECT as two separate intents races: the
-	   CONNECT can reach onStartCommand while the DISCONNECT's stopSelf() is
-	   still pending, and the freshly built tunnel gets destroyed with it -
-	   which is exactly why "configure per-app, and the tunnel never came
-	   back up". Here we stop the old fd WITHOUT stopSelf, then rebuild. */
+	/* 把在跑的隧道拆掉并立刻重来，作为 onStartCommand 的**单个**动作。用于"仅在
+	   establish() 时生效"的设置（按应用范围、全局模式）在连接状态下被改动时。
+	   分两条 intent 发 DISCONNECT + CONNECT 会有竞态：CONNECT 可能已经进
+	   onStartCommand，而 DISCONNECT 的 stopSelf() 还在排队，于是刚建好的隧道被它一起
+	   拆掉 —— 这正是"改了按应用分流，隧道就再也起不来了"的原因。这里**不调用**
+	   stopSelf，只停掉旧 fd，然后重建。 */
 	private void rebuildTunnel() {
 		if (tunFd != null) {
 			stopStats();
@@ -2163,21 +2025,26 @@ public class TProxyService extends VpnService {
 		}
 	}
 
+	/* 通知栏每秒都会重建，所以调用方可以把自己已经算好的"实时"行传进来，
+	   省掉一次重复的 statsLine 构造。 */
 	private Notification buildNotification() {
+		return buildNotification(null);
+	}
+
+	private Notification buildNotification(String precomputedLine) {
 		/* 实时/会话/总展示隧道总流量（取自 getTotalTraffic，独立于 9090）。代理
 		   专属统计依赖 /connections，控制接口不可用时为 0，会显得“流量不动”。 */
-		String line = statsLine(R.string.stats_realtime,
-			formatRate(txRate), formatRate(rxRate));
+		String line = precomputedLine != null ? precomputedLine
+			: statsLine(R.string.stats_realtime, formatRate(txRate), formatRate(rxRate));
 		String big = line + "\n" +
 			statsLine(R.string.stats_session,
 				formatBytes(sessionTx), formatBytes(sessionRx)) + "\n" +
 			statsLine(R.string.stats_total,
 				formatBytes(totalTx), formatBytes(totalRx));
 
-		/* The node goes into the title, where a long name is simply ellipsized,
-		   so the live rates below can never be pushed out of the notification.
-		   statsPrefs is still null for the very first notification (it is set
-		   by startStats), hence the fallback. */
+		/* 节点名放在**标题**里 —— 名字长了最多被省略号截断 —— 这样下面的实时速率
+		   永远不会被挤出通知之外。第一条通知时 statsPrefs 还是 null（它由
+		   startStats 设置），所以要有兜底。 */
 		Preferences p = (statsPrefs != null) ? statsPrefs : new Preferences(this);
 		String node = p.getCurrentNode();
 		if (node.isEmpty())
@@ -2186,12 +2053,20 @@ public class TProxyService extends VpnService {
 		String bigText = getString(R.string.notify_node, node)
 			+ (proxyTestStatus.isEmpty() ? "" : ("\n" + proxyTestStatus)) + "\n" + big;
 
-		Intent i = new Intent(this, MainActivity.class);
-		i.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-		PendingIntent pi = PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE);
-
-		Intent stop = new Intent(this, TProxyService.class).setAction(ACTION_DISCONNECT);
-		PendingIntent psi = PendingIntent.getService(this, 0, stop, PendingIntent.FLAG_IMMUTABLE);
+		/* 两个 PendingIntent 的内容永不改变，而 getActivity/getService 每次都要走
+		   Binder；通知每秒重建，缓存下来就省掉了每秒两次跨进程调用。
+		   （并发时最多重复创建一次，内容相同，无副作用。） */
+		PendingIntent pi = notifyContentPi;
+		PendingIntent psi = notifyStopPi;
+		if (pi == null || psi == null) {
+			Intent i = new Intent(this, MainActivity.class);
+			i.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+			pi = PendingIntent.getActivity(this, 0, i, PendingIntent.FLAG_IMMUTABLE);
+			Intent stop = new Intent(this, TProxyService.class).setAction(ACTION_DISCONNECT);
+			psi = PendingIntent.getService(this, 0, stop, PendingIntent.FLAG_IMMUTABLE);
+			notifyContentPi = pi;
+			notifyStopPi = psi;
+		}
 
 		return new NotificationCompat.Builder(this, NOTIFY_CHANNEL)
 			.setContentTitle(node)
@@ -2211,11 +2086,10 @@ public class TProxyService extends VpnService {
 		return getString(R.string.stats_line, getString(labelId), up, down);
 	}
 
-	/* Host our own loopback HTTP control API (the "clash-api"). libmihomo is a
-	   JNI-first library and never binds external-controller itself, so nothing
-	   would listen on the API port otherwise: a browser could not reach
-	   127.0.0.1:<API_PORT>, and the app's REST paths (the latency test)
-	   would fail. ClashApiServer translates REST -> in-process bridge. */
+	/* 自己托管一个回环的 HTTP 控制接口（也就是 "clash-api"）。libmihomo 是 JNI 优先的
+	   库，自己从不绑 external-controller，所以否则 API 端口上根本没人监听：浏览器连
+	   127.0.0.1:<API_PORT> 连不上，App 走 REST 的路径（延迟测试）也会失败。
+	   ClashApiServer 负责把 REST 翻译成进程内桥调用。 */
 	private void startEmbeddedApi() {
 		try {
 			if (clashApiServer != null)
@@ -2225,10 +2099,9 @@ public class TProxyService extends VpnService {
 			  appendLog("clash-api: 内嵌控制接口已监听 127.0.0.1:" + MihomoConfig.API_PORT
 				+ "（浏览器打开 http://127.0.0.1:" + MihomoConfig.API_PORT + "/ 可见）");
 			else {
-				/* start() may have failed BEFORE or AFTER binding: stop() closes
-				   the listener and shuts the worker pool in both cases, whereas
-				   dropping the reference (the old code) leaked whichever half
-				   had been created. */
+				/* start() 可能在**绑定前**也可能在**绑定后**失败：两种情况下 stop()
+				   都能关掉监听并停掉工作线程池；而单纯丢掉引用（旧代码的做法）会把已经
+				   创建出来的那一半泄漏掉。 */
 				clashApiServer.stop();
 				clashApiServer = null;
 				appendLog("clash-api: 无法监听 127.0.0.1:" + MihomoConfig.API_PORT
@@ -2247,7 +2120,7 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* Poll mihomo's traffic counters once a second. */
+	/* 每秒轮询一次 mihomo 的流量计数。 */
 	private void startStats(Preferences prefs) {
 		statsPrefs = prefs;
 		baseTx = prefs.getTotalTx();
@@ -2277,8 +2150,7 @@ public class TProxyService extends VpnService {
 			proxyBaseTx, proxyBaseRx, 0, 0, 0, 0);
 		prefs.setAppStats(snapshotApps(this, prefs), prefs.getAppTotal());
 
-		/* Run the sampler on a dedicated background thread: it performs a
-		   synchronous httpGet() to the core, which the main thread forbids. */
+		/* 采样器跑在专属后台线程上：它会对内核做同步 httpGet()，而主线程是禁止的。 */
 		if (statsThread != null) {
 			statsThread.quitSafely();
 			statsThread = null;
@@ -2302,10 +2174,8 @@ public class TProxyService extends VpnService {
 		long dt = now - lastTime;
 		lastTime = now;
 
-		/* These must come from the since-the-core-started total. getTraffic()
-		   only carries the last second's delta, so treating it as a running
-		   total makes both the rate (a delta of a delta) and the session
-		   figure meaningless. */
+		/* 这两个值必须取自**内核启动至今的累计量**。getTraffic() 只带最近一秒的增量，
+		   把它当累计量用，会让速率（增量的增量）和会话统计都失去意义。 */
 		long tx = -1, rx = -1;
 		String raw = null;
 		Throwable error = null;
@@ -2317,8 +2187,7 @@ public class TProxyService extends VpnService {
 			error = e;
 		}
 		if (tx < 0 || rx < 0) {
-			/* Fall back to the delta counter, for a bridge that has no
-			   total one. */
+			/* 退回到"增量计数器"，以兼容没有累计量的桥。 */
 			try {
 				String s = Clash.INSTANCE.getTraffic();
 				if (s != null) {
@@ -2338,17 +2207,16 @@ public class TProxyService extends VpnService {
 
 		if (tx >= 0 && rx >= 0) {
 			if (!trafficPrimed) {
-				/* First valid sample: establish baselines so the very first
-				   rate is not "the whole core cumulative in one tick" (which
-				   shows a bogus 9G/s spike) and the session total is not the
-				   whole core cumulative. */
+				/* 第一个有效样本：先定基准，免得第一个速率变成"在一拍里把内核全部
+				   累计量都算上"（那会显示一个假的 9G/s 尖峰），会话总量也不会等于内核
+				   的全部累计量。 */
 				lastTx = tx; lastRx = rx;
 				sessionBaseTx = tx; sessionBaseRx = rx;
 				trafficPrimed = true;
 				sessionTx = 0; sessionRx = 0;
 			} else if (rx < lastRx || tx < lastTx) {
-				/* Core counter reset (config reload / core restart): re-baseline
-				   instead of emitting a negative-delta spike. */
+				/* 内核计数被重置（重载配置 / 内核重启）：重新定基准，
+				   而不是算出一个负增量的尖峰。 */
 				lastTx = tx; lastRx = rx;
 				sessionBaseTx = tx; sessionBaseRx = rx;
 				sessionTx = 0; sessionRx = 0;
@@ -2372,19 +2240,16 @@ public class TProxyService extends VpnService {
 
 		saveAllStats();
 
-		/* Re-read which node the core is really using every ~30s: in auto mode
-		   the core's own health check moves the selector by itself, so the
-		   home page / notification would otherwise keep showing the first
-		   node forever. */
+		/* 每约 30 秒重新读一次"内核真正在用哪个节点"：自动模式下内核自己的健康检查就会
+		   移动选择器，否则首页 / 通知栏会永远停在最初那个节点上。 */
 		if (++nodeSyncTick >= 30) {
 			nodeSyncTick = 0;
 			syncActiveNode(MihomoConfig.GROUP);
 		}
 	}
 
-	/* A stuck traffic counter is invisible from the UI - it just keeps
-	   showing 0 - so record what the core actually returned. The first few
-	   samples plus one a minute, otherwise the log floods. */
+	/* 流量计数卡住时，从界面上是看不出来的（它就一直显示 0），所以把内核实际返回的内容
+	   记下来。只记最初几个样本，之后每分钟一条，否则日志会被刷爆。 */
 	private void logTraffic(String raw, long tx, long rx, Throwable error) {
 		trafficSamples++;
 		if (error != null) {
@@ -2396,10 +2261,9 @@ public class TProxyService extends VpnService {
 		  appendLog("traffic: raw=" + raw + " tx=" + tx + " rx=" + rx);
 	}
 
-	/* key -> compiled pattern. jsonBytes runs on the 1s stats heartbeat (2-4
-	   calls per tick) and Pattern.compile is by far the most expensive part of
-	   a regex match, so the compiled form is cached per key instead of being
-	   rebuilt on every sample. */
+	/* 键 -> 已编译正则。jsonBytes 跑在 1 秒一次的统计心跳上（每拍 2~4 次调用），而
+	   Pattern.compile 是正则匹配里**最贵**的一步，所以按键缓存编译结果，
+	   而不是每次采样都重新编译。 */
 	private static final Map<String, Pattern> JSON_PATTERNS =
 		new java.util.concurrent.ConcurrentHashMap<String, Pattern>();
 
@@ -2412,8 +2276,8 @@ public class TProxyService extends VpnService {
 		return p;
 	}
 
-	/* mihomo reports the running totals as uploadTotal/downloadTotal and the
-	   per-second deltas as up/down; accept every spelling seen in the wild. */
+	/* mihomo 把累计量报成 uploadTotal/downloadTotal，把每秒增量报成 up/down；
+	   这里把见过的各种写法都接受。 */
 	private static long jsonBytes(String json, String... keys) {
 		if (json == null)
 		  return -1;
@@ -2428,19 +2292,17 @@ public class TProxyService extends VpnService {
 		return -1;
 	}
 
-	/* Pull the core's connection list and add up what actually went through a
-	   node. Only the deltas are counted, so a connection that stays open keeps
-	   contributing as it transfers. */
+	/* 拉取内核的连接列表，把**确实经过节点**的流量累加起来。只累加增量，
+	   所以一条长连接会在传输过程中持续贡献。 */
 	private void accumulateProxy() {
-		/* Read the connection snapshot through the in-process bridge (apiAction
-		   "getConnections" == statistic.DefaultManager.Snapshot()) - it needs no
-		   HTTP listener, so proxy-only traffic/conns stay accurate even when the
-		   clash-api (9090) never binds. The snapshot JSON is the same shape as the
-		   REST /connections body, so everything below parses unchanged. */
+		/* 通过进程内桥读连接快照（apiAction "getConnections" ==
+		   statistic.DefaultManager.Snapshot()）—— 它不需要 HTTP 监听，所以即使
+		   clash-api（9090）从没绑上，"代理专属"的流量与连接数也依然准确。快照 JSON 与
+		   REST /connections 的响应体形状相同，所以下面所有解析代码都不用改。 */
 		String body = apiAction("getConnections", null);
 		if (body == null) {
-			/* Core still warming up, or bridge error. Count quietly and say once;
-			   total traffic (getTotalTraffic) is unaffected. */
+			/* 内核还在预热，或桥出错了。静默计数、只提示一次；
+			   总流量（getTotalTraffic）不受影响。 */
 			connFailStreak++;
 			if (connFailStreak == 5)
 			  appendLog("流量统计：无法读取连接快照（in-process 桥 getConnections 不可用，"
@@ -2450,8 +2312,8 @@ public class TProxyService extends VpnService {
 		if (connFailStreak >= 5)
 		  appendLog("流量统计：/connections 已恢复");
 		connFailStreak = 0;
-		/* Publish this snapshot so the connections screen can show it without
-		   making its own (competing) bridge call. */
+		/* 把这份快照发布出去，好让「连接」页直接展示，而不必自己再发一次（会互相抢的）
+		   桥调用。 */
 		connSnapshot = body;
 		try {
 			JSONObject root = new JSONObject(body);
@@ -2459,9 +2321,8 @@ public class TProxyService extends VpnService {
 			if (arr == null)
 			  return;
 
-			/* Hand the live list to the main-process connections screen. It
-			   cannot read the bridge / sInstance (different process), so this
-			   is the only channel; it is written only when the list changed. */
+			/* 把实时列表交给主进程的「连接」页。它读不到桥、也读不到 sInstance
+			   （不同进程），所以这是唯一通道；只有列表变化时才会写入。 */
 			publishConnSnapshot(arr);
 
 			Set<String> alive = new HashSet<String>();
@@ -2483,8 +2344,7 @@ public class TProxyService extends VpnService {
 				long down = c.optLong("download");
 				long[] prev = connSeen.get(id);
 				if (prev == null) {
-					/* First sighting: it already moved this much before we
-					   noticed it. */
+					/* 第一次看到它：在我们注意到之前，它就已经搬了这么多。 */
 					proxySessionTx += up;
 					proxySessionRx += down;
 				} else {
@@ -2495,9 +2355,9 @@ public class TProxyService extends VpnService {
 				}
 				connSeen.put(id, new long[] { up, down });
 				}
-				/* A connection missing from this poll has closed: record it as a recent
-				request (where it went, which rule/chain, how much it moved, how long
-				it lasted) so history survives past the live view. */
+				/* 这一轮里消失的连接就是已经关闭了：把它记成一条"最近请求"
+				   （去了哪、走了哪条规则/链路、搬了多少、持续了多久），
+				   这样历史记录能留存下来，而不只活在实时列表里。 */
 				if (!connInfo.isEmpty()) {
 				long endMs = SystemClock.elapsedRealtime();
 				Iterator<String> it = connInfo.keySet().iterator();
@@ -2530,11 +2390,10 @@ public class TProxyService extends VpnService {
 					flushRecentRequests(endMs);
 				}
 				}
-				/* Drop finished connections so the map cannot grow forever. */
+				/* 清掉已结束的连接，免得这个 map 无限膨胀。 */
 				connSeen.keySet().retainAll(alive);
-			/* A zero proxy count while traffic is clearly flowing usually means
-			   the filter is wrong (field name, or every connection routed
-			   DIRECT) - make it visible instead of a silent blank counter. */
+			/* 流量明明在跑、代理连接数却是 0，通常说明筛选条件不对（字段名变了，
+			   或者所有连接都走了 DIRECT）—— 要让它可见，而不是一个无声的空白计数。 */
 			if (trafficSamples <= 3 || (trafficSamples % 60) == 0)
 			  appendLog("流量统计：活跃连接=" + arr.length()
 				+ " 代理连接=" + proxyConnCount
@@ -2544,7 +2403,7 @@ public class TProxyService extends VpnService {
 			long dt = now - lastProxyTime;
 			lastProxyTime = now;
 			if (!proxyPrimed) {
-				/* First valid sample primes baselines; no bogus rate spike. */
+				/* 第一个有效样本用来定基准；不会冒出假的速率尖峰。 */
 				proxyPrimed = true;
 				lastProxyTx = proxySessionTx;
 				lastProxyRx = proxySessionRx;
@@ -2555,9 +2414,8 @@ public class TProxyService extends VpnService {
 				lastProxyRx = proxySessionRx;
 			}
 		} catch (Exception e) {
-			/* A parse failure here silently froze "代理专属流量/连接数" at 0
-			   without a word - the exact shape of the old "stats always 0"
-			   bug. Say it once per streak. */
+			/* 这里解析失败会**不声不响地**把"代理专属流量/连接数"冻在 0 —— 这正是当年
+			   "统计永远是 0"那个 bug 的样子。所以每连续失败一串就提示一次。 */
 			proxyParseFails++;
 			if (proxyParseFails == 5)
 			  appendLog("流量统计：解析连接快照失败 " + e
@@ -2565,8 +2423,8 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* Remember a connection's metadata the first time we see it, then keep its
-	   last counters current; this drives the recent-requests history. */
+	/* 第一次见到某条连接时记住它的元信息，之后持续更新它的最新计数；
+	   "最近请求"历史就是靠这个维护的。 */
 	private void recordConnInfo(String id, JSONObject c) {
 		ConnInfo info = connInfo.get(id);
 		long up = c.optLong("upload");
@@ -2614,9 +2472,8 @@ public class TProxyService extends VpnService {
 		JSONObject meta = c.optJSONObject("metadata");
 		return meta != null ? meta.optString("process", "") : "";
 	}
-	/* Build a compact, capped snapshot of the live connections and publish it
-	   to SharedPreferences for the main-process connections screen. Only
-	   rewritten when the content changed, so an idle list costs nothing. */
+	/* 给活动连接生成一份**紧凑且有上限**的快照，发布到 SharedPreferences 供主进程的
+	   「连接」页读取。只有内容变化时才重写，所以列表空闲时没有任何开销。 */
 	private void publishConnSnapshot(JSONArray arr) {
 		try {
 			JSONArray out = new JSONArray();
@@ -2643,7 +2500,7 @@ public class TProxyService extends VpnService {
 		} catch (Throwable ignore) {
 		}
 	}
-	/* "<rule>(<payload>) · <chain>": the one-line "why + where" of a row. */
+	/* "<规则>(<参数>) · <链路>"：一行说明这行的"为什么 + 去了哪"。 */
 	private static String connRoute(JSONObject c) {
 		StringBuilder sb = new StringBuilder();
 		String rule = c.optString("rule", "");
@@ -2662,17 +2519,15 @@ public class TProxyService extends VpnService {
 		return sb.toString();
 	}
 
-	/* Serialize the recent-requests history to Preferences, throttled so we are
-	   not writing to disk on every poll. */
+	/* 把"最近请求"历史序列化进 Preferences，并做节流，避免每轮询一次就写一次磁盘。 */
 	private void flushRecentRequests(long now) {
 		Preferences sp = statsPrefs;
 		if (sp == null)
 		  return;
-		/* Snapshot under the lock, serialize OUTSIDE it: the list is also
-		   touched by the UI thread (clearRecentRequests) and a shared iterator
-		   over a plain ArrayList was a ConcurrentModificationException waiting
-		   to happen - while holding the lock across the disk write would block
-		   the UI's 清空 action for the whole write. */
+		/* **在锁内**取快照、**在锁外**序列化：这个列表也会被 UI 线程碰到
+		   （clearRecentRequests），而对一个普通 ArrayList 共享迭代器迟早会抛
+		   ConcurrentModificationException；反过来，把锁一直held到磁盘写完，
+		   又会把 UI 的"清空"操作卡住整个写入过程。 */
 		List<RecentRequest> snapshot;
 		synchronized (recentRequests) {
 			if (now - lastRecentFlush < 2000 && recentRequests.size() < 20)
@@ -2696,13 +2551,13 @@ public class TProxyService extends VpnService {
 			} catch (Exception e) {
 			}
 		}
-		/* Use the non-null snapshot taken above: stopStats() may have cleared the
-		   field while this flush was serializing. */
+		/* 用上面取到的那个非空快照：本次落盘序列化期间，stopStats() 可能已经把字段
+		   清掉了。 */
 		sp.setRecentRequests(arr.toString());
 	}
 	private void loadRecentRequests() {
-		/* Called from startStats (main thread) while a previous pass may still
-		   have a flush in flight: same lock as every other access. */
+		/* 由 startStats（主线程）调用，而上一轮可能还有一次落盘在途：
+		   所以与其它所有访问用同一把锁。 */
 		synchronized (recentRequests) {
 			recentRequests.clear();
 		}
@@ -2733,11 +2588,10 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* An empty chain, or a DIRECT hop in it, means the request never reached a
-	   proxy node. mihomo has exposed the proxy path as both "chains" (array) and
-	   "chain" (single string) across builds, so accept either spelling -
-	   otherwise a field-name mismatch makes every connection look direct and the
-	   proxied counters stay at zero. */
+	/* 链路为空、或者其中有一跳是 DIRECT，就说明这个请求从没经过代理节点。mihomo 在不同
+	   构建里把代理路径暴露成 "chains"（数组）或 "chain"（单个字符串）两种形式，所以
+	   两种写法都接受 —— 否则字段名对不上会让**每条**连接都显得是直连，
+	   代理计数就会一直是 0。 */
 	private static boolean isDirectConnection(JSONObject c) {
 		JSONArray chains = c.optJSONArray("chains");
 		if (chains == null) {
@@ -2756,7 +2610,7 @@ public class TProxyService extends VpnService {
 		return false;
 	}
 
-	/* Only re-post the notification when the shown text really changed. */
+	/* 只有显示文本真的变了才重新贴通知。 */
 	private void updateNotification() {
 		String line = statsLine(R.string.stats_realtime,
 			formatRate(txRate), formatRate(rxRate));
@@ -2765,12 +2619,11 @@ public class TProxyService extends VpnService {
 		lastNotifyText = line;
 		NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
 		if (nm != null)
-		  nm.notify(NOTIFY_ID, buildNotification());
+		  nm.notify(NOTIFY_ID, buildNotification(line));
 	}
 
-	/* Publish BOTH counter sets in one preferences write (they are displayed
-	   side by side, and this runs every second - two commits meant two full
-	   file writes per tick). */
+	/* 两套计数**一次**写进 preferences（它们是并排显示的，而这段每秒都跑 ——
+	   分两次 commit 就是每拍写两遍完整文件）。 */
 	private void saveAllStats() {
 		Preferences sp = statsPrefs;
 		if (sp != null)
@@ -2797,7 +2650,7 @@ public class TProxyService extends VpnService {
 		}
 	}
 
-	/* Current value of the per-app byte counters (device-wide, since boot). */
+	/* 按应用的字节计数**当前值**（设备级、自开机起累计）。 */
 	private static String snapshotApps(Context context, Preferences prefs) {
 		Map<String, long[]> map = new HashMap<String, long[]>();
 		PackageManager pm = context.getPackageManager();
@@ -2812,7 +2665,7 @@ public class TProxyService extends VpnService {
 		return Preferences.formatAppStats(map);
 	}
 
-	/* Fold the usage of this session into the per-app totals. */
+	/* 把本次会话的用量折算进"按应用累计"里。 */
 	private static void accumulateApps(Context context, Preferences prefs) {
 		Map<String, long[]> base = Preferences.parseAppStats(prefs.getAppBase());
 		Map<String, long[]> now = Preferences.parseAppStats(snapshotApps(context, prefs));
@@ -2850,10 +2703,9 @@ public class TProxyService extends VpnService {
 		if (bytes < 1024)
 		  return bytes + " B";
 		double value = bytes;
-		/* unit starts at -1 because the FIRST division already turns bytes into
-		   KB, so the result must land on BYTE_UNITS[0]. Starting from 0 (and
-		   incrementing before use) shifted EVERY value one unit up: 100 KB came
-		   out as "100.0 MB", 3.7 MB as "3.7 GB", and so on. */
+		/* unit 从 -1 开始，因为**第一次**除法就已经把字节变成 KB，结果必须落在
+		   BYTE_UNITS[0] 上。从 0 开始（并且先自增再使用）会把**每个**值都顶高一档：
+		   100 KB 显示成 "100.0 MB"、3.7 MB 显示成 "3.7 GB"，依此类推。 */
 		int unit = -1;
 		while (value >= 1024 && unit < BYTE_UNITS.length - 1) {
 			value /= 1024;
@@ -2861,22 +2713,29 @@ public class TProxyService extends VpnService {
 		}
 		if (unit < 0)
 		  unit = 0;
-		return String.format(Locale.US, value < 10 ? "%.2f %s" : "%.1f %s", value,
-			BYTE_UNITS[unit]);
+		/* 手写定点格式化，不用 String.format：后者每次都要新建 Formatter、解析格式串，
+		   而这段每秒被通知栏和首页叫十几次（值本身已经是 double，见上）。 */
+		int decimals = value < 10 ? 2 : 1;
+		long scale = decimals == 2 ? 100L : 10L;
+		long rounded = Math.round(value * scale);
+		StringBuilder sb = new StringBuilder(12);
+		sb.append(rounded / scale).append('.');
+		if (decimals == 2)
+		  sb.append((char) ('0' + (rounded % scale) / 10));   /* 十分位，可能为 0 */
+		sb.append((char) ('0' + rounded % 10)).append(' ').append(BYTE_UNITS[unit]);
+		return sb.toString();
 	}
 
-	/* Allocation-free: formatBytes/formatRate are called several times per
-	   second by the notification refresh. */
+	/* 仅管格式：值是 double，格式化按"小于 10 保留两位小数，否则一位"来做。
+	   BYTE_UNITS 是静态常量数组，不产生分配。 */
 	private static final String[] BYTE_UNITS = { "KB", "MB", "GB", "TB" };
 
-	// create NotificationChannel
 	private void initNotificationChannel(String channelName) {
 		NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 			CharSequence name = getString(R.string.app_name);
-			/* The notification is refreshed every second, so it must be a
-			   silent/low-importance channel. Importance can only be set when
-			   the channel is created, hence the delete + recreate once. */
+			/* 这条通知每秒都会刷新，所以必须是静音 / 低重要性的通道。重要性只在**创建**
+			   通道时才能设定，所以这里先删再建一次。 */
 			NotificationChannel old = notificationManager.getNotificationChannel(channelName);
 			if (old != null && old.getImportance() != NotificationManager.IMPORTANCE_LOW)
 			  notificationManager.deleteNotificationChannel(channelName);

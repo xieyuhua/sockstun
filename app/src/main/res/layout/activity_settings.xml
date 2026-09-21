@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Sectioned settings list. Each card is an empty container here; the rows
-     themselves are inflated from settings_item.xml in SettingsActivity. -->
+<!-- 分组的设置列表。每张卡片在这里只是个空容器；
+     里面的行由 SettingsActivity 用 settings_item.xml 逐个 inflate 出来。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
 	xmlns:app="http://schemas.android.com/apk/res-auto"
 	android:orientation="vertical"

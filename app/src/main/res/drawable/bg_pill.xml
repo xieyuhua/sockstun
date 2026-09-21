@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Rounded pill behind the latency figure on each node row. -->
+<!-- 节点行里延迟数字背后的圆角胶囊。 -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
 	android:shape="rectangle">
 	<solid android:color="?attr/colorSurfaceVariant"/>

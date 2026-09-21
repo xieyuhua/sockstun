@@ -1,10 +1,8 @@
 /*
  ============================================================================
- Name        : ConfigActivity.java
- Description : Preview and edit the clash config the core actually loads
-               (files/config.yaml). It can regenerate it from the current
-               settings, and a "use custom config" switch keeps the hand-edited
-               file from being overwritten on the next connect.
+ 文件名  : ConfigActivity.java
+ 说明    : 预览并编辑内核真正加载的那份 clash 配置（files/config.yaml）。可以按当前
+           设置重新生成；打开「使用自定义配置」后，下次连接不会再覆盖手改过的文件。
  ============================================================================
 */
 
@@ -30,7 +28,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 public class ConfigActivity extends BaseActivity implements View.OnClickListener {
-	/* Same name/location MihomoConfig writes and the core loads. */
+	/* 与 MihomoConfig 写入、内核加载的是同一个文件名与目录。 */
 	private static final String CONFIG_NAME = "config.yaml";
 
 	private Preferences prefs;
@@ -105,7 +103,7 @@ public class ConfigActivity extends BaseActivity implements View.OnClickListener
 		updateStatus();
 	}
 
-	/* "共 N 行 · 12.3 KB" for what is on disk, or "尚未生成". */
+	/* 磁盘上的文件显示成"共 N 行 · 12.3 KB"，不存在则显示"尚未生成"。 */
 	private void updateStatus() {
 		File f = file();
 		if (!f.exists()) {
@@ -124,7 +122,7 @@ public class ConfigActivity extends BaseActivity implements View.OnClickListener
 			lines, TProxyService.formatBytes(f.length())));
 	}
 
-	/* Rebuild the file from the current subscription / rules / DNS settings. */
+	/* 按当前的订阅 / 规则 / DNS 设置重新生成配置文件。 */
 	private void regenerate() {
 		try {
 			File f = MihomoConfig.build(this, prefs);
@@ -141,8 +139,8 @@ public class ConfigActivity extends BaseActivity implements View.OnClickListener
 		try {
 			write(file(), edittext_config.getText().toString());
 			updateStatus();
-			/* Without "use custom config" the next connect regenerates the file,
-			   so say so rather than letting the edit look permanent. */
+			/* 没开「使用自定义配置」时，下次连接会重新生成这个文件，所以要明确告诉
+			   用户，别让这次编辑看起来是永久的。 */
 			Toast.makeText(this, prefs.getCustomConfig()
 				? R.string.config_saved : R.string.config_saved_overwrite,
 				prefs.getCustomConfig() ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show();

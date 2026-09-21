@@ -1,9 +1,9 @@
 /*
  ============================================================================
- Name        : MainActivity.java
- Author      : hev <r@hev.cc>
- Copyright   : Copyright (c) 2023 xyz
- Description : Main Activity
+ 文件名  : MainActivity.java
+ 作者    : hev <r@hev.cc>
+ 版权    : Copyright (c) 2023 xyz
+ 说明    : 首页：连接开关 + 状态卡片 + 当前节点 + 配置档切换 + 流量卡片，并承载底部导航。
  ============================================================================
  */
 
@@ -49,11 +49,10 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	private static final long STATS_INTERVAL = 1500;
 	private Handler statsHandler;
 	private Runnable statsTask;
-	/* Last failure already surfaced as a Toast, so the 1.5s tick stays quiet. */
+	/* 已经用 Toast 提示过的失败原因，避免每 1.5 秒的刷新又弹一次。 */
 	private String lastShownError = "";
 
-	/* Refresh the control state when the tunnel is toggled elsewhere
-	   (e.g. from the Quick Settings tile) while this screen is visible. */
+	/* 本页可见时，隧道在别处被开关（例如快捷设置磁贴）也要刷新连接状态。 */
 	private final SharedPreferences.OnSharedPreferenceChangeListener prefsListener =
 		new SharedPreferences.OnSharedPreferenceChangeListener() {
 			@Override
@@ -91,8 +90,8 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 				  intent = new Intent(MainActivity.this, SettingsActivity.class);
 				if (intent != null) {
 					startActivity(intent);
-					/* Those entries open their own screen, so keep "home"
-					   highlighted instead of leaving the tab selected. */
+					/* 这些入口打开的是独立页面，所以底部导航保持停在"首页"，
+					   而不是让被点的那个标签一直处于选中态。 */
 					bottomNav.setSelectedItemId(R.id.nav_home);
 				}
 				return true;
@@ -123,15 +122,14 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 			}
 		};
 
-		/* Android 13+ hides the ongoing traffic notification unless the
-		   POST_NOTIFICATIONS permission has been granted. */
+		/* Android 13+ 若未授予 POST_NOTIFICATIONS 权限，常驻流量通知会被系统隐藏。 */
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
 			checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
 				android.content.pm.PackageManager.PERMISSION_GRANTED) {
 			requestPermissions(new String[] { android.Manifest.permission.POST_NOTIFICATIONS }, 1);
 		}
 
-		/* Request VPN permission */
+		/* 申请 VPN 权限 */
 		Intent intent = VpnService.prepare(MainActivity.this);
 		if (intent != null)
 		  startActivityForResult(intent, 0);
@@ -179,7 +177,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		}
 		if (view == button_control) {
 			boolean isEnable = prefs.getEnable();
-			/* A fresh attempt clears the previous failure message. */
+			/* 重新尝试连接时，先清掉上一次的失败提示。 */
 			if (!isEnable)
 			  prefs.clearLastError();
 			prefs.setEnable(!isEnable);
@@ -198,12 +196,10 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		updateNode();
 	}
 
-	/* Traffic counters: the tunnel totals are exact, the per-app numbers come
-	   from the system counters and include traffic outside the tunnel. */
+	/* 流量计数器：隧道总量是精确值；分应用的数字来自系统计数器，包含隧道之外的流量。 */
 	private void refreshTraffic() {
 		prefs = new Preferences(this);
-		/* Proxied traffic only: the counters behind these come from the core's
-		   connection list filtered by chain, so direct traffic is excluded. */
+		/* 代理专属流量：其背后的计数器来自内核连接列表并按链路过滤，直连流量不计入。 */
 		/* 隧道总流量来自核心 getTotalTraffic，独立于 9090 控制接口；而代理专属
 		   统计依赖 /connections（9090），控制接口不可用时恒为 0，会导致“流量不动”
 		   的假象。故实时/会话/总一律用总流量。 */
@@ -218,17 +214,15 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 			TProxyService.formatBytes(prefs.getTotalRx())));
 		updateNode();
 
-		/* Enable and LastError are written by the :native process, which cannot
-		   notify this one through OnSharedPreferenceChangeListener - so poll.
-		   Without this the card would keep showing "connected" after a failed
-		   start, and the failure would only become visible on the next resume. */
+		/* Enable 与 LastError 由 :native 进程写入，它无法通过
+		   OnSharedPreferenceChangeListener 通知本进程 —— 所以这里轮询。没有这一步，
+		   启动失败后卡片会一直显示"已连接"，要等到下次回到本页才看得到失败。 */
 		updateControlState();
 	}
 
-	/* Which node the tunnel is using: while the tunnel is UP this is the node
-	   the core has ACTUALLY selected (TProxyService records it from the running
-	   config), otherwise the picked subscription node, the manual SOCKS5
-	   upstream, or the subscription's own default. */
+	/* 隧道正在用哪个节点：隧道**在运行时**显示内核**真正选中**的那个（TProxyService
+	   从运行中的配置里读出来记下的）；否则显示所选订阅节点、手动 SOCKS5 上游，或订阅
+	   自带的默认节点。 */
 	private void updateNode() {
 		String node = prefs.getCurrentNode();
 		String label = node.isEmpty()
@@ -245,12 +239,11 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 		updateStatus();
 	}
 
-	/* Paint the hero card and the main button.
-	   Three states, not two: a start attempt can fail *after* Enable was
-	   already flipped to true (MainActivity does that before asking the service
-	   to start), so "not connected" alone cannot describe what happened. When
-	   the service reports a failure it writes LastError + Enable=false, and we
-	   surface the reason here instead of silently going back to "disconnected". */
+	/* 绘制状态卡片与主按钮。
+	   状态是**三种**而不是两种：启动尝试可能在 Enable 已被置 true **之后**才失败
+	   （本页会在请求服务启动前就先置位），所以"未连接"单独一个状态说不清发生过什么。
+	   服务报失败时会写 LastError 并把 Enable 置回 false，我们在这里把原因显示出来，
+	   而不是悄悄退回"未连接"。 */
 	private void updateStatus() {
 		final boolean connected = prefs.getEnable();
 		final String error = prefs.getLastError();
@@ -285,7 +278,7 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 			textview_status_subtitle.setText(R.string.status_disconnected_hint);
 		}
 
-		/* Tell the user once per distinct failure, not on every 1.5s tick. */
+		/* 每种不同的失败只提示一次，不是每 1.5 秒弹一次。 */
 		if (failed && !error.equals(lastShownError)) {
 			lastShownError = error;
 			Toast.makeText(this, getString(R.string.status_failed) + "：" + error,
