@@ -20,6 +20,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -39,6 +40,9 @@ public class Preferences
 	public static final String ACTIVE_NODE = "ActiveNode";
 	public static final String SOCKS_SERVERS = "SocksServers";
 	public static final String SOCKS_ACTIVE = "SocksActive";
+	/* 服务器备份：把当前手动配置的服务器列表（含启用中的那台）整体固化下来，
+	   与订阅备份分开存储。每条备份 = {id, name, activeId, servers}。 */
+	public static final String SERVER_BACKUPS = "ServerBackups";
 	public static final String SUBSCRIPTIONS = "Subscriptions";
 	public static final String SUB_ACTIVE = "SubActive";
 	/* 订阅页的视图状态，跨次启动保留（国家筛选、协议筛选）。 */
@@ -542,6 +546,74 @@ public class Preferences
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putString(key(SOCKS_ACTIVE), id == null ? "" : id);
 		editor.commit();
+	}
+
+	/* 一条服务器备份：捕获某一时刻的全部手动服务器，以及当时启用中的那一台，
+	   以便「恢复」能完整还原（不只是节点，连"哪台在用"也还原）。 */
+	public static class ServerBackup {
+		public String id;
+		public String name;
+		public String activeId;
+		public List<SocksServer> servers;
+		public ServerBackup(String id, String name, String activeId, List<SocksServer> servers) {
+			this.id = id;
+			this.name = name;
+			this.activeId = (activeId == null) ? "" : activeId;
+			this.servers = (servers == null) ? new ArrayList<SocksServer>() : servers;
+		}
+	}
+
+	public List<ServerBackup> getServerBackups() {
+		List<ServerBackup> out = new ArrayList<ServerBackup>();
+		String json = prefs.getString(key(SERVER_BACKUPS), "");
+		if (json == null || json.isEmpty())
+		  return out;
+		try {
+			JSONArray arr = new JSONArray(json);
+			for (int i = 0; i < arr.length(); i++) {
+				JSONObject o = arr.getJSONObject(i);
+				List<SocksServer> servers = SocksServer.decode(o.optString("servers", ""));
+				out.add(new ServerBackup(o.optString("id"), o.optString("name"),
+					o.optString("activeId", ""), servers));
+			}
+		} catch (JSONException e) {
+		}
+		return out;
+	}
+
+	public void setServerBackups(List<ServerBackup> list) {
+		JSONArray arr = new JSONArray();
+		try {
+			for (ServerBackup b : list) {
+				JSONObject o = new JSONObject();
+				o.put("id", b.id);
+				o.put("name", b.name);
+				o.put("activeId", b.activeId);
+				o.put("servers", SocksServer.encode(b.servers));
+				arr.put(o);
+			}
+		} catch (JSONException e) {
+		}
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(SERVER_BACKUPS), arr.toString());
+		editor.commit();
+	}
+
+	public void addServerBackup(ServerBackup b) {
+		List<ServerBackup> list = getServerBackups();
+		list.add(0, b);
+		setServerBackups(list);
+	}
+
+	public void deleteServerBackup(String id) {
+		List<ServerBackup> list = getServerBackups();
+		for (int i = 0; i < list.size(); i++) {
+			if (id.equals(list.get(i).id)) {
+				list.remove(i);
+				break;
+			}
+		}
+		setServerBackups(list);
 	}
 
 	/* 启用中的服务器；由订阅负责时返回 null。 */

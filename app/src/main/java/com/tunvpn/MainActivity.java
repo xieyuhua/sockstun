@@ -170,6 +170,10 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	@Override
 	public void onClick(View view) {
 		if (view.getId() == R.id.traffic_reset) {
+			/* 先让运行中的服务把**内存里**的计数器一起归零并重新定基准 —— 否则它的
+			   采样线程下一秒就用旧值把 preferences 覆盖掉，症状正是"界面上当时清空了、
+			   实际没重置"。服务没在跑时这一步是空操作。 */
+			TProxyService.resetTraffic();
 			prefs.resetStats();
 			prefs.resetProxyStats();
 			refreshTraffic();

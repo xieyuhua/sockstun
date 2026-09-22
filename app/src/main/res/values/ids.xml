@@ -16,6 +16,11 @@
 	<item name="settings_test_timeout" type="id"/>
 	<item name="settings_node_limit" type="id"/>
 	<item name="settings_autosel_interval" type="id"/>
+	<!-- 设置页里的「测速配置」入口，以及二级页 TestConfigActivity 内部的行。 -->
+	<item name="settings_test_config" type="id"/>
+	<item name="test_config_url" type="id"/>
+	<item name="test_config_timeout" type="id"/>
+	<item name="test_config_interval" type="id"/>
 	<item name="settings_secret" type="id"/>
 	<item name="settings_webdav" type="id"/>
 	<item name="settings_webdav_config" type="id"/>

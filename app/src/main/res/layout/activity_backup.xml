@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 备份管理：独立的「备份」界面。上半部分是「备份当前可用节点」按钮，
-     下半部分是「备份历史记录」列表，每条可「覆盖当前配置」或「删除」。 -->
+<!-- 备份管理：上半部分是备份操作（订阅节点 / 服务器列表），下半部分是两类历史记录。
+     历史行由 item_backup.xml 渲染（图标 + 标题/数量 + 恢复/删除），行间用细分隔线。
+     订阅备份在前，服务器备份在后。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
 	xmlns:app="http://schemas.android.com/apk/res-auto"
 	android:orientation="vertical"
@@ -26,9 +27,10 @@
 			android:layout_height="wrap_content"
 			android:paddingLeft="16dp"
 			android:paddingRight="16dp"
+			android:paddingTop="16dp"
 			android:paddingBottom="24dp">
 
-			<!-- 备份按钮卡片 -->
+			<!-- 备份操作卡片：图标 + 标题/说明，下面是全宽的主 / 次按钮。 -->
 			<com.google.android.material.card.MaterialCardView
 				style="@style/Widget.TunVPN.Card"
 				android:layout_width="match_parent"
@@ -38,29 +40,69 @@
 					android:padding="16dp"
 					android:layout_width="match_parent"
 					android:layout_height="wrap_content">
-					<TextView
-						android:text="@string/backup_now"
-						android:textAppearance="?attr/textAppearanceTitleMedium"
-						android:textStyle="bold"
+					<LinearLayout
+						android:orientation="horizontal"
 						android:layout_width="match_parent"
-						android:layout_height="wrap_content"/>
-					<TextView
-						android:text="@string/backup_now_desc"
-						android:textAppearance="?attr/textAppearanceBodyMedium"
-						android:layout_marginTop="6dp"
-						android:layout_width="match_parent"
-						android:layout_height="wrap_content"/>
+						android:layout_height="wrap_content"
+						android:gravity="center_vertical">
+						<ImageView
+							android:layout_width="44dp"
+							android:layout_height="44dp"
+							android:background="@drawable/bg_avatar"
+							android:contentDescription="@string/backup_now"
+							android:padding="10dp"
+							android:src="@drawable/ic_backup"
+							android:tint="?attr/colorPrimary"/>
+						<LinearLayout
+							android:orientation="vertical"
+							android:layout_width="0dp"
+							android:layout_height="wrap_content"
+							android:layout_weight="1"
+							android:layout_marginStart="12dp">
+							<TextView
+								android:text="@string/backup_now"
+								android:textAppearance="?attr/textAppearanceTitleMedium"
+								android:textStyle="bold"
+								android:layout_width="match_parent"
+								android:layout_height="wrap_content"/>
+							<TextView
+								android:text="@string/backup_now_desc"
+								android:textAppearance="?attr/textAppearanceBodySmall"
+								android:textColor="?attr/colorOnSurfaceVariant"
+								android:layout_marginTop="4dp"
+								android:layout_width="match_parent"
+								android:layout_height="wrap_content"/>
+						</LinearLayout>
+					</LinearLayout>
 					<com.google.android.material.button.MaterialButton
 						android:id="@+id/btn_backup"
-						android:layout_marginTop="12dp"
-						android:layout_gravity="end"
-						android:layout_width="wrap_content"
+						android:layout_marginTop="14dp"
+						android:layout_width="match_parent"
 						android:layout_height="wrap_content"
-						android:text="@string/backup_now"/>
+						android:minHeight="48dp"
+						android:text="@string/backup_now"
+						android:textSize="15sp"
+						app:cornerRadius="24dp"
+						app:icon="@drawable/ic_backup"
+						app:iconGravity="textStart"
+						app:iconPadding="8dp"/>
+					<com.google.android.material.button.MaterialButton
+						android:id="@+id/btn_backup_servers"
+						style="?attr/materialButtonOutlinedStyle"
+						android:layout_marginTop="8dp"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:minHeight="48dp"
+						android:text="@string/backup_now_servers"
+						android:textSize="15sp"
+						app:cornerRadius="24dp"
+						app:icon="@drawable/ic_server"
+						app:iconGravity="textStart"
+						app:iconPadding="8dp"/>
 				</LinearLayout>
 			</com.google.android.material.card.MaterialCardView>
 
-			<!-- 历史记录卡片 -->
+			<!-- 订阅备份历史 -->
 			<com.google.android.material.card.MaterialCardView
 				style="@style/Widget.TunVPN.Card"
 				android:layout_marginTop="16dp"
@@ -68,24 +110,124 @@
 				android:layout_height="wrap_content">
 				<LinearLayout
 					android:orientation="vertical"
-					android:padding="16dp"
 					android:layout_width="match_parent"
 					android:layout_height="wrap_content">
-					<TextView
-						android:text="@string/backup_history_title"
-						android:textAppearance="?attr/textAppearanceTitleMedium"
-						android:textStyle="bold"
+					<LinearLayout
+						android:orientation="horizontal"
 						android:layout_width="match_parent"
-						android:layout_height="wrap_content"/>
+						android:layout_height="wrap_content"
+						android:gravity="center_vertical"
+						android:paddingLeft="16dp"
+						android:paddingRight="16dp"
+						android:paddingTop="14dp"
+						android:paddingBottom="6dp">
+						<ImageView
+							android:layout_width="20dp"
+							android:layout_height="20dp"
+							android:contentDescription="@string/backup_history_subs"
+							android:src="@drawable/ic_backup"
+							android:tint="?attr/colorPrimary"/>
+						<TextView
+							android:layout_width="0dp"
+							android:layout_height="wrap_content"
+							android:layout_weight="1"
+							android:layout_marginStart="8dp"
+							android:text="@string/backup_history_subs"
+							android:textAppearance="@style/TextAppearance.TunVPN.Section"/>
+						<TextView
+							android:id="@+id/backup_count_subs"
+							android:layout_width="wrap_content"
+							android:layout_height="wrap_content"
+							android:background="@drawable/bg_pill"
+							android:gravity="center"
+							android:minWidth="34dp"
+							android:paddingLeft="9dp"
+							android:paddingRight="9dp"
+							android:paddingTop="3dp"
+							android:paddingBottom="3dp"
+							android:textAppearance="?attr/textAppearanceLabelMedium"
+							android:textStyle="bold"
+							android:visibility="gone"/>
+					</LinearLayout>
 					<TextView
 						android:id="@+id/backup_empty"
-						android:layout_marginTop="8dp"
-						android:text="@string/backup_manager_empty"
-						android:textAppearance="?attr/textAppearanceBodyMedium"
 						android:layout_width="match_parent"
-						android:layout_height="wrap_content"/>
+						android:layout_height="wrap_content"
+						android:paddingLeft="16dp"
+						android:paddingRight="16dp"
+						android:paddingTop="2dp"
+						android:paddingBottom="16dp"
+						android:text="@string/backup_manager_empty"
+						android:textAppearance="?attr/textAppearanceBodySmall"
+						android:textColor="?attr/colorOnSurfaceVariant"/>
 					<LinearLayout
 						android:id="@+id/backup_list"
+						android:orientation="vertical"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"/>
+				</LinearLayout>
+			</com.google.android.material.card.MaterialCardView>
+
+			<!-- 服务器备份历史 -->
+			<com.google.android.material.card.MaterialCardView
+				style="@style/Widget.TunVPN.Card"
+				android:layout_marginTop="16dp"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content">
+				<LinearLayout
+					android:orientation="vertical"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content">
+					<LinearLayout
+						android:orientation="horizontal"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:gravity="center_vertical"
+						android:paddingLeft="16dp"
+						android:paddingRight="16dp"
+						android:paddingTop="14dp"
+						android:paddingBottom="6dp">
+						<ImageView
+							android:layout_width="20dp"
+							android:layout_height="20dp"
+							android:contentDescription="@string/backup_history_servers"
+							android:src="@drawable/ic_server"
+							android:tint="?attr/colorPrimary"/>
+						<TextView
+							android:layout_width="0dp"
+							android:layout_height="wrap_content"
+							android:layout_weight="1"
+							android:layout_marginStart="8dp"
+							android:text="@string/backup_history_servers"
+							android:textAppearance="@style/TextAppearance.TunVPN.Section"/>
+						<TextView
+							android:id="@+id/backup_count_servers"
+							android:layout_width="wrap_content"
+							android:layout_height="wrap_content"
+							android:background="@drawable/bg_pill"
+							android:gravity="center"
+							android:minWidth="34dp"
+							android:paddingLeft="9dp"
+							android:paddingRight="9dp"
+							android:paddingTop="3dp"
+							android:paddingBottom="3dp"
+							android:textAppearance="?attr/textAppearanceLabelMedium"
+							android:textStyle="bold"
+							android:visibility="gone"/>
+					</LinearLayout>
+					<TextView
+						android:id="@+id/backup_empty_servers"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:paddingLeft="16dp"
+						android:paddingRight="16dp"
+						android:paddingTop="2dp"
+						android:paddingBottom="16dp"
+						android:text="@string/backup_manager_empty_servers"
+						android:textAppearance="?attr/textAppearanceBodySmall"
+						android:textColor="?attr/colorOnSurfaceVariant"/>
+					<LinearLayout
+						android:id="@+id/backup_list_servers"
 						android:orientation="vertical"
 						android:layout_width="match_parent"
 						android:layout_height="wrap_content"/>

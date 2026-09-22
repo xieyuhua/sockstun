@@ -35,17 +35,31 @@
 		android:text="@string/server_list_empty"
 		android:textAppearance="?attr/textAppearanceBodyMedium"
 		android:textColor="?attr/colorOnSurfaceVariant"/>
-	<ListView
-		android:id="@+id/server_list"
+	<FrameLayout
 		android:layout_width="match_parent"
 		android:layout_height="0dp"
-		android:layout_weight="1"
-		android:clipToPadding="false"
-		android:divider="@android:color/transparent"
-		android:dividerHeight="10dp"
-		android:paddingLeft="16dp"
-		android:paddingRight="16dp"
-		android:scrollbarStyle="outsideOverlay"/>
+		android:layout_weight="1">
+		<ListView
+			android:id="@+id/server_list"
+			android:layout_width="match_parent"
+			android:layout_height="match_parent"
+			android:clipToPadding="false"
+			android:divider="@android:color/transparent"
+			android:dividerHeight="10dp"
+			android:paddingLeft="16dp"
+			android:paddingTop="4dp"
+			android:paddingRight="16dp"
+			android:paddingBottom="16dp"
+			android:scrollbarStyle="outsideOverlay"/>
+		<com.google.android.material.floatingactionbutton.FloatingActionButton
+			android:id="@+id/server_test_all"
+			android:layout_width="wrap_content"
+			android:layout_height="wrap_content"
+			android:layout_gravity="bottom|end"
+			android:layout_margin="16dp"
+			android:contentDescription="@string/server_test_all"
+			android:src="@drawable/ic_speed"/>
+	</FrameLayout>
 	<com.google.android.material.button.MaterialButton
 		android:id="@+id/server_add"
 		android:layout_width="match_parent"

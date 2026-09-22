@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 拉取订阅时的进度弹窗：一条可动起来的水平进度条 + 文案。
+     进度条按下载字节实时推进（单条订阅也有平滑的动态效果）；服务器没给 Content-Length
+     时切成不确定态（条形一直滑动），避免看着像"卡死"。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	android:orientation="vertical"
+	android:layout_width="match_parent"
+	android:layout_height="wrap_content"
+	android:paddingLeft="24dp"
+	android:paddingRight="24dp"
+	android:paddingTop="20dp"
+	android:paddingBottom="8dp">
+	<TextView
+		android:id="@+id/dialog_fetch_message"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:text="@string/sub_fetching"
+		android:textAppearance="?attr/textAppearanceBodyMedium"/>
+	<ProgressBar
+		android:id="@+id/dialog_fetch_bar"
+		style="?android:attr/progressBarStyleHorizontal"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_marginTop="16dp"
+		android:indeterminate="true"
+		android:max="100"
+		android:progress="0"/>
+</LinearLayout>

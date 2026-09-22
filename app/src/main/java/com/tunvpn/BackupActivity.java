@@ -15,6 +15,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -38,7 +39,12 @@ public class BackupActivity extends BaseActivity {
 	private Preferences prefs;
 	private MaterialButton btnBackup;
 	private TextView backupEmpty;
+	private TextView backupCountSubs;
 	private LinearLayout backupList;
+	private MaterialButton btnBackupServers;
+	private TextView backupEmptyServers;
+	private TextView backupCountServers;
+	private LinearLayout backupListServers;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -53,10 +59,18 @@ public class BackupActivity extends BaseActivity {
 
 		btnBackup = (MaterialButton) findViewById(R.id.btn_backup);
 		backupEmpty = (TextView) findViewById(R.id.backup_empty);
+		backupCountSubs = (TextView) findViewById(R.id.backup_count_subs);
 		backupList = (LinearLayout) findViewById(R.id.backup_list);
+		btnBackupServers = (MaterialButton) findViewById(R.id.btn_backup_servers);
+		backupEmptyServers = (TextView) findViewById(R.id.backup_empty_servers);
+		backupCountServers = (TextView) findViewById(R.id.backup_count_servers);
+		backupListServers = (LinearLayout) findViewById(R.id.backup_list_servers);
 
 		btnBackup.setOnClickListener(new View.OnClickListener() {
 			@Override public void onClick(View v) { doBackup(); }
+		});
+		btnBackupServers.setOnClickListener(new View.OnClickListener() {
+			@Override public void onClick(View v) { doBackupServers(); }
 		});
 	}
 
@@ -77,49 +91,47 @@ public class BackupActivity extends BaseActivity {
 		backupList.removeAllViews();
 		if (backups.isEmpty()) {
 			backupEmpty.setVisibility(View.VISIBLE);
+			backupCountSubs.setVisibility(View.GONE);
 		} else {
 			backupEmpty.setVisibility(View.GONE);
-			for (Subscription s : backups)
-				backupList.addView(makeBackupItem(s));
+			backupCountSubs.setVisibility(View.VISIBLE);
+			backupCountSubs.setText(getString(R.string.backup_count_pill, backups.size()));
+			for (int i = 0; i < backups.size(); i++)
+			  backupList.addView(makeBackupItem(backups.get(i), i == backups.size() - 1));
+		}
+
+		/* 下半部分：服务器备份历史。 */
+		List<Preferences.ServerBackup> serverBackups = prefs.getServerBackups();
+		backupListServers.removeAllViews();
+		if (serverBackups.isEmpty()) {
+			backupEmptyServers.setVisibility(View.VISIBLE);
+			backupCountServers.setVisibility(View.GONE);
+		} else {
+			backupEmptyServers.setVisibility(View.GONE);
+			backupCountServers.setVisibility(View.VISIBLE);
+			backupCountServers.setText(
+				getString(R.string.backup_count_pill_servers, serverBackups.size()));
+			for (int i = 0; i < serverBackups.size(); i++)
+			  backupListServers.addView(
+				makeServerBackupItem(serverBackups.get(i), i == serverBackups.size() - 1));
 		}
 	}
 
-	/* 一条历史备份：标题（名称 · N 个节点）+ 两个操作按钮。 */
-	private View makeBackupItem(final Subscription s) {
+	/* 一条订阅备份：图标 + 名称 / 节点数 + 「恢复」「删除」。 */
+	private View makeBackupItem(final Subscription s, boolean last) {
 		int count = ClashNode.decode(prefs.getSubNodes(s.id)).size();
-
-		LinearLayout item = new LinearLayout(this);
-		item.setOrientation(LinearLayout.VERTICAL);
-		float density = getResources().getDisplayMetrics().density;
-		int padV = (int) (12 * density);
-		item.setPadding(0, padV, 0, padV);
-
-		TextView tv = new TextView(this);
-		tv.setText(s.label() + (count > 0 ? "  ·  " + count + " 个节点" : ""));
-		tv.setTextSize(16);
-		tv.setTypeface(null, android.graphics.Typeface.BOLD);
-		item.addView(tv);
-
-		LinearLayout btns = new LinearLayout(this);
-		btns.setOrientation(LinearLayout.HORIZONTAL);
-		btns.setPadding(0, padV / 2, 0, 0);
-
-		MaterialButton restore = new MaterialButton(this);
-		restore.setText(R.string.backup_overwrite);
-		restore.setMinHeight(0);
-		restore.setOnClickListener(new View.OnClickListener() {
+		View item = getLayoutInflater().inflate(R.layout.item_backup, backupList, false);
+		((ImageView) item.findViewById(R.id.item_icon)).setImageResource(R.drawable.ic_backup);
+		((TextView) item.findViewById(R.id.item_title)).setText(s.label());
+		((TextView) item.findViewById(R.id.item_subtitle))
+			.setText(getString(R.string.backup_nodes_count, count));
+		item.findViewById(R.id.item_divider).setVisibility(last ? View.GONE : View.VISIBLE);
+		item.findViewById(R.id.item_restore).setOnClickListener(new View.OnClickListener() {
 			@Override public void onClick(View v) { confirmOverwrite(s); }
 		});
-		MaterialButton del = new MaterialButton(this);
-		del.setText(R.string.backup_delete);
-		del.setMinHeight(0);
-		del.setOnClickListener(new View.OnClickListener() {
+		item.findViewById(R.id.item_delete).setOnClickListener(new View.OnClickListener() {
 			@Override public void onClick(View v) { confirmDelete(s); }
 		});
-
-		btns.addView(restore);
-		btns.addView(del);
-		item.addView(btns);
 		return item;
 	}
 
@@ -152,6 +164,91 @@ public class BackupActivity extends BaseActivity {
 			.show();
 	}
 
+	/* 一条服务器备份：图标 + 名称 / 服务器数 + 「恢复」「删除」。 */
+	private View makeServerBackupItem(final Preferences.ServerBackup b, boolean last) {
+		int count = b.servers.size();
+		View item = getLayoutInflater().inflate(R.layout.item_backup, backupListServers, false);
+		((ImageView) item.findViewById(R.id.item_icon)).setImageResource(R.drawable.ic_server);
+		((TextView) item.findViewById(R.id.item_title)).setText(b.name);
+		((TextView) item.findViewById(R.id.item_subtitle))
+			.setText(getString(R.string.backup_servers_count, count));
+		item.findViewById(R.id.item_divider).setVisibility(last ? View.GONE : View.VISIBLE);
+		item.findViewById(R.id.item_restore).setOnClickListener(new View.OnClickListener() {
+			@Override public void onClick(View v) { confirmOverwriteServer(b); }
+		});
+		item.findViewById(R.id.item_delete).setOnClickListener(new View.OnClickListener() {
+			@Override public void onClick(View v) { confirmDeleteServer(b); }
+		});
+		return item;
+	}
+
+	private void confirmOverwriteServer(final Preferences.ServerBackup b) {
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.backup_overwrite)
+			.setMessage(getString(R.string.backup_servers_overwrite_confirm, b.name, b.servers.size()))
+			.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+				@Override public void onClick(DialogInterface d, int w) {
+					applyServerBackup(b);
+					refresh();
+				}
+			})
+			.setNegativeButton(android.R.string.cancel, null)
+			.show();
+	}
+
+	private void confirmDeleteServer(final Preferences.ServerBackup b) {
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.backup_delete)
+			.setMessage(getString(R.string.backup_delete_confirm, b.name))
+			.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+				@Override public void onClick(DialogInterface d, int w) {
+					prefs.deleteServerBackup(b.id);
+					refresh();
+				}
+			})
+			.setNegativeButton(android.R.string.cancel, null)
+			.show();
+	}
+
+	/* 用某条服务器备份覆盖当前服务器列表：替换全部手动服务器并恢复当时启用中的那台；
+	   隧道连着就立即重建（与订阅恢复同理）。 */
+	private void applyServerBackup(Preferences.ServerBackup b) {
+		prefs.setSocksServers(b.servers);
+		prefs.setActiveSocksId(b.activeId);
+		if (prefs.getEnable()) {
+			Intent i = new Intent(this, TProxyService.class);
+			i.setAction(TProxyService.ACTION_RECONNECT);
+			startService(i);
+		}
+		Toast.makeText(this, getString(R.string.backup_servers_applied, b.name),
+			Toast.LENGTH_LONG).show();
+	}
+
+	/* 把当前手动配置的服务器整体备份（含当时启用中的那台）。服务器备份只存本地、
+	   与订阅备份分开，不依赖 WebDAV。 */
+	private void doBackupServers() {
+		List<SocksServer> servers = prefs.getSocksServers();
+		if (servers.isEmpty()) {
+			Toast.makeText(this, R.string.backup_servers_empty, Toast.LENGTH_LONG).show();
+			return;
+		}
+		/* 深拷贝，避免之后编辑服务器污染已存的备份。 */
+		List<SocksServer> copy = new ArrayList<SocksServer>();
+		for (SocksServer s : servers) {
+			SocksServer c = new SocksServer(s.id, s.name, s.addr, s.port,
+				s.user, s.pass, s.type, s.raw);
+			c.latency = s.latency;
+			copy.add(c);
+		}
+		String name = getString(R.string.backup_name,
+			new SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(new Date()));
+		prefs.addServerBackup(new Preferences.ServerBackup(
+			SocksServer.newId(), name, prefs.getActiveSocksId(), copy));
+		refresh();
+		Toast.makeText(this, getString(R.string.backup_servers_done, copy.size()),
+			Toast.LENGTH_LONG).show();
+	}
+
 	/* 把所有可用节点（延迟 >= 0）备份。目的地同订阅页：WebDAV 已配置→上传远端，
 	   否则落成本地订阅。 */
 	private void doBackup() {
@@ -178,14 +275,16 @@ public class BackupActivity extends BaseActivity {
 		}
 		String name = getString(R.string.backup_name,
 			new SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(new Date()));
+		/* 先落一条本地记录：保证「备份历史记录」永远有内容（无论是否传远端都留底），
+		   本地记录同时充当缓存，离线也能还原。 */
+		final String id = Subscription.newId();
+		saveBackupLocal(sb.toString(), id, name, kept, missed);
+		refresh(); /* 新备份立刻出现在历史列表 */
 		if (prefs.webdavReady()) {
+			/* 配置了 WebDAV 就再上传一份到远端（失败时 uploadBackupRemote 内部已回退本地）。 */
 			uploadBackupRemote(sb.toString(), kept, missed, name);
-		} else {
-			final String id = Subscription.newId();
-			saveBackupLocal(sb.toString(), id, name, kept, missed);
-			refresh(); /* 新备份立刻出现在历史列表 */
-			offerApplyBackup(id, name, kept.size());
 		}
+		offerApplyBackup(id, name, kept.size());
 	}
 
 	private void offerApplyBackup(final String id, final String name, final int count) {
@@ -279,7 +378,7 @@ public class BackupActivity extends BaseActivity {
 				} catch (final IOException e) {
 					runOnUiThread(new Runnable() {
 						@Override public void run() {
-							saveBackupLocal(yml, Subscription.newId(), name, kept, missed);
+							/* 本地记录已在 doBackup 里落好，此处不必重复写；只提示上传失败。 */
 							Toast.makeText(BackupActivity.this,
 								getString(R.string.backup_upload_failed, e.getMessage()),
 								Toast.LENGTH_LONG).show();

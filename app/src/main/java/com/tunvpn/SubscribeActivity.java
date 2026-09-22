@@ -112,6 +112,10 @@ public class SubscribeActivity extends BaseActivity {
 				return t;
 			}
 		});
+	/* TCP 预筛专用池（见 tcpFastFail）。它直接拨号 host:port，**不走**那条单回调的桥，
+	   所以能真正高并发 —— 与 testPool（受桥串行限制，只有 4 个 worker）相互独立，
+	   不会互相饿死。同样是进程级：一轮测速的寿命长于发起它的 Activity。 */
+	private static final ExecutorService tcpPool = Executors.newFixedThreadPool(32);
 	/* 本轮的时间都花在哪了（收尾日志）：桥是**单回调**的，所以一轮的耗时=各次探测之
 	   **和** —— 这几个计数反映的正是这件事。 */
 	private final java.util.concurrent.atomic.AtomicLong probeMsTotal =
@@ -725,6 +729,9 @@ public class SubscribeActivity extends BaseActivity {
 		slowestName = null;
 		passLogged.clear();
 		updateTestProgress();
+		/* 立刻刷新列表：批量测速进行中，每一行的「测速」按钮都要置灰（见 getView 里
+		   的 TestProgress.batch() 判断）—— 点它只会被"测速中"拒绝，灰掉才是诚实的。 */
+		adapter.notifyDataSetChanged();
 		/* 轮次头：足够还原"某个节点从可用翻成不可用"那一轮的上下文（哪个内核应答的、
 		   等了多久、用的哪个地址、这轮最多能跑多久）。
 		   批量测速下每个探测只在**失败**时记一行（见 CoreTestHost）：否则上千个节点就是
@@ -772,8 +779,11 @@ public class SubscribeActivity extends BaseActivity {
 						+ " 秒没有新结果（已完成 " + TestProgress.done() + "/"
 						+ TestProgress.total() + "）→ 判定卡住，结束本轮，剩余按未测速处理"
 						+ "（看上面的 bridge/delay 行：内核或桥没有回应）");
+					singleTesting = null;
 					releasePass();
 					updateTestProgress();
+					/* 这一轮已被判停：刷新列表，让各行「测速」按钮从置灰恢复可点。 */
+					applyView();
 					Toast.makeText(SubscribeActivity.this, R.string.sub_test_stalled,
 						Toast.LENGTH_LONG).show();
 					return;
@@ -923,6 +933,93 @@ public class SubscribeActivity extends BaseActivity {
 			+ " 个（它们仍会逐个探测；判定口径不变）");
 	}
 
+	/* TCP 负向预筛：把"连 host:port 都连不上"的节点**直接判死**，省掉它们那次昂贵的
+	   串行内核探测。
+
+	   为什么需要它：逐节点探测受"桥只允许一个在途回调"的限制而串行，一个死节点要吃掉
+	   ~「单次探测超时 + 6s」（默认 5s+6s）。一个订阅里死节点一多，一轮就是几十分钟；
+	   而"拨一下端口"是**本机并行**的、几毫秒到几百毫秒就出结果，且**不占桥**。
+
+	   为什么**只判不可用、绝不判可用**：TCP 端口连得上并不代表代理能转发（混淆 / 密码 /
+	   CDN 前置都可能"端口开着但代理是死的"），所以连上的节点原样交给内核做权威探测 ——
+	   判定口径始终是"内核真的把请求从这个节点转发出去"，与既有语义完全一致，只是把
+	   明显没救的那些提前剔掉。 */
+
+	/* 预筛的拨号超时：取得比较短，因为它的目的只是"快速排除明显没救的"，不是精确测量。
+	   上限 2.5s，避免个别被防火墙静默丢包的地址把这一步拖长。 */
+	private void tcpFastFail(List<ClashNode> scope, final int gen) {
+		if (scope == null || scope.isEmpty())
+		  return;
+		final int connectMs = Math.min(2500, Math.max(800, prefs.getProxyTestTimeout() * 1000));
+		final boolean asFail = prefs.getProbeTimeoutAsFail();
+		final List<ClashNode> todo = new ArrayList<ClashNode>();
+		for (ClashNode n : scope) {
+			/* 已经被分组快测定论（活）的、或没有可拨号地址的，都不预筛。 */
+			if (n.testedGen == gen)
+			  continue;
+			if (n.server == null || n.server.trim().isEmpty() || n.port <= 0)
+			  continue;
+			todo.add(n);
+		}
+		if (todo.isEmpty())
+		  return;
+		long t0 = System.currentTimeMillis();
+		final java.util.concurrent.CountDownLatch latch =
+			new java.util.concurrent.CountDownLatch(todo.size());
+		final java.util.concurrent.atomic.AtomicInteger dead =
+			new java.util.concurrent.atomic.AtomicInteger();
+		final java.util.concurrent.atomic.AtomicInteger dnsFail =
+			new java.util.concurrent.atomic.AtomicInteger();
+		for (final ClashNode n : todo) {
+			try {
+				tcpPool.execute(new Runnable() {
+					@Override
+					public void run() {
+						try {
+							if (!TestProgress.isCurrent(gen))
+							  return;
+							java.net.Socket s = new java.net.Socket();
+							try {
+								s.connect(new InetSocketAddress(n.server.trim(), n.port), connectMs);
+								/* 连上了：**不写结论**，留给内核做权威判定。 */
+							} catch (java.net.UnknownHostException e) {
+								/* 本机解析不了名字：可能是 DNS 的临时问题，不能据此判死。 */
+								dnsFail.incrementAndGet();
+							} catch (Exception e) {
+								/* 解析到了地址但拨号失败（超时 / 拒绝 / 不可达）：确定不可用。 */
+								if (TestProgress.isCurrent(gen)) {
+									n.testedGen = gen;
+									if (asFail) {
+										n.latency = -2;
+										passTimeoutFail.incrementAndGet();
+									} else {
+										n.latency = -1;   /* 保守模式：只记「未测速」，不判死 */
+									}
+									dead.incrementAndGet();
+								}
+							} finally {
+								try { s.close(); } catch (Exception ignore) { }
+							}
+						} finally {
+							latch.countDown();
+						}
+					}
+				});
+			} catch (Throwable e) {
+				latch.countDown();   /* 池被意外拒绝：不能让下面的等待卡住 */
+			}
+		}
+		/* 给一个总上限：个别节点的 DNS 卡死也不能拖住整轮。到点就继续，慢的交给内核探测。 */
+		try {
+			latch.await(connectMs + 4000L, java.util.concurrent.TimeUnit.MILLISECONDS);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
+		TProxyService.log("测速: TCP 预筛 " + todo.size() + " 个未定节点 → 判死 " + dead.get()
+			+ " 个（端口连不上，已省去串行探测）· 名字解析失败 " + dnsFail.get()
+			+ " 个（交内核）· 耗时 " + (System.currentTimeMillis() - t0) + "ms");
+	}
+
 	/* batch = 属于"测速全部"；gen = 这个节点所属的轮次，这样失联轮次残留的活儿会自己停下。 */
 	private void testNode(final ClashNode n, final boolean batch, final int gen) {
 		Runnable task = new Runnable() {
@@ -948,8 +1045,12 @@ public class SubscribeActivity extends BaseActivity {
 							/* 内核就绪后先做一次**分组快测**：让内核并发把整池量一遍
 							   （一次调用一组），比逐节点串行探测快一个数量级。它只补充
 							   "可用"结论，失败/未命中的节点照旧走逐个探测。 */
-							if (batch)
+							if (batch) {
 							  fastGroupPhase(gen, coreOk);
+							  /* 分组快测之后再做一次 TCP 负向预筛：把"端口都连不上"的节点直接
+							     判死，省掉它们在桥上串行的逐一探测（一个死节点 ~超时+6s）。 */
+							  tcpFastFail(roundScope, gen);
+							}
 							corePrepared = true;
 							/* 要记一行，因为这是用户眼中"什么都没发生"的**死时间**：
 							   加载 + 应用配置（几百个节点）再加上自检探测。 */
@@ -958,19 +1059,21 @@ public class SubscribeActivity extends BaseActivity {
 						}
 					}
 				}
-				/* 判定**只**来自内核真的把一个请求从**这个**节点推出去（即隔离式的
-				   "testDelay" 探测）。这才能证明代理确实在转发流量 —— 光是 TCP 端口能连上
-				   **不算**，所以那个 socket 探测被删掉了。真实测试跑不起来时（没有内核，
-				   或该节点不在已加载的配置里），就让它保持"未验证"（-1），而不是
-				   "不可用"。 */
+				/* 判"可用"**只**来自内核真的把一个请求从**这个**节点推出去（隔离式的
+				   "testDelay" 探测）：这才能证明代理确实在转发流量 —— 光是 TCP 端口能连上
+				   **不算**，所以 TCP 从来不是"可用"的证据。TCP 只在**反方向**被用作负向
+				   预筛（见 tcpFastFail）：连不上 ⇒ 必然不可用，于是提前剔掉、省一次串行探测。
+				   真实测试跑不起来时（没有内核，或该节点不在已加载的配置里），就让它保持
+				   "未验证"（-1），而不是"不可用"。 */
+				/* 已经被"分组快测"（活）或"TCP 预筛"（死）定论的节点直接采用其结果 —— 两者
+				   都是并发得到的，不占桥的串行槽位；否则才做权威的内核逐节点探测。 */
+				final boolean reused = (n.testedGen == gen);
 				long probeT0 = System.currentTimeMillis();
-				/* 分组快测（见 fastGroupPhase）已经量过这个节点就直接采用它的结果 ——
-				   同样是内核自己测出的真实转发延迟，只是由内核并发完成，不占桥的串行槽位。 */
-				Long real = (n.testedGen == gen && n.latency >= 0)
+				Long real = reused
 					? Long.valueOf(n.latency)
 					: (expired ? null : proxyDelayMs(n));
 				long probeCost = System.currentTimeMillis() - probeT0;
-				if (!expired) {
+				if (!expired && !reused) {
 					probeCount.incrementAndGet();
 					probeMsTotal.addAndGet(probeCost);
 					if (probeCost > slowestMs.get()) {
@@ -993,10 +1096,10 @@ public class SubscribeActivity extends BaseActivity {
 				/* 逐节点判定。判为"不可用"的**每个**节点都会记一行（那正是要追查的
 				   现象）；而"未测速"每轮只记一次，因为它通常是**整轮级**的情况（没有内核），
 				   否则会每个节点都打一遍。 */
-				if (real != null && real < 0)
+				if (real != null && real == -2L)
 				  TProxyService.log("测速结果: " + n.name + " [" + n.server + ":" + n.port
 					+ " " + (n.type == null ? "?" : n.type) + "] -> 不可用(-2)");
-				else if (real == null)
+				else if (real == null || real < 0)
 				  logOnce("untested", "测速结果: 无判定 → 未测速，例如 " + n.name + " ["
 					+ n.server + ":" + n.port + "]");
 				/* **先**上报结果，**再**查国别。国别查询需要 DNS，而一个慢解析器以前会把
@@ -1035,6 +1138,9 @@ public class SubscribeActivity extends BaseActivity {
 						}
 						if (TestProgress.pending() > 0)
 						  return;               /* 还有节点没报完 */
+						/* 这一轮结束：清掉"单测转圈"标记（批量测速时它本来就是 null），
+						   下面 applyView() 重绑行时按钮就恢复正常。 */
+						singleTesting = null;
 						/* 最后一个节点已上报：**不管页面还在不在**都要把这一轮收干净 ——
 						   releasePass() 会恢复 CoreTestHost 的日志级别并清掉进程级的 RUNNING
 						   标记；少了它，下次进页面会被"上一轮还没结束"挡住，而且之后的测速
@@ -1980,6 +2086,10 @@ public class SubscribeActivity extends BaseActivity {
 			.show();
 	}
 
+	/* 正在**单节点**测速的那个节点（null = 没在测）。行内按钮据此显示"转圈"，
+	   反馈与服务器列表一致；批量测速不改它。只在 UI 线程读写。 */
+	private ClashNode singleTesting = null;
+
 	/* 单节点重测：与"测速全部"共用同一套**单飞**规则（同一份进程级状态），
 	   否则批量测速期间来一次重测，会把整轮弄坏。抽成方法是为了让行内的按钮
 	   只挂一个复用的监听器（见 NodeAdapter）。 */
@@ -1998,6 +2108,9 @@ public class SubscribeActivity extends BaseActivity {
 		passLogged.clear();
 		/* 单节点测试保留用户设的超时和详细日志；只是轮次的记账方式不同。 */
 		CoreTestHost.setVerbose(true);
+		/* 标记这一个节点正在单测，并立刻刷新列表：它的「测速」按钮立刻置灰 + 转圈。 */
+		singleTesting = n;
+		adapter.notifyDataSetChanged();
 		/* 同样显示进度行/进度条（0/1 -> 1/1），
 		   让单节点重测也能看得见"正在跑"。 */
 		updateTestProgress();
@@ -2010,6 +2123,7 @@ public class SubscribeActivity extends BaseActivity {
 		MaterialCardView card;
 		TextView flag, name, detail, proto, source, status, badge;
 		Button use, test;
+		ProgressBar spinner;
 		/* 这一行当前绑定的节点。行的长按要用它 —— **不能**把节点挂在 card 的 tag 上：
 		   card 就是 convertView，它的 tag 已经被 ViewHolder（本类）占用了。 */
 		ClashNode node;
@@ -2060,6 +2174,7 @@ public class SubscribeActivity extends BaseActivity {
 				r.badge = (TextView) convertView.findViewById(R.id.item_badge);
 				r.use = (Button) convertView.findViewById(R.id.item_use);
 				r.test = (Button) convertView.findViewById(R.id.item_test);
+				r.spinner = (ProgressBar) convertView.findViewById(R.id.item_test_spinner);
 				/* 点击监听器只创建一次：当前行的节点挂在按钮的 tag 上，点击时再取。 */
 				r.use.setOnClickListener(new View.OnClickListener() {
 					@Override
@@ -2104,6 +2219,13 @@ public class SubscribeActivity extends BaseActivity {
 			r.use.setTag(n);
 			r.test.setTag(n);
 			r.node = n;
+
+			/* 「测速」按钮的可用性：
+			   - 正在单测这一行 → 置灰 + 叠转圈，明确"已点击、正在测"（与服务器列表一致）；
+			   - 批量测速进行中 → **所有**行都置灰（测速是单飞的，点它只会被拒）。 */
+			boolean testing = (n == singleTesting);
+			r.test.setEnabled(!testing && !TestProgress.batch());
+			r.spinner.setVisibility(testing ? View.VISIBLE : View.GONE);
 
 			String cc = countryCode(n);
 			r.flag.setText(Country.flag(cc));

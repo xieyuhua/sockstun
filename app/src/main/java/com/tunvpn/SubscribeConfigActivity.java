@@ -22,8 +22,10 @@ import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.app.ProgressDialog;
 
 import androidx.appcompat.app.AlertDialog;
 
@@ -36,9 +38,7 @@ import java.util.List;
 
 import com.tunvpn.ClashNode;
 import com.tunvpn.ClashParser;
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -167,13 +167,17 @@ public class SubscribeConfigActivity extends BaseActivity {
 		editName.setHint(R.string.subs_name);
 		editName.setSingleLine(true);
 		final EditText editUrl = new EditText(this);
-		/* 新增时这一栏既能填订阅链接，也能直接粘贴 base64 / 备份文本：提示与输入类型都
-		   放宽成多行纯文本；编辑已有网络订阅时仍是单行 URI。 */
+		/* 新增时这一栏既能填订阅链接，也能直接粘贴 base64 / 备份文本：放宽成多行纯文本，
+		   并给足高度（base64 很长），编辑已有网络订阅时仍是单行 URI。 */
 		if (add) {
 			editUrl.setHint(R.string.subs_add_input_hint);
 			editUrl.setSingleLine(false);
 			editUrl.setInputType(InputType.TYPE_CLASS_TEXT
 				| InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+			editUrl.setMinLines(5);
+			editUrl.setGravity(android.view.Gravity.TOP);
+			editUrl.setVerticalScrollBarEnabled(true);
+			editUrl.setMovementMethod(new android.text.method.ScrollingMovementMethod());
 		} else {
 			editUrl.setHint(R.string.subs_url);
 			editUrl.setSingleLine(true);
@@ -191,6 +195,15 @@ public class SubscribeConfigActivity extends BaseActivity {
 		switchEnabled.setChecked(add || existing.enabled);
 		container.addView(editName);
 		container.addView(editUrl);
+		final MaterialButton[] webdavBtn = new MaterialButton[1];
+		if (add) {
+			/* 不想手贴 base64 时，可以直接从 WebDAV 云备份里挑一份导入成订阅。 */
+			MaterialButton btn = new MaterialButton(this);
+			btn.setText(R.string.subs_add_from_webdav);
+			btn.setMinHeight(0);
+			webdavBtn[0] = btn;
+			container.addView(btn);
+		}
 		container.addView(switchEnabled);
 
 		AlertDialog.Builder builder = new AlertDialog.Builder(this);
@@ -257,7 +270,112 @@ public class SubscribeConfigActivity extends BaseActivity {
 				}
 			});
 		}
-		builder.show();
+		final AlertDialog dlg = builder.show();
+		/* 点了"从 WebDAV 云备份选择"就先关掉新增对话框，再走云端选择流程。 */
+		if (webdavBtn[0] != null) {
+			webdavBtn[0].setOnClickListener(new View.OnClickListener() {
+				@Override public void onClick(View v) {
+					dlg.dismiss();
+					pickFromWebdav();
+				}
+			});
+		}
+	}
+
+	/* 从 WebDAV 云备份里挑一份当作新订阅导入：先列目录，再让用户选，选中后下载并
+	   走与「WebDAV 导入」相同的 saveImportedLocal（后台解析 + 离线分国家）。 */
+	private void pickFromWebdav() {
+		if (!prefs.webdavReady()) {
+			Toast.makeText(this, R.string.subs_webdav_not_ready, Toast.LENGTH_LONG).show();
+			return;
+		}
+		final ProgressDialog pd = new ProgressDialog(this);
+		pd.setMessage(getString(R.string.subs_webdav_listing));
+		pd.setCancelable(false);
+		pd.show();
+		new Thread(new Runnable() {
+			@Override public void run() {
+				try {
+					final List<String> names = WebDav.listBackups(prefs);
+					runOnUiThread(new Runnable() {
+						@Override public void run() {
+							if (pd.isShowing()) pd.dismiss();
+							if (names.isEmpty()) {
+								Toast.makeText(SubscribeConfigActivity.this,
+									R.string.subs_webdav_no_backup, Toast.LENGTH_LONG).show();
+								return;
+							}
+							showWebdavBackupPicker(names);
+						}
+					});
+				} catch (final IOException e) {
+					runOnUiThread(new Runnable() {
+						@Override public void run() {
+							if (pd.isShowing()) pd.dismiss();
+							Toast.makeText(SubscribeConfigActivity.this,
+								getString(R.string.subs_webdav_list_failed, e.getMessage()),
+								Toast.LENGTH_LONG).show();
+						}
+					});
+				}
+			}
+		}).start();
+	}
+
+	/* 把云端备份文件名列成单选列表让用户挑。 */
+	private void showWebdavBackupPicker(final List<String> names) {
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.subs_add_from_webdav)
+			.setItems(names.toArray(new String[0]), new DialogInterface.OnClickListener() {
+				@Override public void onClick(DialogInterface d, int which) {
+					downloadAndImportWebdav(names.get(which));
+				}
+			})
+			.setNegativeButton(android.R.string.cancel, null)
+			.show();
+	}
+
+	/* 下载选中的云端备份并作为本地订阅导入（含后台解析 + 分国家 + 落盘）。 */
+	private void downloadAndImportWebdav(final String fileName) {
+		final ProgressDialog pd = new ProgressDialog(this);
+		pd.setMessage(getString(R.string.subs_webdav_downloading, fileName));
+		pd.setCancelable(false);
+		pd.show();
+		new Thread(new Runnable() {
+			@Override public void run() {
+				try {
+					final String yaml = WebDav.download(prefs, fileName);
+					runOnUiThread(new Runnable() {
+						@Override public void run() {
+							if (pd.isShowing()) pd.dismiss();
+							saveImportedLocal(
+								getString(R.string.subs_import_remote_name, fileName),
+								yaml, false,
+								new ImportResult() {
+									@Override public void onResult(int n) {
+										if (n < 0) {
+											Toast.makeText(SubscribeConfigActivity.this,
+												R.string.subs_import_failed, Toast.LENGTH_LONG).show();
+										} else {
+											Toast.makeText(SubscribeConfigActivity.this,
+												getString(R.string.subs_import_ok, n), Toast.LENGTH_LONG).show();
+										}
+									}
+								});
+						}
+					});
+				} catch (final IOException e) {
+					runOnUiThread(new Runnable() {
+						@Override public void run() {
+							if (pd.isShowing()) pd.dismiss();
+							Toast.makeText(SubscribeConfigActivity.this,
+								getString(R.string.subs_webdav_download_failed, e.getMessage()),
+								Toast.LENGTH_LONG).show();
+						}
+					});
+				}
+			}
+		}).start();
 	}
 
 	private class SubAdapter extends ArrayAdapter<Subscription> {
@@ -621,22 +739,49 @@ public class SubscribeConfigActivity extends BaseActivity {
 	}
 
 	/* 拉取每条（已启用的）订阅的 clash.yml，解析后按订阅分别存下原始 YAML 与节点列表。
-	   停用的会跳过，与合并逻辑保持一致。拉完刷新列表，让缓存节点数跟着更新。 */
+	   停用的会跳过，与合并逻辑保持一致。拉完刷新列表，让缓存节点数跟着更新。
+	   过程中弹一个**不可取消**的进度弹窗：进度条**按下载字节实时推进**（单条订阅也有平滑
+	   的动态效果），服务器没给 Content-Length 时退化为不确定态动画，绝不会看着像"卡死"。 */
 	private void fetchAll() {
 		final List<Subscription> subs = prefs.getSubscriptions();
 		if (subs.isEmpty()) {
 			Toast.makeText(this, R.string.subs_none, Toast.LENGTH_SHORT).show();
 			return;
 		}
+		/* 统计真正要拉取的条目数，用来算进度百分比。 */
+		int todo = 0;
+		for (Subscription sub : subs) {
+			if (!sub.enabled || sub.local)
+			  continue;
+			String u = sub.url == null ? "" : sub.url.trim();
+			if (!u.isEmpty())
+			  todo++;
+		}
+		if (todo == 0) {
+			Toast.makeText(this, R.string.sub_no_nodes, Toast.LENGTH_LONG).show();
+			return;
+		}
 		buttonUpdate.setEnabled(false);
 		buttonUpdate.setText(R.string.sub_fetching);
+
+		/* 自定义进度弹窗：进度条 + 文案都在我们自己手里，便于实时刷进度 / 切换不确定态。 */
+		View dialogView = getLayoutInflater().inflate(R.layout.dialog_fetch_progress, null);
+		final TextView msg = (TextView) dialogView.findViewById(R.id.dialog_fetch_message);
+		final ProgressBar bar = (ProgressBar) dialogView.findViewById(R.id.dialog_fetch_bar);
+		final AlertDialog pd = new AlertDialog.Builder(this)
+			.setView(dialogView)
+			.setCancelable(false)
+			.create();
+		pd.show();
+
+		final int totalTodo = todo;
 		new Thread(new Runnable() {
 			@Override
 			public void run() {
-				int total = 0;
+				int total = 0, done = 0;
 				String firstError = null;
 				try {
-					for (Subscription sub : subs) {
+					for (final Subscription sub : subs) {
 						/* 不会合并进来的订阅，就没必要去拉它。 */
 						if (!sub.enabled)
 						  continue;
@@ -644,11 +789,55 @@ public class SubscribeConfigActivity extends BaseActivity {
 						   去拉只会把它覆盖掉，必须跳过。 */
 						if (sub.local)
 						  continue;
-						String url = sub.url == null ? "" : sub.url.trim();
+						final String url = sub.url == null ? "" : sub.url.trim();
 						if (url.isEmpty())
 						  continue;
+						final String label = sub.label();
+						final int finished = done; /* 本条之前已完成的条数（用于算整体百分比） */
+						/* 每条各自的节流与"当前是否不确定态"状态。 */
+						final long[] lastUi = { 0L };
+						final boolean[] indeterminate = { false };
 						try {
-							String yaml = ClashParser.decodeRaw(download(url));
+							String yaml = ClashParser.decodeRaw(download(url, new DownloadListener() {
+								@Override
+								public void onProgress(long read, long t) {
+									/* 最多每 ~120ms 刷一次 UI，避免高频刷新拖慢下载。 */
+									long now = System.currentTimeMillis();
+									if (now - lastUi[0] < 120)
+									  return;
+									lastUi[0] = now;
+									if (t > 0) {
+										/* 已知总长：把"本条已完成的比例"并入整体百分比，进度条平滑推进。 */
+										final int pct = (int) ((finished
+											+ Math.min(1.0, (double) read / t)) * 100.0 / totalTodo);
+										final boolean backToDeterminate = indeterminate[0];
+										indeterminate[0] = false;
+										runOnUiThread(new Runnable() {
+											@Override public void run() {
+												if (!pd.isShowing())
+												  return;
+												if (backToDeterminate)
+												  bar.setIndeterminate(false);
+												bar.setProgress(pct);
+												msg.setText(getString(
+													R.string.sub_fetching_progress, label, pct));
+											}
+										});
+									} else if (!indeterminate[0]) {
+										/* 总长未知：切成不确定态（条形一直滑动），至少不是"卡死"。 */
+										indeterminate[0] = true;
+										runOnUiThread(new Runnable() {
+											@Override public void run() {
+												if (!pd.isShowing())
+												  return;
+												bar.setIndeterminate(true);
+												msg.setText(getString(R.string.sub_fetching_step,
+													label, finished + 1, totalTodo));
+											}
+										});
+									}
+								}
+							}));
 							List<ClashNode> parsed = ClashParser.parseAll(yaml);
 							for (ClashNode n : parsed)
 							  n.subId = sub.id;
@@ -660,7 +849,22 @@ public class SubscribeConfigActivity extends BaseActivity {
 							total += parsed.size();
 						} catch (Exception e) {
 							if (firstError == null)
-							  firstError = sub.label() + ": " + e.getMessage();
+							  firstError = label + ": " + e.getMessage();
+						} finally {
+							/* 拉完一条就把整体百分比对齐到"已完成条数"（成功或失败都算完成一条）。 */
+							done++;
+							final int pct = (int) (done * 100.0 / totalTodo);
+							runOnUiThread(new Runnable() {
+								@Override public void run() {
+									if (!pd.isShowing())
+									  return;
+									if (indeterminate[0])
+									  bar.setIndeterminate(false);
+									bar.setProgress(pct);
+									msg.setText(getString(
+										R.string.sub_fetching_progress, label, pct));
+								}
+							});
 						}
 					}
 				} finally {
@@ -672,6 +876,8 @@ public class SubscribeConfigActivity extends BaseActivity {
 					runOnUiThread(new Runnable() {
 						@Override
 						public void run() {
+							if (pd.isShowing())
+							  pd.dismiss();
 							if (isFinishing() || isDestroyed())
 							  return;
 							buttonUpdate.setEnabled(true);
@@ -695,7 +901,15 @@ public class SubscribeConfigActivity extends BaseActivity {
 		}).start();
 	}
 
-	private String download(String urlStr) throws Exception {
+	/* 下载进度的回调：read 已读字节数，total 总字节数（服务器未给 Content-Length 时为 -1）。 */
+	private interface DownloadListener {
+		void onProgress(long read, long total);
+	}
+
+	/* 下载订阅内容。改为**按字节流式读取**，每读一块就把"已读/总长"回给回调，
+	   好让进度条跟着实时走（单条订阅也能平滑推进）；服务器没给长度时 total=-1，
+	   调用方改用不确定态动画。 */
+	private String download(String urlStr, DownloadListener listener) throws Exception {
 		HttpURLConnection conn = null;
 		try {
 			URL url = new URL(urlStr);
@@ -707,14 +921,19 @@ public class SubscribeConfigActivity extends BaseActivity {
 			int code = conn.getResponseCode();
 			if (code != HttpURLConnection.HTTP_OK)
 			  throw new Exception("HTTP " + code);
-			StringBuilder sb = new StringBuilder();
-			try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-					conn.getInputStream(), StandardCharsets.UTF_8))) {
-				String line;
-				while ((line = reader.readLine()) != null)
-				  sb.append(line).append('\n');
+			final long total = conn.getContentLength(); /* 未知（如分块传输）为 -1 */
+			java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+			java.io.InputStream in = conn.getInputStream();
+			byte[] buf = new byte[8192];
+			long read = 0;
+			int n;
+			while ((n = in.read(buf)) != -1) {
+				bos.write(buf, 0, n);
+				read += n;
+				if (listener != null)
+				  listener.onProgress(read, total);
 			}
-			return sb.toString();
+			return new String(bos.toByteArray(), StandardCharsets.UTF_8);
 		} finally {
 			if (conn != null)
 			  conn.disconnect();

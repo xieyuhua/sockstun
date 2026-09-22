@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「测速配置」二级页（设置 → 延迟测试配置 → 测速配置）：
+     把原先散在设置页里的"延迟测试配置"整块搬到这里。卡片为空容器，
+     里面的行由 TestConfigActivity 用 settings_item / settings_switch_item 逐个 inflate。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	xmlns:app="http://schemas.android.com/apk/res-auto"
+	android:orientation="vertical"
+	android:layout_width="match_parent"
+	android:layout_height="match_parent"
+	android:background="?attr/colorSurface">
+	<com.google.android.material.appbar.MaterialToolbar
+		android:id="@+id/toolbar"
+		android:layout_width="match_parent"
+		android:layout_height="?attr/actionBarSize"
+		app:navigationIcon="?attr/homeAsUpIndicator"
+		app:title="@string/settings_test_config"
+		app:titleTextAppearance="@style/TextAppearance.TunVPN.Toolbar"/>
+	<ScrollView
+		android:layout_width="match_parent"
+		android:layout_height="0dp"
+		android:layout_weight="1"
+		android:clipToPadding="false"
+		android:fillViewport="true">
+		<LinearLayout
+			android:orientation="vertical"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:paddingLeft="16dp"
+			android:paddingRight="16dp"
+			android:paddingBottom="24dp">
+			<com.google.android.material.card.MaterialCardView
+				style="@style/Widget.TunVPN.Card"
+				android:layout_marginTop="16dp"
+				android:layout_width="match_parent"
+				android:layout_height="wrap_content">
+				<LinearLayout
+					android:id="@+id/test_config_group"
+					android:orientation="vertical"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"/>
+			</com.google.android.material.card.MaterialCardView>
+		</LinearLayout>
+	</ScrollView>
+</LinearLayout>

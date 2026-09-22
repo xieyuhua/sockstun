@@ -1273,6 +1273,24 @@ public class TProxyService extends VpnService {
 		}
 		sInstance.flushRecentRequests(android.os.SystemClock.elapsedRealtime());
 	}
+	/* 首页「重置累计」：把**内存里**的流量计数器也一起归零并重新定基准。
+	   必须在**采样线程**上做（post 到 statsHandler）—— 否则下一秒的 sampleStats()
+	   会立刻用旧值把 preferences 再写回去，症状正是"界面上当时清空了、实际没重置"。
+	   服务没在跑时无需处理：下次 startStats() 会从 preferences 重新读基准（已经是 0）。 */
+	static void resetTraffic() {
+		TProxyService inst = sInstance;
+		if (inst == null)
+		  return;
+		Handler h = inst.statsHandler;
+		if (h != null)
+		  h.post(new Runnable() {
+			@Override public void run() {
+				TProxyService i = sInstance;
+				if (i != null)
+				  i.zeroTraffic();
+			}
+		});
+	}
 	/* 统计轮询抓到的**最新** /connections 快照；隧道没运行 / 还没轮询过时为 null。
 	   「连接」页面读它，从而不必自己发一次桥调用。 */
 	static String lastConnectionsSnapshot() {
@@ -2630,6 +2648,41 @@ public class TProxyService extends VpnService {
 		  sp.setAllStats(totalTx, totalRx, sessionTx, sessionRx, txRate, rxRate,
 			proxyBaseTx + proxySessionTx, proxyBaseRx + proxySessionRx,
 			proxySessionTx, proxySessionRx, proxyRateTx, proxyRateRx);
+	}
+
+	/* 在**采样线程**上把内存计数器归零并重新定基准（只由 resetTraffic() post 过来，
+	   所以与 sampleStats() 天然互斥，不会读到写了一半的状态）。
+
+	   关键在"重新定基准"：内核报的是**开机以来的累计值**，我们算的是相对基准的增量。
+	   所以归零不是把内核计数抹掉（也抹不掉），而是把基准挪到"现在"——之后只有新增的
+	   流量才算进会话 / 总。 */
+	private void zeroTraffic() {
+		/* 隧道总量：把会话基准挪到最近一次采样到的内核累计值。还没定过基准时保持
+		   trafficPrimed=false，让下一次 sampleStats() 自己把基准定在当时的累计值。 */
+		if (trafficPrimed) {
+			sessionBaseTx = lastTx;
+			sessionBaseRx = lastRx;
+		}
+		baseTx = 0;
+		baseRx = 0;
+		sessionTx = 0;
+		sessionRx = 0;
+		totalTx = 0;
+		totalRx = 0;
+		txRate = 0;
+		rxRate = 0;
+		/* 代理专属：同理归零。connSeen 保留 —— 它记着每条连接上一次看到的字节数，
+		   所以之后算出来的都是"从现在起"的增量，不会把旧流量重新算进来。 */
+		proxyBaseTx = 0;
+		proxyBaseRx = 0;
+		proxySessionTx = 0;
+		proxySessionRx = 0;
+		lastProxyTx = 0;
+		lastProxyRx = 0;
+		proxyRateTx = 0;
+		proxyRateRx = 0;
+		/* 立刻写盘，别等下一拍（否则这中间 UI 可能又读到旧值）。 */
+		saveAllStats();
 	}
 
 	private void stopStats() {

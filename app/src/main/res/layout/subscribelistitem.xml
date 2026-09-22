@@ -143,20 +143,32 @@
 			android:layout_width="match_parent"
 			android:layout_height="wrap_content"
 			android:layout_marginTop="8dp">
-			<com.google.android.material.button.MaterialButton
-				android:id="@+id/item_test"
-				style="?attr/materialButtonOutlinedStyle"
+			<FrameLayout
 				android:layout_width="0dp"
 				android:layout_weight="1"
-				android:layout_height="wrap_content"
-				android:minHeight="38dp"
-				android:text="@string/sub_test"
-				android:textSize="12sp"
-				app:cornerRadius="19dp"
-				app:icon="@drawable/ic_speed"
-				app:iconGravity="textStart"
-				app:iconPadding="4dp"
-				app:iconSize="16dp"/>
+				android:layout_height="wrap_content">
+				<com.google.android.material.button.MaterialButton
+					android:id="@+id/item_test"
+					style="?attr/materialButtonOutlinedStyle"
+					android:layout_width="match_parent"
+					android:layout_height="wrap_content"
+					android:minHeight="38dp"
+					android:text="@string/sub_test"
+					android:textSize="12sp"
+					app:cornerRadius="19dp"
+					app:icon="@drawable/ic_speed"
+					app:iconGravity="textStart"
+					app:iconPadding="4dp"
+					app:iconSize="16dp"/>
+				<!-- 单节点测速中叠在按钮上的转圈，默认隐藏；由代码在测速时显示。 -->
+				<ProgressBar
+					android:id="@+id/item_test_spinner"
+					android:layout_width="26dp"
+					android:layout_height="26dp"
+					android:layout_gravity="center"
+					android:indeterminate="true"
+					android:visibility="gone"/>
+			</FrameLayout>
 			<com.google.android.material.button.MaterialButton
 				android:id="@+id/item_use"
 				android:layout_width="0dp"

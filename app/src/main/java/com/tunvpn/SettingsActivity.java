@@ -128,36 +128,10 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			});
 
 		/* ===== 延迟测试配置 =====
-		   测速地址 / 超时 / 探测超时判定 / 自动重测间隔 / 预加载测速内核，
-		   这些只影响"怎么测延迟"，与订阅本身无关，单独归到一类更清楚。 */
-		addRow(group_latency, R.drawable.ic_routing, R.string.sub_test_url_title,
-			getString(R.string.sub_test_url, prefs.getAutoTestUrl()), R.id.settings_test_url);
-		addRow(group_latency, R.drawable.ic_routing, R.string.settings_test_timeout,
-			getString(R.string.sub_test_timeout, prefs.getProxyTestTimeout()), R.id.settings_test_timeout);
-		/* 探测**完全没有回应**时该怎么算：不可用（默认）还是未测速。做成开关，是因为
-		   否则"所有节点都变不可用"与"内核/桥坏了"这两种情况很难区分。 */
-		addSwitchRow(group_latency, R.drawable.ic_routing,
-			R.string.settings_probe_timeout_fail,
-			R.string.settings_probe_timeout_fail_hint, prefs.getProbeTimeoutAsFail(),
-			new CompoundButton.OnCheckedChangeListener() {
-				@Override
-				public void onCheckedChanged(CompoundButton button, boolean checked) {
-					prefs.setProbeTimeoutAsFail(checked);
-				}
-			});
-		addRow(group_latency, R.drawable.ic_routing, R.string.settings_autosel_interval,
-			autoSelectIntervalSubtitle(), R.id.settings_autosel_interval);
-		/* 未连接时是否预加载无 TUN 的测速内核（以便测真实转发延迟），
-		   以及该内核是否携带**全部**节点（忽略国家/地区筛选）。 */
-		addSwitchRow(group_latency, R.drawable.ic_routing, R.string.settings_preload_core,
-			R.string.settings_preload_core_hint, prefs.getPreloadCore(),
-			new CompoundButton.OnCheckedChangeListener() {
-				@Override
-				public void onCheckedChanged(CompoundButton button, boolean checked) {
-					prefs.setPreloadCore(checked);
-					CoreTestHost.reset();
-				}
-			});
+		   测速地址 / 超时 / 探测超时判定 / 自动重测间隔 / 预加载测速内核，这些只影响
+		   "怎么测延迟"。整块参数已收进二级页「测速配置」，这里只留一个入口。 */
+		addRow(group_latency, R.drawable.ic_speed, R.string.settings_test_config,
+			testConfigSubtitle(), R.id.settings_test_config);
 
 		/* ===== 备份分组：WebDAV 远程备份 =====
 		   总开关开启**且**填了地址时，"备份可用节点"会传到远端；否则落成本地订阅
@@ -243,36 +217,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  Toast.makeText(this, R.string.settings_restart_needed, Toast.LENGTH_LONG).show();
 	}
 
-	/* mihomo 的 url-test 组用来测速的目标地址。如果一个节点所在的网络访问不到这个
-	   主机，那么在该组里每个节点都会被测成失败，哪怕节点本身是好的 —— 这正是
-	   "测速正常但用不了"的常见原因。 */
-	/* 测速地址：留空恢复默认值；任何输入都必须是 http(s) 地址，且边输边校验，
-	   避免把坏值存进去。 */
-	private void editTestUrl() {
-		showInputDialog(R.string.sub_test_url_title,
-			getString(R.string.sub_test_url_title),
-			getString(R.string.sub_test_url_hint),
-			InputType.TYPE_TEXT_VARIATION_URI | InputType.TYPE_CLASS_TEXT,
-			prefs.getAutoTestUrl(),
-			new InputValidator() {
-				@Override public String validate(String v) {
-					if (v.isEmpty())
-					  return null;
-					if (!isHttpUrl(v))
-					  return getString(R.string.sub_test_url_invalid);
-					return null;
-				}
-			},
-			new OnValue() {
-				@Override public void onReceiveValue(String v) {
-					prefs.setAutoTestUrl(v.trim());
-					buildList();
-					afterNetworkChange();
-				}
-			},
-			null);
-	}
-
+	/* 是否是 http(s) 地址：WebDAV 地址校验用（测速地址的校验已随「测速配置」搬到
+	   TestConfigActivity，那里有自己的同名实现）。 */
 	private static boolean isHttpUrl(String url) {
 		String u = url.toLowerCase();
 		return u.startsWith("http://") || u.startsWith("https://");
@@ -440,6 +386,14 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		return url.trim();
 	}
 
+	/* 「测速配置」入口的副标题：把关键参数摘要出来，一眼看到当前设置。 */
+	private String testConfigSubtitle() {
+		return getString(R.string.settings_test_timeout)
+			+ " " + getString(R.string.sub_test_timeout, prefs.getProxyTestTimeout())
+			+ " · " + getString(R.string.settings_autosel_interval)
+			+ " " + autoSelectIntervalSubtitle();
+	}
+
 	private String logSubtitle() {
 		return getString(prefs.getLogEnabled() ? R.string.settings_state_on
 			: R.string.settings_state_off);
@@ -480,89 +434,6 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			Math.max(1, Math.round(prefs.getAutoSelectInterval() / 60f)));
 	}
 
-	/* 自动重测间隔：单个分钟输入框（1–1440），取代原来"先选预设再自定义"的流程。
-	   留空或超出范围会在输入框内直接报错。 */
-	private void editAutoSelectInterval() {
-		final int cur = Math.max(1, Math.round(prefs.getAutoSelectInterval() / 60f));
-		showInputDialog(R.string.sub_interval_title,
-			getString(R.string.sub_interval_hint),
-			getString(R.string.sub_interval_custom_title),
-			InputType.TYPE_CLASS_NUMBER,
-			Integer.toString(cur),
-			new InputValidator() {
-				@Override public String validate(String v) {
-					if (v.isEmpty())
-					  return getString(R.string.sub_interval_invalid);
-					int m;
-					try {
-						m = Integer.parseInt(v);
-					} catch (NumberFormatException e) {
-						return getString(R.string.sub_interval_invalid);
-					}
-					if (m < 1 || m > 1440)
-					  return getString(R.string.sub_interval_invalid);
-					return null;
-				}
-			},
-			new OnValue() {
-				@Override public void onReceiveValue(String v) {
-					int m;
-					try {
-						m = Integer.parseInt(v);
-					} catch (NumberFormatException e) {
-						m = cur;
-					}
-					int clamped = Math.max(1, Math.min(1440, m));
-					prefs.setAutoSelectInterval(clamped * 60);
-					buildList();
-					afterNetworkChange();
-				}
-			},
-			null);
-	}
-
-	/* 手动"测节点"时单个探测目标的超时（秒，1–30）。它限定内核转发这次探测最多花多久，
-	   免得一个慢但可用的节点被过紧的默认值误判为不可用。 */
-	private void editTestTimeout() {
-		final int cur = prefs.getProxyTestTimeout();
-		showInputDialog(R.string.settings_test_timeout,
-			getString(R.string.settings_test_timeout),
-			getString(R.string.sub_test_timeout_hint),
-			InputType.TYPE_CLASS_NUMBER,
-			Integer.toString(cur),
-			new InputValidator() {
-				@Override public String validate(String v) {
-					if (v.isEmpty())
-					  return getString(R.string.sub_test_timeout_invalid);
-					int s;
-					try {
-						s = Integer.parseInt(v);
-					} catch (NumberFormatException e) {
-						return getString(R.string.sub_test_timeout_invalid);
-					}
-					if (s < Preferences.MIN_PROXY_TEST_TIMEOUT
-							|| s > Preferences.MAX_PROXY_TEST_TIMEOUT)
-					  return getString(R.string.sub_test_timeout_invalid);
-					return null;
-				}
-			},
-			new OnValue() {
-				@Override public void onReceiveValue(String v) {
-					int s;
-					try {
-						s = Integer.parseInt(v);
-					} catch (NumberFormatException e) {
-						s = cur;
-					}
-					int clamped = Math.max(Preferences.MIN_PROXY_TEST_TIMEOUT,
-						Math.min(Preferences.MAX_PROXY_TEST_TIMEOUT, s));
-					prefs.setProxyTestTimeout(clamped);
-					buildList();
-				}
-			},
-			null);
-	}
-
 	@Override
 	public void onClick(View view) {
 		int id = view.getId();
@@ -576,10 +447,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  startActivity(new Intent(this, RecentRequestsActivity.class));
 		else if (id == R.id.settings_subscription)
 		  startActivity(new Intent(this, SubscribeConfigActivity.class));
-		else if (id == R.id.settings_test_url)
-		  editTestUrl();
-		else if (id == R.id.settings_test_timeout)
-		  editTestTimeout();
+		else if (id == R.id.settings_test_config)
+		  startActivity(new Intent(this, TestConfigActivity.class));
 		else if (id == R.id.settings_proxy_port)
 		  editPort();
 		else if (id == R.id.settings_log)
@@ -590,8 +459,6 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  showThemeDialog();
 		else if (id == R.id.settings_version)
 		  showVersionDialog();
-		else if (id == R.id.settings_autosel_interval)
-		  editAutoSelectInterval();
 		else if (id == R.id.settings_secret)
 		  showSecretDialog();
 		else if (id == R.id.settings_webdav_config)
@@ -808,6 +675,7 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		for (Subscription s : prefs.getSubscriptions())
 		  if (s.local)
 			n++;
+		n += prefs.getServerBackups().size();
 		return n > 0 ? getString(R.string.backup_count_subtitle, n)
 			: getString(R.string.backup_count_none);
 	}
