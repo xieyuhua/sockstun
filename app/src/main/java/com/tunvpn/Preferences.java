@@ -102,23 +102,17 @@ public class Preferences
 	public static final String WEBDAV_PASS = "WebdavPass";
 	public static final String WEBDAV_DIR = "WebdavDir";
 	/* 单次探测的超时秒数（走 clash-api 的 /delay 接口测一个节点）。内核量的是**真实
-	   转发**的一次请求，所以超时调大能容下"慢但可用"的节点。 */
+	   转发**的一次请求，所以超时调大能容下"慢但可用"的节点。
+	   每个节点**只测一次**：这一超时就是该节点这一次探测的等待时间，超时即判不可用；
+	   不再保留"每节点测速上限"这种重复的总时限，也不再做救援/重试式的多次探测。 */
 	public static final String PROXY_TEST_TIMEOUT = "ProxyTestTimeout";
 	public static final int DEFAULT_PROXY_TEST_TIMEOUT = 5;
 	public static final int MIN_PROXY_TEST_TIMEOUT = 1;
 	public static final int MAX_PROXY_TEST_TIMEOUT = 30;
-	/* **单个节点**测速的总时限（秒），与上面的"单次探测超时"是两回事。一个节点可能
-	   要发好几次探测（配置的地址 + 内置兜底目标 + 救援探测）；没有这个上限时，一个
-	   永远不回包的节点能吃掉约 36 秒，整轮就爬得像卡死。有了它，一轮的上界是
-	   节点数 × 该值。**严格生效**：给内核的探测超时和本地等待都按剩余额度收紧。 */
-	public static final String NODE_TEST_LIMIT = "NodeTestLimit";
-	public static final int DEFAULT_NODE_TEST_LIMIT = 15;
-	public static final int MIN_NODE_TEST_LIMIT = 5;
-	public static final int MAX_NODE_TEST_LIMIT = 120;
 	/* 一次探测**完全没有响应**（我们等超时了，内核一直没回包）时，对节点意味着什么？
-	   开（默认）：判「不可用」—— 一个永远不回包的探测，正是用户口中的"死节点"，
-	   也是"每节点时限"这句话本身的含义。关：只有内核**明确**报失败才判不可用，
-	   其它情况一律「未测速」（保守模式，用于排查误杀好节点）。 */
+	   开（默认）：判「不可用」—— 一个永远不回包的探测，正是用户口中的"死节点"。
+	   关：只有内核**明确**报失败才判不可用，其它情况一律「未测速」（保守模式，
+	   用于排查误杀好节点）。 */
 	public static final String PROBE_TIMEOUT_AS_FAIL = "ProbeTimeoutAsFail";
 	/* clash-api 的 bearer 令牌。只生成一次并持久化，这样"写进生成配置里的 secret"
 	   和"每个客户端请求带的 secret"跨重启始终一致。 */
@@ -782,18 +776,7 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* **单个节点**测速总共可以花多久（秒），限定在 5~120。 */
-	public int getNodeTestLimit() {
-		int t = prefs.getInt(key(NODE_TEST_LIMIT), DEFAULT_NODE_TEST_LIMIT);
-		return Math.max(MIN_NODE_TEST_LIMIT, Math.min(MAX_NODE_TEST_LIMIT, t));
-	}
 
-	public void setNodeTestLimit(int seconds) {
-		int t = Math.max(MIN_NODE_TEST_LIMIT, Math.min(MAX_NODE_TEST_LIMIT, seconds));
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putInt(key(NODE_TEST_LIMIT), t);
-		editor.commit();
-	}
 
 	/* clash-api 的 bearer 令牌。只生成一次并持久化，然后既注入到内核配置里，
 	   又由每个控制请求携带（Authorization: Bearer）。配置里一旦设了 `secret:`，

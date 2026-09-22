@@ -124,7 +124,7 @@ public class SubscribeActivity extends BaseActivity {
 	/* 内核报出的**可测**节点数，供日志用：它能区分"生成的配置里压根没有节点"和
 	   "这个节点不在其中"。 */
 	private volatile int coreNodeCount = 0;
-	/* 因为时间预算耗尽而被本轮跳过的节点数。收尾时会报出来，
+	/* 因为本轮被新轮替换/停止而没来得及测的节点数。收尾时会报出来，
 	   这样"N 个未测速"就不会是个谜。 */
 	private final java.util.concurrent.atomic.AtomicInteger passSkipped =
 		new java.util.concurrent.atomic.AtomicInteger();
@@ -199,21 +199,11 @@ public class SubscribeActivity extends BaseActivity {
 	   上一轮还在跑时又起一轮，会弄坏计数，还会往本已繁忙的内核上再压几千个探测。
 	   之所以是 static 状态，是因为一轮的生命周期**长于**本页面 —— 用户可能切走再切回来，
 	   页面甚至可能被重建 —— 而回来时进度条必须还在。 */
-	/* **批量**测速时使用的单目标超时。批量不能继承 30 秒的设置：
-	   几次探测 × 30 秒，**一个**死节点就是好几分钟。 */
-	private static final int BATCH_PROBE_TIMEOUT_MS = 4000;
-	/* 一轮最多跑多久，超过就把剩余节点放着不测（并弹出"已达时间上限"提示）。
-	   必须给得宽裕：动作桥是**单回调**的，所以一轮的耗时约等于各次探测时间之**和**，
-	   一份大订阅合理就要好几分钟。但它仍要保证这一轮**能结束**，剩下的一律报「未测速」
-	   而不是靠猜。死节点每个更贵，不过批量超时会兜住它们 —— 预算真的用完了，
-	   那本身就是诚实的答案。 */
 
-	private static long passBudgetMs(int nodeCount, int nodeLimitSec) {
-		/* 单节点上限为 L 时，最坏情况是 节点数 × L；而桥是单回调的，所以这真的就是
-		   实际成本。按这个给（再留点余量），但保留一个**硬顶**，好让卡住的一轮也能结束。 */
-		long want = nodeCount * (nodeLimitSec + 3L) * 1000L;
-		return Math.min(20 * 60 * 1000L, Math.max(180000L, want));
-	}
+	/* 总时长**不设上限**：每个节点只受自身"单次探测超时"控制，整轮耗时≈各节点探测之和，
+	   轮次靠每个节点的超时自然收敛、自行结束（几千上万个代理也一轮测完，绝不会因为
+	   "总时长超预算"而被中途截断）。唯一的安全网是 armStallWatchdog：只有内核/桥真死、
+	   连续很久零进度时才收尾——那是应对卡死，不是限制总时长。 */
 	/* 每完成 N 个节点就把（共享的）节点缓存存一次：一轮测速如果被切页或进程被杀打断，
 	   已经做过的部分不能白丢。 */
 	private static final int INCREMENTAL_SAVE_EVERY = 15;
@@ -315,7 +305,7 @@ public class SubscribeActivity extends BaseActivity {
 				if (id == R.id.action_help)
 				  showHelp();
 				else if (id == R.id.action_backup)
-				  backupAvailableNodes();
+				  showBackupManager();
 				return true;
 			}
 		});
@@ -702,9 +692,9 @@ public class SubscribeActivity extends BaseActivity {
 		roundScope = toTest;
 		/* 启动这个**进程级**的测速轮次。它是**异步**的：离开本页、甚至本 Activity 被
 		   重建，都不会让它停下；用户回来时进度仍在。 */
-		final int gen = TestProgress.begin(toTest.size(),
-			System.currentTimeMillis() + passBudgetMs(toTest.size(), prefs.getNodeTestLimit()),
-			true);
+		/* 第三参数是"时间预算"：传 0 表示不限（TestProgress.isCurrent 把 d<=0 当作不限），
+		   整轮只受单节点超时控制，几千上万个节点也能一轮测完。 */
+		final int gen = TestProgress.begin(toTest.size(), 0, true);
 		if (gen < 0) {
 			updateTestProgress();
 			Toast.makeText(this, R.string.sub_test_busy, Toast.LENGTH_SHORT).show();
@@ -734,14 +724,11 @@ public class SubscribeActivity extends BaseActivity {
 		   批量测速下每个探测只在**失败**时记一行（见 CoreTestHost）：否则上千个节点就是
 		   上千行，而每行都要开关一次文件 —— 光是这点 I/O 就足以造成那种"卡住"的观感。 */
 		CoreTestHost.setVerbose(false);
-		int capSec = Math.min(prefs.getProxyTestTimeout() * 1000, BATCH_PROBE_TIMEOUT_MS) / 1000;
+		int capSec = prefs.getProxyTestTimeout();
 		TProxyService.log("=== 测速开始：" + toTest.size() + " 个节点 · VPN="
 			+ (prefs.getEnable() ? "已连接" : "未连接")
-			+ " · 单目标超时 " + capSec + "s" + (capSec != prefs.getProxyTestTimeout()
-				? ("（设置 " + prefs.getProxyTestTimeout() + "s，批量已收紧）") : "")
-			+ " · 单节点上限 " + prefs.getNodeTestLimit() + "s"
-			+ " · 时间预算 "
-			+ (passBudgetMs(toTest.size(), prefs.getNodeTestLimit()) / 1000) + "s · 测速地址 "
+			+ " · 单次探测超时 " + capSec + "s"
+			+ " · 时间预算 不限制（仅按单节点超时控制） · 测速地址 "
 			+ prefs.getAutoTestUrl() + " · 内置目标 " + PROXY_TEST_URLS.length + " 个"
 			+ " · 国家筛选=" + (prefs.getSubCountryFilter().isEmpty()
 				? "全部" : prefs.getSubCountryFilter())
@@ -755,13 +742,15 @@ public class SubscribeActivity extends BaseActivity {
 		armStallWatchdog(gen);
 	}
 
-	/* 测速进行期间每 15 秒重新排一次。`stallMs` 由"每节点上限"推导而来，所以一个
-	   合理地慢的节点（在限额之内）绝不会被误判成卡住。相关字段只在 UI 线程上访问。 */
+	/* 测速进行期间每 15 秒重新排一次。`stallMs` 由"单次探测超时"推导而来，所以一个
+	   合理地慢的节点（在超时之内）绝不会被误判成卡住。相关字段只在 UI 线程上访问。 */
 	private long watchdogDone = -1;
 	private long watchdogAt = 0;
 
 	private void armStallWatchdog(final int gen) {
-		final long stallMs = Math.max(60000L, prefs.getNodeTestLimit() * 1000L + 15000L);
+		/* 下限给到 120s：几千上万个代理时，测速内核加载并应用大配置可能要几十秒，
+		   首个结果出来前别误判成"卡住"。单节点正常探测 ≤ 单次探测超时，不会触发这里。 */
+		final long stallMs = Math.max(120000L, prefs.getProxyTestTimeout() * 1000L + 15000L);
 		ui.postDelayed(new Runnable() {
 			@Override
 			public void run() {
@@ -865,7 +854,7 @@ public class SubscribeActivity extends BaseActivity {
 			  return;
 			/* 自检要短：它只需要证明"管道通了"，不必去测列表里最慢的那个节点。
 			   它跑在**任何**节点被测之前，所以这里多花的每一秒，都是进度条冻在 0% 的一秒。 */
-			int probeMs = Math.min(prefs.getProxyTestTimeout() * 1000, 5000);
+			int probeMs = prefs.getProxyTestTimeout() * 1000;
 			long t0 = System.currentTimeMillis();
 			Long d = CoreTestHost.testDelay(name, prefs.getAutoTestUrl(), probeMs);
 			TProxyService.log("测速自检：" + (d == null
@@ -891,7 +880,7 @@ public class SubscribeActivity extends BaseActivity {
 		if (!coreOk || scope == null || scope.isEmpty())
 		  return;
 		/* 快测组只存在于**测试内核**里；走隧道内核（REST）时没有它们。 */
-		int probeMs = Math.min(prefs.getProxyTestTimeout() * 1000, 5000);
+		int probeMs = prefs.getProxyTestTimeout() * 1000;
 		long t0 = System.currentTimeMillis();
 		java.util.Map<String, Long> hits =
 			CoreTestHost.testGroups(prefs.getAutoTestUrl(), probeMs, gen);
@@ -993,7 +982,7 @@ public class SubscribeActivity extends BaseActivity {
 				  n.latency = -1;          // 无法验证 -> 未知，而不是"可用"
 				if (expired) {
 					passSkipped.incrementAndGet();
-					logOnce("budget", "测速: 已超过时间预算，剩余节点按未测速处理");
+					logOnce("expired", "测速: 本轮已结束（被新轮替换或已停止），剩余节点按未测速处理");
 				}
 				/* 逐节点判定。判为"不可用"的**每个**节点都会记一行（那正是要追查的
 				   现象）；而"未测速"每轮只记一次，因为它通常是**整轮级**的情况（没有内核），
@@ -1068,7 +1057,7 @@ public class SubscribeActivity extends BaseActivity {
 							int skipped = passSkipped.get();
 							TProxyService.log("=== 测速结束：可用 " + ok + " / 不可用 "
 								+ bad + " / 未测速 " + un + (skipped > 0
-									? ("（其中 " + skipped + " 个超出时间预算未测）") : "")
+									? ("（其中 " + skipped + " 个因本轮提前结束未测）") : "")
 								+ " · 详见上面每行「测速:」 ===");
 							/* 时间都花在哪了。动作桥一次只带**一个**在途调用，所以一轮
 							   的耗时=各探测之和 —— 这一行就是证据。 */
@@ -1252,6 +1241,82 @@ public class SubscribeActivity extends BaseActivity {
 			startService(i);
 		}
 		Toast.makeText(this, getString(R.string.backup_applied, name), Toast.LENGTH_LONG).show();
+	}
+
+	/* 备份管理：列出所有本地备份（本地内容订阅），点一条可"恢复（覆盖当前订阅）"或"删除"；
+	   顶部按钮可"备份当前可用节点"。这样备份不再是一锤子买卖，事后还能挑某份恢复。 */
+	private void showBackupManager() {
+		List<Subscription> all = prefs.getSubscriptions();
+		List<Subscription> backups = new ArrayList<Subscription>();
+		for (Subscription s : all)
+		  if (s.local)
+			backups.add(s);
+
+		AlertDialog.Builder b = new AlertDialog.Builder(this);
+		b.setTitle(R.string.backup_manager_title);
+		b.setNegativeButton(android.R.string.cancel, null);
+		b.setPositiveButton(R.string.backup_now, new DialogInterface.OnClickListener() {
+			@Override
+			public void onClick(DialogInterface d, int which) {
+				/* 备份逻辑自带提示/询问，这里直接调起。 */
+				backupAvailableNodes();
+			}
+		});
+		if (backups.isEmpty()) {
+			b.setMessage(R.string.backup_manager_empty);
+		} else {
+			CharSequence[] items = new CharSequence[backups.size()];
+			for (int i = 0; i < backups.size(); i++) {
+				Subscription s = backups.get(i);
+				int count = ClashNode.decode(prefs.getSubNodes(s.id)).size();
+				items[i] = s.label() + (count > 0 ? "  ·  " + count + " 个节点" : "");
+			}
+			final List<Subscription> fixed = backups;
+			b.setItems(items, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface d, int which) {
+					showBackupItemMenu(fixed.get(which));
+				}
+			});
+		}
+		b.show();
+	}
+
+	/* 单条备份的后续操作：恢复（覆盖当前订阅）或删除。 */
+	private void showBackupItemMenu(final Subscription sub) {
+		int count = ClashNode.decode(prefs.getSubNodes(sub.id)).size();
+		new AlertDialog.Builder(this)
+			.setTitle(sub.label() + (count > 0 ? "  ·  " + count + " 个节点" : ""))
+			.setItems(new CharSequence[] {
+				getString(R.string.backup_restore),
+				getString(R.string.backup_delete)
+			}, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface d, int which) {
+					if (which == 0)
+					  applyLocalOverride(sub.id, sub.name);
+					else
+					  deleteBackup(sub.id);
+				}
+			})
+			.show();
+	}
+
+	/* 删除一条本地备份：同时清掉它的原始内容缓存与节点缓存。 */
+	private void deleteBackup(String id) {
+		List<Subscription> list = prefs.getSubscriptions();
+		for (int i = 0; i < list.size(); i++) {
+			if (id.equals(list.get(i).id)) {
+				list.remove(i);
+				break;
+			}
+		}
+		prefs.setSubscriptions(list);
+		prefs.setSubRaw(id, "");
+		prefs.setSubNodes(id, "");
+		Toast.makeText(this, R.string.backup_deleted, Toast.LENGTH_SHORT).show();
+		/* 删完重新打开管理列表，让用户立刻看到变化。 */
+		showBackupManager();
 	}
 
 	/* 本地备份：原行为。把可用节点存成一条默认停用的本地订阅，并顺手写好节点缓存
@@ -1503,101 +1568,31 @@ public class SubscribeActivity extends BaseActivity {
 		for (String u : PROXY_TEST_URLS)
 		  if (!targets.contains(u))
 			targets.add(u);
+		/* 「延迟测试超时」= 单个节点这一次探测最多等回包多久。已移除「每节点测速上限」：
+		   现在每个节点**只探一次**——用这个超时作为等待，超时/失败即判不可用，不再有救援、
+		   也不再对同一节点反复测。这样「延迟测试超时」就是唯一的时间旋钮，语义不重复。 */
 		int timeoutMs = prefs.getProxyTestTimeout() * 1000;
-		/* 批量测速不能继承"单目标 30 秒"的设置：4 个目标 + 2 次救援探测 × 30 秒，
-		   **一个**死节点就要三分钟，而一份订阅有几百个。所以要收紧（并记一次日志）。 */
-		boolean capped = false;
-		if (TestProgress.batch() && timeoutMs > BATCH_PROBE_TIMEOUT_MS) {
-			timeoutMs = BATCH_PROBE_TIMEOUT_MS;
-			capped = true;
+		/* 不再受「每节点上限」约束：给桥留足回包余量（探测自身超时 + 缓冲），
+		   避免客户端在等内核那次探测时先超时。 */
+		long maxWaitMs = timeoutMs + 6000L;
+
+		/* 每个节点只测一次：取第一个验证目标（用户配置的「测速地址」优先，否则内置兜底），
+		   探一次即可——通即活，超时/失败即判不可用，不再换目标继续试探。
+		   要最大化抗误判，请在设置里把「测速地址」填成可靠的 URL（例如你自己可达的地址）。 */
+		String target = targets.get(0);
+		if (!TestProgress.running()) {
+			logOnce("round-end:" + name, "测速: 本轮已结束 → " + name + " 按未测速处理");
+			return null;                  /* 是这一轮被放弃了，而不是这个节点有问题 */
 		}
-		/* 第一轮用配置的超时。**任何**一个目标成功就算可用。真正的失败（504/408：
-		   内核确实完不成这次探测）会被记住；而故障类（401/404/...）不是判定，
-		   只会让节点保持"未测速"。 */
-		/* **每节点**的墙钟上限（设置 → 订阅 → 每节点测速上限）。一个节点可能要消耗好几次
-		   探测（配置地址 + 内置兜底 + 救援）；没有上限时，一个永远不回包的节点能吃掉约
-		   36 秒，几百个这样的节点就让一轮看起来像冻住了。
-		   这个上限**严格生效**：它约束的是**我们自己发出去的那次探测**（给内核的 timeout
-		   和本地等待），而不只是"第一次之后的重试" —— 以前 5 秒的上限允许单次 9 秒的探测，
-		   所以那个设置看起来毫无作用。 */
-		int nodeLimitMs = Math.max(1000, prefs.getNodeTestLimit() * 1000);
-		final long nodeDeadline = System.currentTimeMillis() + nodeLimitMs;
-		boolean failed = false;
-		int hardFails = 0;
-		for (String target : targets) {
-			if (!TestProgress.running()) {
-				logOnce("nodelimit:" + name,
-					"测速: 本轮已结束 → " + name + " 按未测速处理");
-				return null;              /* 是这一轮被放弃了，而不是这个节点有问题 */
-			}
-			long remaining = nodeDeadline - System.currentTimeMillis();
-			if (remaining < 500) {
-				logOnce("nodelimit:" + name, "测速: " + name + " 已达单节点上限 "
-					+ (nodeLimitMs / 1000) + "s → 停止尝试");
-				return noVerdict(true);
-			}
-			/* 给内核的时间绝不超过这个节点的剩余额度：否则它会占着那唯一的探测槽位，
-			   一直超过我们自己设的上限。 */
-			int effTimeout = (int) Math.max(1000L, Math.min((long) timeoutMs, remaining));
-			Long d = delayProbe(name, target, effTimeout, remaining);
-			if (d != null && d >= 0)
-			  return d;
-			/* 这里只记失败/故障，所以正常工作的节点不会制造噪音，
-			   而即将被判定的节点会留下完整线索（目标 + 返回了什么）。 */
-			TProxyService.log("测速: " + name + " @" + target + " -> "
-				+ (d == null ? ("无响应（等待 " + (remaining / 1000) + "s 上限内没有判定）")
-					: "失败(" + d + ")"));
-			if (d == null) {
-				/* 这次探测**完全没有**应答。再换剩下的目标也只是把同样的沉默重复一遍，
-				   所以就此打住，交给策略判断：「无响应判为不可用」开着（默认）时这就是
-				   "不可用"—— 对用户来说，超时本来就意味着不可用。 */
-				return noVerdict(true);
-			}
-			failed = true;
-			hardFails++;
-			/* 提前转入救援探测是批量测速能快起来的关键：批量下**一次**硬失败就够了，
-			   因为救援（换一个更可靠的目标、用更长的超时）本身就是确认。
-			   单节点测试则保留完整的"逐个目标"流程。 */
-			if (hardFails >= (TestProgress.batch() ? 1 : 2))
-			  break;
-		}
-		if (capped)
-		  logOnce("cap", "测速: 批量测速把单目标超时收紧为 "
-			+ (BATCH_PROBE_TIMEOUT_MS / 1000) + "s（设置在 "
-			+ prefs.getProxyTestTimeout() + "s），并对失败节点提前转入救援探测");
-		if (!failed)
-		  return noVerdict(false);  /* 实际上一次探测都没发出去 */
-		/* 救援轮：用更长的超时去探最可靠的那个（些）目标，救回那些"慢但能用"、只是被
-		   紧超时判失败的节点。这就是老的"真实请求"兜底曾经起到的作用，但**不碰**全局
-		   选择器；而且只对即将被标记的节点才跑。 */
-		long leftMs = nodeDeadline - System.currentTimeMillis();
-		if (leftMs < 1000 || !TestProgress.running()) {
-			/* 已经看到硬失败，但这个节点的额度用完了：没有救援探测能再确认它。
-			   按策略上报 —— 上限是用户自己定的，而「无响应判为不可用」开着时，
-			   "额度用尽"**就是**一次失败（这正是"5 秒没响应就是不可用"那种情况）。 */
-			logOnce("nodelimit-r:" + name, "测速: " + name
-				+ " 单节点上限（" + (nodeLimitMs / 1000) + "s）已用尽，跳过救援探测");
-			return noVerdict(TestProgress.running());
-		}
-		int retryMs = (int) Math.min(
-			Math.max(timeoutMs, TestProgress.batch() ? 8000 : 12000), leftMs);
-		int retryCount = TestProgress.batch() ? 1 : RETRY_TEST_URLS.length;
-		for (int ri = 0; ri < retryCount; ri++) {
-			String target = RETRY_TEST_URLS[ri];
-			Long d = delayProbe(name, target, retryMs, leftMs);
-			if (d != null && d >= 0) {
-				TProxyService.log("测速: " + name + " 救援探测成功 " + d + "ms @"
-					+ target + "（首轮 " + timeoutMs / 1000 + "s 超时偏紧）");
-				return d;
-			}
-			if (d == null) {
-				TProxyService.log("测速: " + name + " 救援探测无响应 @" + target);
-				return noVerdict(true);
-			}
-			TProxyService.log("测速: " + name + " 救援探测失败 @" + target + " -> " + d);
-		}
-		TProxyService.log("测速: " + name + " → 判定不可用（目标与救援探测均失败）");
-		return -2L;                   /* genuinely unreachable */
+		Long d = delayProbe(name, target, timeoutMs, maxWaitMs);
+		if (d != null && d >= 0)
+		  return d;                      /* 通 = 节点活 */
+		TProxyService.log("测速: " + name + " @" + target + " -> "
+			+ (d == null ? ("无响应（" + (timeoutMs / 1000) + "s 内未判定）")
+				: "失败(" + d + ")"));
+		/* 一次探测超时/失败即判定该节点不可用（「无响应判为不可用」开着时就是不可用），
+		   不再继续试探其它目标 —— 这就是"每个节点只测一次"。 */
+		return noVerdict(true);
 	}
 
 	/* 所有探测都没拿到延迟时的**最终判定**。
@@ -1614,11 +1609,7 @@ public class SubscribeActivity extends BaseActivity {
 		return null;
 	}
 
-	/* 最可靠的目标，只有救援轮会用。 */
-	private static final String[] RETRY_TEST_URLS = {
-		"http://cp.cloudflare.com",
-		"http://www.gstatic.com/generate_204",
-	};
+
 
 	/* 一次 /delay 探测。成功返回延迟（>=0）；内核明确报探测失败（504/408）返回 -2；
 	   测试根本没能跑起来（传输不通 / 鉴权 / 路由 / 其它状态码）返回 null ——
@@ -1627,8 +1618,8 @@ public class SubscribeActivity extends BaseActivity {
 		/* 首选：通过动作桥用内核自己的隔离式探测。只要本进程里加载了内核（也就是那个
 		   无 TUN 的测速内核）就可用，所以 VPN 关着、没有任何 HTTP 也能测延迟。
 		   本进程没有内核时返回 null。
-		   maxWaitMs = 该节点的剩余额度：等得比它更久，会让「每节点测速上限」变成一句
-		   空话。 */
+		   maxWaitMs = 这次探测愿意最多等多久回包（单次探测超时 + 缓冲），仅用于给桥留足
+		   等待余量，不再受「每节点上限」约束。 */
 		Long viaCore = CoreTestHost.testDelay(name, target, timeoutMs, maxWaitMs);
 		if (viaCore != null)
 		  return viaCore;

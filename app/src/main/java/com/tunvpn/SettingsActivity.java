@@ -128,17 +128,12 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			});
 
 		/* ===== 延迟测试配置 =====
-		   测速地址 / 超时 / 节点上限 / 探测超时判定 / 自动重测间隔 / 预加载测速内核，
+		   测速地址 / 超时 / 探测超时判定 / 自动重测间隔 / 预加载测速内核，
 		   这些只影响"怎么测延迟"，与订阅本身无关，单独归到一类更清楚。 */
 		addRow(group_latency, R.drawable.ic_routing, R.string.sub_test_url_title,
 			getString(R.string.sub_test_url, prefs.getAutoTestUrl()), R.id.settings_test_url);
 		addRow(group_latency, R.drawable.ic_routing, R.string.settings_test_timeout,
 			getString(R.string.sub_test_timeout, prefs.getProxyTestTimeout()), R.id.settings_test_timeout);
-		/* 单个节点（含它所有探测）的**硬性**时间上限。没有它时，一个从不回应的节点
-		   能烧掉约 36 秒，一轮"测速全部"就会慢到看起来卡死。 */
-		addRow(group_latency, R.drawable.ic_routing, R.string.settings_node_limit,
-			getString(R.string.sub_test_node_limit, prefs.getNodeTestLimit()),
-			R.id.settings_node_limit);
 		/* 探测**完全没有回应**时该怎么算：不可用（默认）还是未测速。做成开关，是因为
 		   否则"所有节点都变不可用"与"内核/桥坏了"这两种情况很难区分。 */
 		addSwitchRow(group_latency, R.drawable.ic_routing,
@@ -564,49 +559,6 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			null);
 	}
 
-	/* 一个节点的测速时间上限（秒，5-120）。这个值决定"测速全部"在单个节点上最多花
-	   多久：该节点的探测都在这个窗口内尝试，到点还没测出结果的按「未测速」处理，
-	   不做猜测。 */
-	private void editNodeTestLimit() {
-		final int cur = prefs.getNodeTestLimit();
-		showInputDialog(R.string.settings_node_limit,
-			getString(R.string.settings_node_limit),
-			getString(R.string.sub_test_node_limit_hint),
-			InputType.TYPE_CLASS_NUMBER,
-			Integer.toString(cur),
-			new InputValidator() {
-				@Override public String validate(String v) {
-					if (v.isEmpty())
-					  return getString(R.string.sub_test_node_limit_invalid);
-					int s;
-					try {
-						s = Integer.parseInt(v);
-					} catch (NumberFormatException e) {
-						return getString(R.string.sub_test_node_limit_invalid);
-					}
-					if (s < Preferences.MIN_NODE_TEST_LIMIT
-							|| s > Preferences.MAX_NODE_TEST_LIMIT)
-					  return getString(R.string.sub_test_node_limit_invalid);
-					return null;
-				}
-			},
-			new OnValue() {
-				@Override public void onReceiveValue(String v) {
-					int s;
-					try {
-						s = Integer.parseInt(v);
-					} catch (NumberFormatException e) {
-						s = cur;
-					}
-					int clamped = Math.max(Preferences.MIN_NODE_TEST_LIMIT,
-						Math.min(Preferences.MAX_NODE_TEST_LIMIT, s));
-					prefs.setNodeTestLimit(clamped);
-					buildList();
-				}
-			},
-			null);
-	}
-
 	@Override
 	public void onClick(View view) {
 		int id = view.getId();
@@ -624,8 +576,6 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  editTestUrl();
 		else if (id == R.id.settings_test_timeout)
 		  editTestTimeout();
-		else if (id == R.id.settings_node_limit)
-		  editNodeTestLimit();
 		else if (id == R.id.settings_proxy_port)
 		  editPort();
 		else if (id == R.id.settings_log)

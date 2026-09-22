@@ -260,10 +260,9 @@ class CoreTestHost {
 		return testDelay(proxyName, url, timeoutMs, 0);
 	}
 
-	/* 同上，但显式限定"最多等回包多久"。调用方的**每节点测速上限**
-	   （设置 → 每节点测速上限）可能比探测自身的超时更**紧**；等超过它就是让那个设置
-	   说谎（调用方放弃之后，内核还占着那唯一的桥槽位），所以这个上界一路传到桥的等待
-	   时间上。传 0 = 用默认值（探测超时 + 5s）。 */
+	/* 同上，但显式限定"最多等回包多久"。调用方传 0 = 用默认值（探测超时 + 5s），
+	   或在 SubscribeActivity 里传（单次探测超时 + 缓冲）作为上限，避免客户端在等内核
+	   那次探测时先超时。不再有"每节点测速上限"这种更紧的总时限。 */
 	static Long testDelay(String proxyName, String url, int timeoutMs, long waitBound) {
 		final long waitMs = waitBound > 0
 			? Math.max(500L, Math.min(timeoutMs + 5000L, waitBound))

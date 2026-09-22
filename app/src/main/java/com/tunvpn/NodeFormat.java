@@ -60,29 +60,30 @@ public class NodeFormat {
 		if (t.startsWith("-"))
 		  t = t.substring(1).trim();
 
-		if (t.startsWith("{") || t.startsWith("[")) {
+		/* 我们的存储格式是 clash flow map（未加引号的键），但也要兼容用户粘贴的 JSON。
+		   flow map 解析器本就能吃带引号的 JSON 写法，所以优先用它；解析出来的
+		   `{"proxies":[...]}` 也顺手展开成单条节点。 */
+		if (t.startsWith("{")) {
 			try {
-				Object o = parseJson(t);
-				if (o instanceof Map) {
-					Map<String, Object> mm = (Map<String, Object>) o;
-					/* {"proxies":[{"name":...}]} 这类包裹，取第一条。 */
-					Object p = mm.get("proxies");
+				Map<String, Object> fm = parseFlowMap(t);
+				if (fm != null && !fm.isEmpty()) {
+					Object p = fm.get("proxies");
 					if (p instanceof List && !((List<?>) p).isEmpty())
 					  return (Map<String, Object>) ((List<?>) p).get(0);
-					return mm;
+					return fm;
 				}
-				if (o instanceof List && !((List<?>) o).isEmpty())
-				  return (Map<String, Object>) ((List<?>) o).get(0);
-			} catch (Exception e) {
+			} catch (Exception ignore) {
 			}
 			return null;
 		}
-		if (t.startsWith("{")) {
+		if (t.startsWith("[")) {
 			try {
-				return parseFlowMap(t);
-			} catch (Exception e) {
-				return null;
+				List<Object> seq = parseFlowSeq(t);
+				if (seq != null && !seq.isEmpty())
+				  return (Map<String, Object>) seq.get(0);
+			} catch (Exception ignore) {
 			}
+			return null;
 		}
 		return null;
 	}
@@ -215,7 +216,7 @@ public class NodeFormat {
 						i++;
 					}
 				}
-				value = unquote(s.substring(start, i).trim());
+				value = scalarToObj(s.substring(start, i).trim());
 			}
 			map.put(key, value);
 		}
@@ -261,7 +262,7 @@ public class NodeFormat {
 						i++;
 					}
 				}
-				list.add(unquote(s.substring(start, i).trim()));
+				list.add(scalarToObj(s.substring(start, i).trim()));
 			}
 		}
 		return list;
@@ -338,6 +339,37 @@ public class NodeFormat {
 			return a;
 		}
 		return v;
+	}
+
+	/* 标量：加引号的一定是字符串；否则把 true/false/null 与数字还原成真实类型，
+	   这样转成 JSON 时不会把 443 / false 写成字符串。 */
+	private static Object scalarToObj(String s) {
+		if (s == null)
+		  return "";
+		s = s.trim();
+		if (s.isEmpty())
+		  return "";
+		int len = s.length();
+		if (len >= 2 &&
+			((s.charAt(0) == '"' && s.charAt(len - 1) == '"') ||
+			 (s.charAt(0) == '\'' && s.charAt(len - 1) == '\'')))
+		  return unquote(s);
+		if (s.equals("true"))
+		  return Boolean.TRUE;
+		if (s.equals("false"))
+		  return Boolean.FALSE;
+		if (s.equals("null"))
+		  return "";
+		try {
+			if (s.indexOf('.') >= 0 || s.indexOf('e') >= 0 || s.indexOf('E') >= 0)
+			  return Double.parseDouble(s);
+			long l = Long.parseLong(s);
+			if (l >= Integer.MIN_VALUE && l <= Integer.MAX_VALUE)
+			  return (int) l;
+			return l;
+		} catch (NumberFormatException ignore) {
+		}
+		return s;
 	}
 
 	private static boolean isSpace(char c) {

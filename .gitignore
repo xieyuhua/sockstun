@@ -1,4 +1,5 @@
 .gradle
+.cache
 app/.externalNativeBuild
 app/build
 # Per-machine SDK path (created by Android Studio or by hand). Never commit it:

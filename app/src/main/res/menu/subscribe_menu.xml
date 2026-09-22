@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+	  xmlns:app="http://schemas.android.com/apk/res-auto">
 	<item
 		android:id="@+id/action_help"
 		android:title="@string/sub_help"/>
-	<!-- 把当前**可用**的节点固化成本地备份订阅，机场地址失效时仍能用（见 backupAvailableNodes）。 -->
+	<!-- 把当前**可用**的节点固化成本地备份订阅，机场地址失效时仍能用（见 showBackupManager）。 -->
 	<item
 		android:id="@+id/action_backup"
-		android:title="@string/backup_nodes"/>
+		android:title="@string/backup_nodes"
+		android:icon="@drawable/ic_backup"
+		app:showAsAction="ifRoom"/>
 </menu>
