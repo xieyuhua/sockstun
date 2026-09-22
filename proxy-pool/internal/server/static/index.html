@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>代理池测速服务器</title>
+<style>
+  :root{
+    --bg:#0d1117; --bg2:#151b23; --bg3:#1c2430; --line:#243040;
+    --fg:#e6edf3; --fg2:#9aa7b4; --acc:#3fb950; --acc2:#238636;
+    --blue:#4493f8; --warn:#d29922; --err:#f85149;
+    --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  a{color:var(--blue);text-decoration:none}
+  header{position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;
+    padding:14px 20px;background:rgba(13,17,23,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .brand{display:flex;gap:12px;align-items:center}
+  .logo{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;font-size:20px;
+    background:linear-gradient(135deg,#238636,#4493f8)}
+  h1{margin:0;font-size:16px}
+  .brand p{margin:0;font-size:12px;color:var(--fg2)}
+  .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  main{max-width:1180px;margin:0 auto;padding:20px;display:flex;flex-direction:column;gap:16px}
+  .card{background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+  .card h2{margin:0 0 12px;font-size:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .hint{font-size:12px;color:var(--fg2);font-weight:400}
+  .btn{border:1px solid var(--line);background:var(--bg3);color:var(--fg);padding:7px 14px;border-radius:8px;cursor:pointer;font-size:13px}
+  .btn:hover{border-color:#3d4b5c}
+  .btn.primary{background:var(--acc2);border-color:var(--acc2);color:#fff}
+  .btn.primary:hover{background:#2ea043}
+  .btn.ghost{background:transparent}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn.mini{padding:3px 9px;font-size:12px}
+  .pill{padding:4px 12px;border-radius:999px;font-size:12px;background:var(--bg3);border:1px solid var(--line);color:var(--fg2)}
+  .pill.run{background:#12341c;border-color:#1f7a35;color:#7ee787}
+  .pill.err{background:#3d1418;border-color:#8b2b31;color:#ff9a92}
+  .bar{height:8px;background:var(--bg3);border-radius:999px;overflow:hidden;margin-top:10px}
+  .bar>div{height:100%;width:0;background:linear-gradient(90deg,#238636,#4493f8);transition:width .3s}
+  .bar.indet>div{width:35%;animation:slide 1.2s infinite}
+  @keyframes slide{0%{margin-left:-35%}100%{margin-left:100%}}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px}
+  .stat{background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);padding:13px 15px}
+  .stat b{display:block;font-size:20px;font-weight:600;margin-top:2px}
+  .stat span{font-size:12px;color:var(--fg2)}
+  .form-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  input,select{background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:7px 10px;font-size:13px;min-width:0}
+  input:focus,select:focus{outline:none;border-color:var(--blue)}
+  form.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px 14px}
+  form.grid label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--fg2)}
+  form.grid label input,form.grid label select{width:100%}
+  .check{flex-direction:row!important;align-items:center;gap:8px!important}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+  th{color:var(--fg2);font-weight:500;font-size:12px;position:sticky;top:0;background:var(--bg2)}
+  tbody tr:hover{background:var(--bg3)}
+  .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;background:var(--bg3);border:1px solid var(--line);color:var(--fg2)}
+  .ok{color:var(--acc)} .bad{color:var(--err)} .muted{color:var(--fg2)}
+  .scroll{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  .scroll table th{background:var(--bg2);top:-1px}
+  #logs{background:#010409;border:1px solid var(--line);border-radius:10px;padding:12px;height:240px;overflow:auto;
+    font:12px/1.7 "Cascadia Code",Consolas,monospace;white-space:pre-wrap;margin:0;color:#c9d1d9}
+  .lvl-WARN{color:var(--warn)} .lvl-ERROR{color:var(--err)} .lvl-INFO{color:#7ee787} .lvl-DEBUG{color:var(--fg2)}
+  .suburl{font:12px ui-monospace,monospace;color:var(--fg2);word-break:break-all}
+  .empty{padding:24px;text-align:center;color:var(--fg2);font-size:13px}
+  .toast{position:fixed;right:20px;bottom:20px;background:var(--bg3);border:1px solid var(--line);border-left:3px solid var(--acc);
+    padding:11px 16px;border-radius:8px;font-size:13px;max-width:420px;z-index:99}
+  .toast.err{border-left-color:var(--err)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <div class="logo">⚡</div>
+    <div>
+      <h1>代理池测速服务器</h1>
+      <p>多订阅合并 · 真实可用性测速 · 输出 Clash 配置</p>
+    </div>
+  </div>
+  <div class="actions">
+    <span id="statusPill" class="pill">空闲</span>
+    <button class="btn primary" id="btnRun">立即测速生成</button>
+    <button class="btn" id="btnRetest">仅重新测速</button>
+    <button class="btn ghost" id="btnReload">重载配置</button>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <strong id="stageText">空闲</strong>
+      <span class="hint" id="progressText"></span>
+    </div>
+    <div class="bar" id="barWrap"><div id="barFill"></div></div>
+  </section>
+
+  <section class="stats" id="stats"></section>
+
+  <section class="card">
+    <h2>订阅地址 <span class="hint">支持 Clash YAML、Base64 分享链接、明文链接列表；可添加任意多个，自动去重合并</span></h2>
+    <form class="form-row" id="subForm" autocomplete="off">
+      <input name="name" placeholder="名称（例如：机场 A）" style="flex:0 0 170px">
+      <input name="url" placeholder="https://example.com/api/v1/client/subscribe?token=xxxx" required style="flex:1 1 380px">
+      <input name="user_agent" placeholder="User-Agent（可选）" style="flex:0 0 180px">
+      <button class="btn primary" type="submit">添加订阅</button>
+    </form>
+    <div class="scroll">
+      <table>
+        <thead><tr><th style="width:190px">名称</th><th>订阅地址</th><th style="width:90px">状态</th><th style="width:230px">操作</th></tr></thead>
+        <tbody id="subBody"></tbody>
+      </table>
+    </div>
+    <p class="suburl" style="margin:12px 0 0">
+      生成的 Clash 订阅地址（可直接填入 Clash / mihomo 客户端）：
+      <a id="clashLink" href="#" target="_blank"></a>
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>测速与输出设置 <span class="hint">内核模式会真实访问网络，只有能连通外网的节点才会被保留</span></h2>
+    <form class="grid" id="cfgForm" autocomplete="off">
+      <label>测速引擎
+        <select name="mode">
+          <option value="core">core（mihomo 内核，真实测速，推荐）</option>
+          <option value="tcp">tcp（仅端口连通性，无需内核）</option>
+        </select>
+      </label>
+      <label>并发内核实例数 <input name="concurrency" type="number" min="1" max="16"></label>
+      <label>单节点探测超时 <input name="timeout" placeholder="5s"></label>
+      <label>最大可接受延迟 (ms) <input name="max_delay" type="number" min="0"></label>
+      <label>延迟探测地址 <input name="delay_url"></label>
+      <label>节点池上限 <input name="max_nodes" type="number" min="0"></label>
+      <label>输出文件路径 <input name="output_path"></label>
+      <label>Clash 混合端口 <input name="mixed_port" type="number" min="1" max="65535"></label>
+      <label>测速文件地址 <input name="download_url"></label>
+      <label>单节点测速时长 <input name="download_duration" placeholder="6s"></label>
+      <label>下载测速节点数（Top N） <input name="download_top" type="number" min="0"></label>
+      <label>最低速度 (MB/s) <input name="min_speed_mb" type="number" step="0.1" min="0"></label>
+      <label>定时生成间隔 <input name="interval" placeholder="30m"></label>
+      <label class="check"><input name="download_enabled" type="checkbox"> 启用下载测速</label>
+      <label class="check"><input name="scheduler_enabled" type="checkbox"> 启用定时自动生成</label>
+      <label class="check"><input name="run_on_start" type="checkbox"> 启动时自动生成一次</label>
+    </form>
+    <div class="form-row" style="margin-top:12px">
+      <button class="btn primary" id="btnSaveCfg" type="button">保存设置</button>
+      <span class="hint">提示：内核缺失时会自动从 GitHub 下载 mihomo 到 bin 目录，可在配置文件中设置 gh_proxy 加速</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>节点池 <span class="hint" id="nodeHint"></span></h2>
+    <div class="form-row">
+      <input id="nodeSearch" placeholder="搜索节点名 / 地址…" style="flex:1 1 260px">
+      <label class="check"><input type="checkbox" id="showAll"> 显示不可用节点</label>
+      <button class="btn" id="btnRefreshNodes">刷新列表</button>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th style="width:210px">节点</th><th style="width:70px">地区</th><th style="width:80px">类型</th>
+          <th style="width:80px">延迟</th><th style="width:100px">速度</th><th>来源</th><th style="width:150px">状态</th>
+        </tr></thead>
+        <tbody id="nodeBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>运行日志</h2>
+    <pre id="logs"></pre>
+  </section>
+</main>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+const $ = (s) => document.querySelector(s);
+let lastSeq = 0, wasRunning = false, nodeCache = [];
+
+function api(path, options = {}) {
+  const url = new URL(path, location.origin);
+  if (TOKEN) url.searchParams.set('token', TOKEN);
+  return fetch(url, options).then(async (r) => {
+    const text = await r.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (e) { data = { error: text }; }
+    if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
+    return data;
+  });
+}
+
+function toast(msg, isErr) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (isErr ? ' err' : '');
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+/* ---------- 状态 ---------- */
+async function refreshStatus() {
+  try {
+    const data = await api('/api/status');
+    const p = data.progress || {};
+    const running = !!p.running;
+
+    const pill = $('#statusPill');
+    pill.textContent = running ? (p.trigger || '运行中') : '空闲';
+    pill.className = 'pill' + (running ? ' run' : '');
+
+    $('#stageText').textContent = running ? (p.stage || '处理中') : '空闲（等待任务）';
+    if (p.total > 0) {
+      const pct = Math.min(100, Math.round(p.done / p.total * 100));
+      $('#progressText').textContent = p.stage + ' ' + p.done + '/' + p.total + '（' + pct + '%）';
+      $('#barWrap').classList.remove('indet');
+      $('#barFill').style.width = pct + '%';
+    } else if (running) {
+      $('#progressText').textContent = p.stage || '';
+      $('#barWrap').classList.add('indet');
+    } else {
+      $('#progressText').textContent = data.output && data.output.exists
+        ? '配置文件已就绪 · ' + data.output.mod_time : '尚未生成配置文件';
+      $('#barWrap').classList.remove('indet');
+      $('#barFill').style.width = '0%';
+    }
+
+    $('#btnRun').disabled = running;
+    $('#btnRetest').disabled = running;
+
+    renderStats(data);
+    if (wasRunning && !running) { loadNodes(); }
+    wasRunning = running;
+  } catch (e) { /* 忽略瞬时错误 */ }
+}
+
+function renderStats(data) {
+  const snap = data.snapshot || {};
+  const out = data.output || {};
+  const dur = snap.duration_ms ? (snap.duration_ms / 1000).toFixed(1) + 's' : '-';
+  const cards = [
+    ['可用节点', snap.alive != null ? snap.alive : '-', '写入配置 ' + (snap.active || 0) + ' 个'],
+    ['解析节点', snap.total != null ? snap.total : '-', '去重 ' + (snap.duplicated || 0) + ' · 丢弃 ' + (snap.dropped || 0)],
+    ['测速引擎', snap.engine || '-', snap.trigger || ''],
+    ['上次生成', snap.at ? snap.at.replace('T', ' ').slice(0, 19) : '-', '耗时 ' + dur],
+    ['配置文件', out.exists ? (out.size / 1024).toFixed(1) + ' KB' : '未生成', out.exists ? out.mod_time : out.path],
+    ['运行时长', data.uptime || '-', '启动于 ' + (data.started_at || '-')],
+  ];
+  $('#stats').innerHTML = cards.map(([t, v, s]) =>
+    `<div class="stat"><span>${esc(t)}</span><b>${esc(v)}</b><span>${esc(s)}</span></div>`).join('');
+}
+
+/* ---------- 订阅 ---------- */
+async function loadSubs() {
+  const data = await api('/api/subscriptions');
+  const subs = data.subscriptions || [];
+  const body = $('#subBody');
+  if (!subs.length) {
+    body.innerHTML = '<tr><td colspan="4" class="empty">还没有订阅，先在上方添加一个吧</td></tr>';
+    return;
+  }
+  body.innerHTML = subs.map((s) => `
+    <tr>
+      <td>${esc(s.name)}</td>
+      <td class="suburl">${esc(s.url)}</td>
+      <td>${s.disabled ? '<span class="tag">已停用</span>' : '<span class="tag ok">启用中</span>'}</td>
+      <td>
+        <button class="btn mini" data-act="toggle" data-id="${s.id}">${s.disabled ? '启用' : '停用'}</button>
+        <button class="btn mini" data-act="check" data-id="${s.id}">测试</button>
+        <button class="btn mini" data-act="del" data-id="${s.id}">删除</button>
+      </td>
+    </tr>`).join('');
+}
+
+$('#subBody').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const { act, id } = btn.dataset;
+  try {
+    if (act === 'del') {
+      if (!confirm('确定删除该订阅？')) return;
+      await api('/api/subscriptions/' + id, { method: 'DELETE' });
+      toast('已删除');
+    } else if (act === 'toggle') {
+      const disabled = btn.textContent.trim() === '停用';
+      await api('/api/subscriptions/' + id, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ disabled }),
+      });
+      toast(disabled ? '已停用' : '已启用');
+    } else if (act === 'check') {
+      btn.disabled = true; btn.textContent = '测试中';
+      const res = await api('/api/subscriptions/' + id + '/check', { method: 'POST' });
+      btn.disabled = false; btn.textContent = '测试';
+      if (res.ok) {
+        toast('解析成功：' + res.count + ' 个节点\n' + (res.samples || []).join('\n'));
+      } else {
+        toast('测试失败：' + res.error, true);
+      }
+      return;
+    }
+    loadSubs();
+  } catch (err) { toast(err.message, true); }
+});
+
+$('#subForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  try {
+    await api('/api/subscriptions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: fd.get('name'), url: fd.get('url'), user_agent: fd.get('user_agent') }),
+    });
+    e.target.reset();
+    toast('订阅已添加');
+    loadSubs();
+  } catch (err) { toast(err.message, true); }
+});
+
+/* ---------- 设置 ---------- */
+async function loadConfig() {
+  const c = await api('/api/config');
+  const f = $('#cfgForm');
+  f.mode.value = c.speedtest.mode;
+  f.concurrency.value = c.speedtest.concurrency;
+  f.timeout.value = c.speedtest.timeout;
+  f.max_delay.value = c.speedtest.max_delay;
+  f.delay_url.value = c.speedtest.delay_url;
+  f.max_nodes.value = c.pool.max_nodes;
+  f.output_path.value = c.output.path;
+  f.mixed_port.value = c.output.mixed_port;
+  f.download_url.value = c.speedtest.download.url;
+  f.download_duration.value = c.speedtest.download.duration;
+  f.download_top.value = c.speedtest.download.top;
+  f.min_speed_mb.value = c.speedtest.download.min_speed_mb;
+  f.download_enabled.checked = !!c.speedtest.download.enabled;
+  f.interval.value = c.scheduler.interval;
+  f.scheduler_enabled.checked = !!c.scheduler.enabled;
+  f.run_on_start.checked = !!c.scheduler.run_on_start;
+
+  const base = location.origin + '/clash.yaml' + (TOKEN ? '?token=' + TOKEN : '');
+  $('#clashLink').href = base;
+  $('#clashLink').textContent = base;
+}
+
+$('#btnSaveCfg').addEventListener('click', async () => {
+  const f = $('#cfgForm');
+  const patch = {
+    pool: { max_nodes: Number(f.max_nodes.value) || 0 },
+    speedtest: {
+      mode: f.mode.value,
+      concurrency: Number(f.concurrency.value) || 4,
+      timeout: f.timeout.value,
+      max_delay: Number(f.max_delay.value) || 0,
+      delay_url: f.delay_url.value,
+      download: {
+        enabled: f.download_enabled.checked,
+        url: f.download_url.value,
+        duration: f.download_duration.value,
+        top: Number(f.download_top.value) || 0,
+        min_speed_mb: Number(f.min_speed_mb.value) || 0,
+      },
+    },
+    output: { path: f.output_path.value, mixed_port: Number(f.mixed_port.value) || 7890 },
+    scheduler: {
+      enabled: f.scheduler_enabled.checked,
+      interval: f.interval.value,
+      run_on_start: f.run_on_start.checked,
+    },
+  };
+  try {
+    await api('/api/config', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+    });
+    toast('设置已保存');
+  } catch (err) { toast(err.message, true); }
+});
+
+/* ---------- 任务 ---------- */
+async function run(cache) {
+  try {
+    await api('/api/run' + (cache ? '?cache=1' : ''), { method: 'POST' });
+    toast('任务已开始');
+  } catch (err) { toast(err.message, true); }
+}
+$('#btnRun').addEventListener('click', () => run(false));
+$('#btnRetest').addEventListener('click', () => run(true));
+$('#btnReload').addEventListener('click', async () => {
+  try { await api('/api/reload', { method: 'POST' }); toast('配置已重载'); loadSubs(); loadConfig(); }
+  catch (err) { toast(err.message, true); }
+});
+$('#btnRefreshNodes').addEventListener('click', loadNodes);
+
+/* ---------- 节点 ---------- */
+async function loadNodes() {
+  try {
+    const data = await api('/api/nodes' + ($('#showAll').checked ? '?all=1' : ''));
+    nodeCache = data.nodes || [];
+    const t = data.at ? data.at : '尚未生成';
+    $('#nodeHint').textContent = `共 ${data.total || 0} 个，可用 ${data.alive || 0} 个，写入配置 ${data.active || 0} 个 · 更新时间 ${t}`;
+    renderNodes();
+  } catch (e) { /* 忽略 */ }
+}
+
+function renderNodes() {
+  const kw = $('#nodeSearch').value.trim().toLowerCase();
+  const list = nodeCache.filter((n) =>
+    !kw || (n.raw.name || '').toLowerCase().includes(kw) || (n.raw.server || '').toLowerCase().includes(kw));
+  const body = $('#nodeBody');
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="7" class="empty">暂无节点数据，点击「立即测速生成」开始</td></tr>';
+    return;
+  }
+  body.innerHTML = list.slice(0, 800).map((n) => {
+    const delay = n.delay > 0 ? n.delay + ' ms' : '-';
+    const speed = n.speed > 0 ? n.speed.toFixed(2) + ' MB/s' : '-';
+    const status = n.alive
+      ? '<span class="ok">可用</span>'
+      : '<span class="bad">不可用</span>' + (n.error ? ' <span class="muted">' + esc(n.error) + '</span>' : '');
+    return `<tr>
+      <td>${esc(n.region_code ? n.emoji : '')} ${esc(n.raw.name)}<div class="suburl">${esc(n.raw.server)}:${esc(n.raw.port)}</div></td>
+      <td>${esc(n.region)}</td>
+      <td><span class="tag">${esc(n.raw.type)}</span></td>
+      <td>${delay}</td>
+      <td>${speed}</td>
+      <td class="muted">${esc(n.source)}</td>
+      <td>${status}</td>
+    </tr>`;
+  }).join('');
+}
+$('#nodeSearch').addEventListener('input', renderNodes);
+$('#showAll').addEventListener('change', loadNodes);
+
+/* ---------- 日志 ---------- */
+async function pollLogs() {
+  try {
+    const data = await api('/api/logs?since=' + lastSeq);
+    lastSeq = data.seq;
+    if (!data.entries || !data.entries.length) return;
+    const box = $('#logs');
+    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 30;
+    const html = data.entries.map((e) =>
+      `<span class="lvl-${esc(e.level)}">[${esc(e.time)}] ${esc(e.level.padEnd(5))}</span> ${esc(e.msg)}`).join('\n');
+    box.innerHTML += (box.innerHTML ? '\n' : '') + html;
+    if (box.innerHTML.length > 200000 || box.textContent.split('\n').length > 500) {
+      box.innerHTML = box.innerHTML.split('\n').slice(-400).join('\n');
+    }
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  } catch (e) { /* 忽略 */ }
+}
+
+/* ---------- 启动 ---------- */
+(async function init() {
+  await loadConfig();
+  await loadSubs();
+  await loadNodes();
+  await refreshStatus();
+  await pollLogs();
+  setInterval(refreshStatus, 1500);
+  setInterval(pollLogs, 2000);
+})();
+</script>
+</body>
+</html>

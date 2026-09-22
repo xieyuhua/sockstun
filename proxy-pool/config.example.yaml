@@ -1,0 +1,116 @@
+# 代理池测速服务器 —— 配置示例
+#
+# 说明：
+#   - 首次启动若当前目录没有 config.yaml，程序会自动生成一份默认配置。
+#   - 相对路径（output.path / speedtest.core.path / output.template）都相对于本配置文件所在目录解析。
+#   - 大部分字段可通过管理页面（http://127.0.0.1:18080/）在线修改，无需手工编辑。
+
+server:
+  # 管理页面与接口监听地址
+  listen: 0.0.0.0:18080
+  # 可选：访问令牌。设置后需要在 URL 上追加 ?token=xxx 或用 Bearer 头访问
+  # token: "change-me"
+
+# ============ 订阅列表（可任意多个，自动合并去重）============
+subscriptions:
+  - id: sub1
+    name: 机场 A
+    url: https://example.com/api/v1/client/subscribe?token=xxxx
+    # disabled: true          # 临时停用该订阅
+    # user_agent: clash-verge/v2.0.0   # 部分机场按 UA 返回不同格式
+    # remark: 备用线路
+  - id: sub2
+    name: 机场 B
+    url: https://example.org/sub?target=clash
+
+# ============ 节点池 ============
+pool:
+  # 节点命名模板，可用占位符：
+  #   {emoji} 地区旗帜  {code} 地区代码  {region} 地区中文
+  #   {index} 序号      {index:03d} 三位序号
+  #   {source} 订阅名   {name} 原始节点名
+  name_format: "{emoji}{code}-{index:03d}"
+  # 最终写入配置的节点数量上限，0 表示不限制
+  max_nodes: 300
+  # 按「服务器 + 端口 + 凭据」去重
+  dedupe: true
+  # 额外丢弃的协议类型（内置白名单之外的协议本来就会被丢弃）
+  # drop_types: ["ssr"]
+
+# ============ 测速 ============
+speedtest:
+  # core：拉起 mihomo 内核做真实延迟 + 下载测速（推荐，只有真正能连通外网的节点才会保留）
+  # tcp ：仅做 TCP 握手探测，无需内核，只能证明端口可达
+  mode: core
+  # 并行内核实例数（每个实例负责一批节点，同时负责延迟与下载测速的并发）
+  concurrency: 4
+  # 单个内核实例内并发延迟探测数量
+  delay_workers: 12
+  # 单个节点探测超时
+  timeout: 5s
+  # 延迟探测目标（返回 204 的地址最合适）
+  delay_url: http://www.gstatic.com/generate_204
+  # 最大可接受延迟（毫秒），超过则判定不可用，0 表示不限制
+  max_delay: 1000
+  # 可用节点数量低于该值时会给出警告（0 表示不检查）
+  min_alive: 1
+
+  # 下载测速（仅 core 模式有效）
+  download:
+    enabled: true
+    url: https://speed.cloudflare.com/__down?bytes=50000000
+    # 单个节点最长测速时长
+    duration: 6s
+    # 只对延迟最优的前 N 个节点做下载测速，0 表示全部
+    top: 30
+    # 低于该速度（MB/s）判定不可用，0 表示不限制
+    min_speed_mb: 0.3
+
+  # mihomo 内核
+  core:
+    # 内核路径，Windows 可省略 .exe
+    path: bin/mihomo.exe
+    # 额外启动参数
+    # args: []
+    # 内核缺失时自动从 GitHub Release 下载
+    auto_download: true
+    # GitHub 加速前缀（国内直连 GitHub 失败时很有用）
+    # gh_proxy: https://ghproxy.net/
+    # 指定内核版本，留空使用最新版
+    # version: v1.19.31
+
+# ============ 输出 ============
+output:
+  # 生成的 Clash 配置文件路径（同时作为订阅地址对外提供）
+  path: data/clash.yaml
+  # 可选：自定义 Clash 模板文件，代理组的 proxies 里用 __NODES__ 占位代表全部节点
+  # template: templates/clash.yaml
+
+  mixed_port: 7890
+  allow_lan: true
+  mode: rule
+  log_level: info
+  ipv6: false
+  unified_delay: true
+  tun_enable: false
+  dns_enable: true
+  # external_controller: 127.0.0.1:9090
+  # secret: ""
+  proxy_group_name: "🚀 节点选择"
+  auto_group_name: "♻️ 自动选择"
+  rules:
+    - GEOIP,CN,DIRECT
+    - MATCH,🚀 节点选择
+  # 需要覆盖/追加的顶层字段（原样写入，例如规则集、sniffer 等）
+  # extra:
+  #   profile:
+  #     store-selected: true
+
+# ============ 定时任务 ============
+scheduler:
+  # 是否启用定时自动生成
+  enabled: true
+  # 执行间隔
+  interval: 30m
+  # 服务启动时先执行一次
+  run_on_start: true
