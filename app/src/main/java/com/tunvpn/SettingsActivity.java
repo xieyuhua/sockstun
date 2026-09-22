@@ -173,6 +173,10 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			});
 		addRow(group_backup, R.drawable.ic_routing, R.string.settings_webdav_config,
 			webdavConfigSubtitle(), R.id.settings_webdav_config);
+		/* 备份管理：进入独立界面，里面才有「备份当前可用节点」按钮、
+		   备份历史记录、以及「覆盖当前配置」—— 之前这些只藏在订阅页菜单里。 */
+		addRow(group_backup, R.drawable.ic_backup, R.string.backup_manager_title,
+			backupCountSubtitle(), R.id.settings_backup_manager);
 		addRow(group_general, R.drawable.ic_log, R.string.log,
 			logSubtitle(), R.id.settings_log);
 		addRow(group_general, R.drawable.ic_rules, R.string.settings_config,
@@ -592,6 +596,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  showSecretDialog();
 		else if (id == R.id.settings_webdav_config)
 		  showWebdavConfig();
+		else if (id == R.id.settings_backup_manager)
+		  startActivity(new Intent(this, BackupActivity.class));
 	}
 
 	/* 运行中隧道的实时快照：真实状态（含启动失败）、所在节点/服务器、以及当前计数器。
@@ -794,6 +800,16 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			})
 			.setNegativeButton(android.R.string.cancel, null)
 			.show();
+	}
+
+	/* 备份管理入口那一行下面的副标题：显示已有几份本地备份。 */
+	private String backupCountSubtitle() {
+		int n = 0;
+		for (Subscription s : prefs.getSubscriptions())
+		  if (s.local)
+			n++;
+		return n > 0 ? getString(R.string.backup_count_subtitle, n)
+			: getString(R.string.backup_count_none);
 	}
 
 	/* 配置入口那一行下面的副标题：一眼看出开关状态 + 是否已填地址。 */

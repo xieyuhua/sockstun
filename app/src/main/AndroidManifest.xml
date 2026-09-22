@@ -64,6 +64,8 @@
 			android:exported="false" android:parentActivityName=".SettingsActivity"/>
 		<activity android:name=".RecentRequestsActivity" android:label="@string/settings_recent_requests"
 			android:exported="false" android:parentActivityName=".SettingsActivity"/>
+		<activity android:name=".BackupActivity" android:label="@string/backup_manager_title"
+			android:exported="false" android:parentActivityName=".SettingsActivity"/>
 	</application>
 	<uses-permission android:name="android.permission.INTERNET"/>
 	<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>

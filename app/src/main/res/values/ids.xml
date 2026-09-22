@@ -24,4 +24,5 @@
 	<item name="settings_webdav_pass" type="id"/>
 	<item name="settings_webdav_dir" type="id"/>
 	<item name="settings_webdav_test" type="id"/>
+	<item name="settings_backup_manager" type="id"/>
 </resources>

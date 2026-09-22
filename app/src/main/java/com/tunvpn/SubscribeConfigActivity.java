@@ -218,13 +218,17 @@ public class SubscribeConfigActivity extends BaseActivity {
 							prefs.setSubscriptions(list);
 							load();
 						} else {
-							int n = saveImportedLocal(
+							saveImportedLocal(
 								name.isEmpty() ? getString(R.string.subs_import_name) : name,
-								raw, switchEnabled.isChecked());
-							if (n < 0) {
-								Toast.makeText(SubscribeConfigActivity.this,
-									R.string.subs_add_content_failed, Toast.LENGTH_LONG).show();
-							}
+								raw, switchEnabled.isChecked(),
+								new ImportResult() {
+									@Override public void onResult(int n) {
+										if (n < 0) {
+											Toast.makeText(SubscribeConfigActivity.this,
+												R.string.subs_add_content_failed, Toast.LENGTH_LONG).show();
+										}
+									}
+								});
 						}
 						return;
 					} else {
@@ -350,40 +354,27 @@ public class SubscribeConfigActivity extends BaseActivity {
 			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
 				@Override
 				public void onClick(DialogInterface d, int which) {
-					String input = editContent.getText().toString().trim();
+					final String input = editContent.getText().toString().trim();
 					if (input.isEmpty()) {
 						Toast.makeText(SubscribeConfigActivity.this,
 							R.string.subs_import_empty, Toast.LENGTH_SHORT).show();
 						return;
 					}
-					/* decodeRaw 自己会处理 base64（明文则原样返回）。 */
-					String yaml = ClashParser.decodeRaw(input);
-					if (yaml == null || !yaml.contains("proxies:")) {
-						Toast.makeText(SubscribeConfigActivity.this,
-							R.string.subs_import_failed, Toast.LENGTH_LONG).show();
-						return;
-					}
-					List<ClashNode> parsed = ClashParser.parseAll(yaml);
-					if (parsed.isEmpty()) {
-						Toast.makeText(SubscribeConfigActivity.this,
-							R.string.subs_import_failed, Toast.LENGTH_LONG).show();
-						return;
-					}
-					String id = Subscription.newId();
-					for (ClashNode n : parsed)
-					  n.subId = id;
-					String name = editName.getText().toString().trim();
-					if (name.isEmpty())
-					  name = getString(R.string.subs_import_name);
-					List<Subscription> list = prefs.getSubscriptions();
-					list.add(new Subscription(id, name, "", false, true));
-					prefs.setSubscriptions(list);
-					prefs.setSubRaw(id, yaml);
-					prefs.setSubNodes(id, ClashNode.encode(parsed));
-					load();
+					final String name = editName.getText().toString().trim();
 					Toast.makeText(SubscribeConfigActivity.this,
-						getString(R.string.subs_import_ok, parsed.size()),
-						Toast.LENGTH_LONG).show();
+						R.string.subs_import_fetching, Toast.LENGTH_SHORT).show();
+					/* 后台解析 + 分国家，成功/失败在 UI 线程回调。 */
+					saveImportedLocal(name, input, false, new ImportResult() {
+						@Override public void onResult(int n) {
+							if (n < 0) {
+								Toast.makeText(SubscribeConfigActivity.this,
+									R.string.subs_import_failed, Toast.LENGTH_LONG).show();
+							} else {
+								Toast.makeText(SubscribeConfigActivity.this,
+									getString(R.string.subs_import_ok, n), Toast.LENGTH_LONG).show();
+							}
+						}
+					});
 				}
 			})
 			.setNegativeButton(android.R.string.cancel, null)
@@ -446,15 +437,19 @@ public class SubscribeConfigActivity extends BaseActivity {
 					final String yaml = WebDav.download(prefs, fileName);
 					runOnUiThread(new Runnable() {
 						@Override public void run() {
-							int n = saveImportedLocal(
-								getString(R.string.subs_import_remote_name, fileName), yaml, false);
-							if (n < 0) {
-								Toast.makeText(SubscribeConfigActivity.this,
-									R.string.subs_import_failed, Toast.LENGTH_LONG).show();
-								return;
-							}
-							Toast.makeText(SubscribeConfigActivity.this,
-								getString(R.string.subs_import_ok, n), Toast.LENGTH_LONG).show();
+							saveImportedLocal(
+								getString(R.string.subs_import_remote_name, fileName), yaml, false,
+								new ImportResult() {
+									@Override public void onResult(int n) {
+										if (n < 0) {
+											Toast.makeText(SubscribeConfigActivity.this,
+												R.string.subs_import_failed, Toast.LENGTH_LONG).show();
+										} else {
+											Toast.makeText(SubscribeConfigActivity.this,
+												getString(R.string.subs_import_ok, n), Toast.LENGTH_LONG).show();
+										}
+									}
+								});
 						}
 					});
 				} catch (final IOException e) {
@@ -470,27 +465,55 @@ public class SubscribeConfigActivity extends BaseActivity {
 		}).start();
 	}
 
-	/* 把一份订阅内容（base64 或含 `proxies:` 的明文）存成本地订阅。
-	   decodeRaw 自己会处理 base64（明文则原样返回）。返回节点数；解析失败返回 -1。 */
-	private int saveImportedLocal(String name, String input, boolean enabled) {
-		if (input == null)
-		  return -1;
-		String yaml = ClashParser.decodeRaw(input.trim());
-		if (yaml == null || !yaml.contains("proxies:"))
-		  return -1;
-		List<ClashNode> parsed = ClashParser.parseAll(yaml);
-		if (parsed.isEmpty())
-		  return -1;
-		String id = Subscription.newId();
-		for (ClashNode n : parsed)
-		  n.subId = id;
-		List<Subscription> list = prefs.getSubscriptions();
-		list.add(new Subscription(id, name, "", enabled, true));
-		prefs.setSubscriptions(list);
-		prefs.setSubRaw(id, yaml);
-		prefs.setSubNodes(id, ClashNode.encode(parsed));
-		load();
-		return parsed.size();
+	/* 订阅导入的回调：在 UI 线程执行。成功给节点数，失败给 -1。 */
+	private interface ImportResult {
+		void onResult(int count);
+	}
+
+	/* 把一份订阅内容（base64 或含 `proxies:` 的明文）解析、分好国家、存成本地订阅。
+	   解析与国别解析都在后台线程做（国别解析对域名会走 DNS，绝不能在 UI 线程），
+	   落盘与刷新列表回 UI 线程。这样导入的订阅**立刻**就能按国家筛选，也不卡界面。 */
+	private void saveImportedLocal(final String name, final String input, final boolean enabled,
+	                               final ImportResult listener) {
+		final String trimmed = input == null ? "" : input.trim();
+		if (trimmed.isEmpty()) {
+			if (listener != null) listener.onResult(-1);
+			return;
+		}
+		new Thread(new Runnable() {
+			@Override public void run() {
+				String yaml = ClashParser.decodeRaw(trimmed);
+				if (yaml == null || !yaml.contains("proxies:")) {
+					if (listener != null) listener.onResult(-1);
+					return;
+				}
+				List<ClashNode> parsed = ClashParser.parseAll(yaml);
+				if (parsed.isEmpty()) {
+					if (listener != null) listener.onResult(-1);
+					return;
+				}
+				String id = Subscription.newId();
+				for (ClashNode n : parsed)
+				  n.subId = id;
+				/* 后台分好国家（离线 GeoLite2），订阅列表马上能按国家筛选。 */
+				assignCountries(parsed);
+				final String finalName = (name == null || name.trim().isEmpty())
+				  ? getString(R.string.subs_import_name) : name.trim();
+				final int count = parsed.size();
+				runOnUiThread(new Runnable() {
+					@Override public void run() {
+						List<Subscription> list = prefs.getSubscriptions();
+						list.add(new Subscription(id, finalName, "", enabled, true));
+						prefs.setSubscriptions(list);
+						prefs.setSubRaw(id, yaml);
+						prefs.setSubNodes(id, ClashNode.encode(parsed));
+						prefs.flushCountryMap();
+						load();
+						if (listener != null) listener.onResult(count);
+					}
+				});
+			}
+		}).start();
 	}
 
 	/* 复制**全部订阅地址**（每行一个）：方便分享 / 迁移到别的设备。本地条目没有地址，跳过。 */
@@ -585,6 +608,18 @@ public class SubscribeConfigActivity extends BaseActivity {
 		return super.onContextItemSelected(item);
 	}
 
+	/* 落盘前把每个节点的国家码解析好（离线优先：内置 GeoLite2 库，纯本地、不联网）。
+	   这样订阅列表**立刻**就能按国家筛选，而延迟测试不必再花时间去分国家 —— 测速只测
+	   延迟。同一台 server 的多次解析会自动命中缓存，所以几千个节点也只付一次
+	   DNS / 查询的代价；IP 字面量则连 DNS 都不用，直接查库。后台线程调用才安全
+	   （GeoIp 对域名会走带 3s 上限的 DNS）。 */
+	private void assignCountries(List<ClashNode> nodes) {
+		for (ClashNode n : nodes) {
+			if (n.country == null || n.country.isEmpty() || GeoIp.UNKNOWN.equals(n.country))
+			  n.country = GeoIp.countryOf(prefs, n.server);
+		}
+	}
+
 	/* 拉取每条（已启用的）订阅的 clash.yml，解析后按订阅分别存下原始 YAML 与节点列表。
 	   停用的会跳过，与合并逻辑保持一致。拉完刷新列表，让缓存节点数跟着更新。 */
 	private void fetchAll() {
@@ -617,6 +652,9 @@ public class SubscribeConfigActivity extends BaseActivity {
 							List<ClashNode> parsed = ClashParser.parseAll(yaml);
 							for (ClashNode n : parsed)
 							  n.subId = sub.id;
+							/* 更新订阅时就分好国家：离线查 GeoLite2，写进节点缓存的 country
+							   字段，订阅列表马上能按国家筛选，延迟测试也不必再分国家。 */
+							assignCountries(parsed);
 							prefs.setSubRaw(sub.id, yaml);
 							prefs.setSubNodes(sub.id, ClashNode.encode(parsed));
 							total += parsed.size();
@@ -626,6 +664,9 @@ public class SubscribeConfigActivity extends BaseActivity {
 						}
 					}
 				} finally {
+					/* 把"合并写入"还挂着的 server->国家 映射落盘（最多每 2s 自动写一次，
+					   这里兜底确保更新结束后一定写全，下次生成配置时国家分组才完整）。 */
+					prefs.flushCountryMap();
 					final int fetched = total;
 					final String error = firstError;
 					runOnUiThread(new Runnable() {

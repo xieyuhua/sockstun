@@ -93,12 +93,17 @@ public class SubscribeActivity extends BaseActivity {
 		new java.util.HashMap<String, String>();
 	/* 测速用的**有界**线程池。进程内的动作桥本来就是串行的（只有一个在途回调），
 	   所以 16 个 worker 只是让 15 个线程卡在锁上排队 —— 徒增内存与调度压力，一点不快。
-	   4 个足够喂满内核，也能避免一份超大订阅堆积出一堆做不完的任务。 */
-	private final ExecutorService testPool = Executors.newFixedThreadPool(4);
+	   4 个足够喂满内核，也能避免一份超大订阅堆积出一堆做不完的任务。
+	   必须是**进程级（static）**：一轮测速的寿命长于发起它的 Activity（见 TestProgress），
+	   切页 / Activity 被销毁时这池子不能跟着关掉，否则队列里没跑的节点全被丢弃、
+	   这一轮永远到不了 100%，进度停摆后被看门狗误判成"卡死"。 */
+	private static final ExecutorService testPool = Executors.newFixedThreadPool(4);
 	/* 国别解析跑在**独立线程**上。它只是装饰（国旗 + 国家标签），但每台主机可能耗掉
 	   好几秒（3 秒 DNS 上限再加两次 HTTP 兜底）；之前内联在探测线程里做，会让 worker
-	   测完一个节点后先等国别解析才去测下一个 —— 几百个节点光这一项就能把一轮拖长几分钟。 */
-	private final ExecutorService geoPool = Executors.newSingleThreadExecutor(
+	   测完一个节点后先等国别解析才去测下一个 —— 几百个节点光这一项就能把一轮拖长几分钟。
+	   同样进程级（static）：国别解析任务也捕获了本页面，Activity 销毁后照常跑完、
+	   只跳过 UI 更新，不能因 onDestroy 被掐掉。 */
+	private static final ExecutorService geoPool = Executors.newSingleThreadExecutor(
 		new java.util.concurrent.ThreadFactory() {
 			@Override
 			public Thread newThread(Runnable r) {
@@ -316,10 +321,11 @@ public class SubscribeActivity extends BaseActivity {
 
 	@Override
 	protected void onDestroy() {
-		/* 丢掉排队中的测试任务：它们持有这个 Activity，否则会在页面消失之后继续跑
-		   （还继续投递 UI 更新）。国别解析同理 —— 它的任务通过 ui.post() 捕获了本页面。 */
-		testPool.shutdownNow();
-		geoPool.shutdownNow();
+		/* 不要在这里 shutdownNow() 测速 / 国别池：一轮测速是**进程级**的（见 TestProgress），
+		   其寿命故意长于本页面 —— 切页或本页面被销毁后，剩下的节点仍要在后台继续测完，
+		   否则队列里没跑的节点全被丢弃、这一轮永远到不了 100%，进度停摆、被看门狗误判成
+		   "卡死"。任务本身已经用 pageGone 跳过 UI 更新，跑完只写进程级状态与缓存，安全。
+		   池子是 static 的，随 App 进程存在，不随某个 Activity 实例销毁。 */
 		super.onDestroy();
 	}
 
@@ -750,7 +756,7 @@ public class SubscribeActivity extends BaseActivity {
 	private void armStallWatchdog(final int gen) {
 		/* 下限给到 120s：几千上万个代理时，测速内核加载并应用大配置可能要几十秒，
 		   首个结果出来前别误判成"卡住"。单节点正常探测 ≤ 单次探测超时，不会触发这里。 */
-		final long stallMs = Math.max(120000L, prefs.getProxyTestTimeout() * 1000L + 15000L);
+		final long stallMs = Math.max(30000L, prefs.getProxyTestTimeout() * 1000L + 15000L);
 		ui.postDelayed(new Runnable() {
 			@Override
 			public void run() {
@@ -1109,15 +1115,13 @@ public class SubscribeActivity extends BaseActivity {
 				  resolveCountryAsync(n);
 			}
 		};
-		/* 提交必须防一手：页面销毁时 onDestroy() 会 shutdownNow() 掉这个池，而**正在
-		   跑的**任务仍会走到这里（以及 resolveCountryAsync 里的 geoPool）。往已关闭的池
-		   提交会抛 RejectedExecutionException —— 它是 RuntimeException，无论从主线程还是
-		   从工作线程逃出去都是**进程级未捕获异常**，直接闪退。这正是"测速全部时切到别的
-		   页面就闪退"的原因，所以这里必须接住。 */
+		/* 提交做个兜底：线程池现在是进程级（static）且永不在 onDestroy 关停，
+		   正常情况下不会抛 RejectedExecutionException；这里只是 belt-and-suspenders，
+		   防止任何意外（池关闭 / 拒绝）从工作线程逃出去变成进程级未捕获异常而闪退。 */
 		try {
 			testPool.execute(task);
 		} catch (Throwable e) {
-			TProxyService.log("测速: 任务被拒（线程池已关闭，页面已销毁）→ 跳过节点 "
+			TProxyService.log("测速: 任务被拒（线程池拒绝提交）→ 跳过节点 "
 				+ n.name + " · " + e);
 		}
 	}

@@ -271,6 +271,14 @@
 	<string name="backup_apply">应用此备份（覆盖当前订阅）</string>
 	<string name="backup_apply_save_only">仅保存</string>
 	<string name="backup_applied">已用「%1$s」覆盖当前订阅，重新连接后生效</string>
+	<!-- 备份管理独立界面（设置 → 备份 → 备份管理；见 BackupActivity） -->
+	<string name="backup_now_desc">把当前**测速通过**的节点固化成一份本地备份（不依赖机场地址）。机场失效或订阅被清空时，仍可到「订阅配置」启用它。</string>
+	<string name="backup_history_title">备份历史记录</string>
+	<string name="backup_overwrite">覆盖当前配置</string>
+	<string name="backup_overwrite_confirm">用「%1$s」（%2$d 个节点）覆盖当前订阅？会停用其它订阅，重新连接后生效。</string>
+	<string name="backup_delete_confirm">删除这份备份「%1$s」？此操作不可恢复。</string>
+	<string name="backup_count_subtitle">%1$d 份本地备份</string>
+	<string name="backup_count_none">还没有本地备份</string>
 	<string name="subs_import_webdav">从 WebDAV 导入</string>
 	<string name="subs_import_webdav_none">WebDAV 上没有备份文件</string>
 	<string name="subs_import_webdav_failed">WebDAV 导入失败：%1$s</string>
