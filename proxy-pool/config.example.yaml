@@ -88,6 +88,8 @@ speedtest:
 output:
   # 生成的 Clash 配置文件路径（同时作为订阅地址对外提供）
   path: data/clash.yaml
+  # 替换前是否把上一版保留为 clash.yaml.bak
+  keep_backup: true
   # 可选：自定义 Clash 模板文件，代理组的 proxies 里用 __NODES__ 占位代表全部节点
   # template: templates/clash.yaml
 
@@ -115,7 +117,13 @@ output:
 scheduler:
   # 是否启用定时自动生成
   enabled: true
-  # 执行间隔
+  # cron 表达式（5 字段：分 时 日 月 周），填写后优先于 interval。
+  # 也支持可选的秒字段与描述符。
+  # 示例：0 */6 * * *（每 6 小时）、30 8 * * 1-5（工作日 8:30）、@every 2h、@daily
+  # cron: "0 */6 * * *"
+  # 解释 cron 时使用的时区，留空使用本机时区
+  # timezone: Asia/Shanghai
+  # 未配置 cron 时使用的固定间隔
   interval: 30m
   # 服务启动时先执行一次
   run_on_start: true

@@ -175,6 +175,8 @@ type SpeedTestConfig struct {
 type OutputConfig struct {
 	// Path 生成文件的保存路径。
 	Path string `yaml:"path" json:"path"`
+	// KeepBackup 替换输出文件前是否保留上一版为 <path>.bak。
+	KeepBackup bool `yaml:"keep_backup" json:"keep_backup"`
 	// Template 可选：自定义 Clash 模板文件，代理组中使用 __NODES__ 占位。
 	Template string `yaml:"template,omitempty" json:"template,omitempty"`
 
@@ -196,7 +198,12 @@ type OutputConfig struct {
 
 // SchedulerConfig 定时任务配置。
 type SchedulerConfig struct {
-	Enabled    bool     `yaml:"enabled" json:"enabled"`
+	Enabled bool `yaml:"enabled" json:"enabled"`
+	// Cron cron 表达式（5 字段，支持可选的秒字段与 @every 等描述符）。
+	// 填写后优先使用 cron，留空则使用 Interval 固定间隔。
+	Cron string `yaml:"cron,omitempty" json:"cron,omitempty"`
+	// Timezone 解释 cron 时使用的时区，例如 Asia/Shanghai，留空使用本机时区。
+	Timezone   string   `yaml:"timezone,omitempty" json:"timezone,omitempty"`
 	Interval   Duration `yaml:"interval" json:"interval"`
 	RunOnStart bool     `yaml:"run_on_start" json:"run_on_start"`
 }
@@ -242,6 +249,7 @@ func Default() *Config {
 		},
 		Output: OutputConfig{
 			Path:           "data/clash.yaml",
+			KeepBackup:     true,
 			MixedPort:      7890,
 			AllowLan:       true,
 			Mode:           "rule",
@@ -350,7 +358,9 @@ func (c *Config) Normalize() {
 	if strings.TrimSpace(st.Core.Path) == "" {
 		st.Core.Path = def.SpeedTest.Core.Path
 	}
-	if c.Scheduler.Enabled && c.Scheduler.Interval.D() < 10*time.Second {
+	c.Scheduler.Cron = strings.TrimSpace(c.Scheduler.Cron)
+	c.Scheduler.Timezone = strings.TrimSpace(c.Scheduler.Timezone)
+	if c.Scheduler.Enabled && c.Scheduler.Cron == "" && c.Scheduler.Interval.D() < 10*time.Second {
 		c.Scheduler.Interval = def.Scheduler.Interval
 	}
 	// 补齐订阅 ID

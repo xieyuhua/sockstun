@@ -19,6 +19,8 @@ import (
 	"proxypool/internal/logx"
 	"proxypool/internal/model"
 	"proxypool/internal/runner"
+	"proxypool/internal/schedule"
+	"proxypool/internal/scheduler"
 	"proxypool/internal/speedtest"
 	"proxypool/internal/subscription"
 )
@@ -33,6 +35,12 @@ type Server struct {
 	log       *logx.Buffer
 	static    fs.FS
 	startedAt time.Time
+	schedule  *schedule.State
+}
+
+// SetScheduleState 注入调度状态，用于在状态接口中展示下一次运行时间。
+func (s *Server) SetScheduleState(state *schedule.State) {
+	s.schedule = state
 }
 
 // New 创建 HTTP 服务。
@@ -59,6 +67,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/config", s.guard(s.handleGetConfig))
 	mux.HandleFunc("PUT /api/config", s.guard(s.handlePutConfig))
 	mux.HandleFunc("POST /api/reload", s.guard(s.handleReload))
+	mux.HandleFunc("GET /api/schedule", s.guard(s.handleSchedulePreview))
 
 	mux.HandleFunc("GET /api/subscriptions", s.guard(s.handleListSubs))
 	mux.HandleFunc("POST /api/subscriptions", s.guard(s.handleCreateSub))
@@ -163,6 +172,14 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"output":      out,
 		"token":       cfg.Server.Token != "",
 	}
+	if s.schedule != nil {
+		mode, next := s.schedule.Snapshot()
+		item := map[string]any{"mode": mode, "describe": scheduler.Describe(cfg.Scheduler)}
+		if !next.IsZero() {
+			item["next"] = next.Format("2006-01-02 15:04:05 MST")
+		}
+		resp["schedule"] = item
+	}
 	if snap := s.runner.Last(); snap != nil {
 		summary := *snap
 		summary.Nodes = nil
@@ -232,6 +249,20 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "没有可更新的字段")
 		return
 	}
+	if section, ok := patch["scheduler"].(map[string]any); ok {
+		if expr, ok := section["cron"].(string); ok && strings.TrimSpace(expr) != "" {
+			if err := schedule.Validate(expr); err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if tz, ok := section["timezone"].(string); ok && strings.TrimSpace(tz) != "" {
+			if _, err := schedule.LoadLocation(tz); err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+	}
 	data, err := yaml.Marshal(patch)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -246,6 +277,28 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Info("配置已更新（订阅列表未受影响）")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "config": s.store.Get()})
+}
+
+// handleSchedulePreview 预览 cron 表达式接下来的触发时间，便于确认表达式是否符合预期。
+func (s *Server) handleSchedulePreview(w http.ResponseWriter, r *http.Request) {
+	expr := r.URL.Query().Get("cron")
+	timezone := r.URL.Query().Get("timezone")
+
+	loc, err := schedule.LoadLocation(timezone)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	times, err := schedule.Preview(expr, loc, 5)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	list := make([]string, 0, len(times))
+	for _, t := range times {
+		list = append(list, t.Format("2006-01-02 15:04:05 MST"))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "next": list})
 }
 
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {

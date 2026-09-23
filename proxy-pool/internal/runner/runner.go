@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -254,15 +252,22 @@ func (r *Runner) Run(ctx context.Context, trigger string, opts Options) (*Snapsh
 		r.finish(snap, cfg)
 		return snap, err
 	}
-	if err := writeFileAtomic(outputPath, data); err != nil {
-		snap.Error = fmt.Sprintf("写入配置失败: %v", err)
+	// 整轮任务到此才算完成：校验通过后原子替换，期间订阅地址始终可读到完整的旧文件。
+	report, err := generator.Publish(outputPath, data, cfg.Output.KeepBackup)
+	if err != nil {
+		snap.Error = err.Error()
+		r.logf("ERROR", "%s", err)
 		snap.DurationMS = time.Since(started).Milliseconds()
 		r.finish(snap, cfg)
 		return snap, err
 	}
-	snap.Output = outputPath
+	snap.Output = report.Path
 	snap.DurationMS = time.Since(started).Milliseconds()
-	r.logf("INFO", "已生成 %s（%d 个节点，耗时 %.1fs）", outputPath, len(alive), time.Since(started).Seconds())
+	if report.BackupPath != "" {
+		r.logf("INFO", "上一版配置已备份为 %s", report.BackupPath)
+	}
+	r.logf("INFO", "整轮任务完成，已原子替换 %s（%d 个节点，%.1f KB，耗时 %.1fs）",
+		report.Path, len(alive), float64(report.Size)/1024, time.Since(started).Seconds())
 
 	r.finish(snap, cfg)
 	return snap, nil
@@ -330,17 +335,6 @@ func filterAlive(nodes []*model.Node, cfg *config.Config) []*model.Node {
 	}
 	model.SortByQuality(alive)
 	return alive
-}
-
-func writeFileAtomic(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }
 
 // taskReporter 把测速过程转发到日志与进度。

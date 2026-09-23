@@ -15,6 +15,7 @@ import (
 	"proxypool/internal/config"
 	"proxypool/internal/logx"
 	"proxypool/internal/runner"
+	"proxypool/internal/schedule"
 	"proxypool/internal/scheduler"
 	"proxypool/internal/server"
 )
@@ -70,8 +71,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	scheduleState := &schedule.State{}
+	httpServer.SetScheduleState(scheduleState)
+
 	cfg := store.Get()
-	scheduler.New(store, taskRunner, logBuf).Start(ctx)
+	scheduler.New(store, taskRunner, logBuf, scheduleState).Start(ctx)
 
 	srv := &http.Server{
 		Addr:              cfg.Server.Listen,

@@ -14,18 +14,26 @@
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
   a{color:var(--blue);text-decoration:none}
-  header{position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;
-    padding:14px 20px;background:rgba(13,17,23,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  code{background:var(--bg3);padding:1px 6px;border-radius:5px;font-size:12px}
+  header{position:sticky;top:0;z-index:20;padding:12px 20px 0;background:rgba(13,17,23,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .head-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
   .brand{display:flex;gap:12px;align-items:center}
-  .logo{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;font-size:20px;
-    background:linear-gradient(135deg,#238636,#4493f8)}
+  .logo{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;font-size:20px;background:linear-gradient(135deg,#238636,#4493f8)}
   h1{margin:0;font-size:16px}
   .brand p{margin:0;font-size:12px;color:var(--fg2)}
   .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  main{max-width:1180px;margin:0 auto;padding:20px;display:flex;flex-direction:column;gap:16px}
+  .tabs{display:flex;gap:4px;margin-top:12px;overflow-x:auto}
+  .tab{border:none;background:transparent;color:var(--fg2);padding:10px 16px;font-size:13px;cursor:pointer;
+    border-bottom:2px solid transparent;white-space:nowrap;border-radius:8px 8px 0 0}
+  .tab:hover{color:var(--fg);background:var(--bg2)}
+  .tab.active{color:var(--fg);border-bottom-color:var(--acc);font-weight:600}
+  main{max-width:1180px;margin:0 auto;padding:20px}
+  .panel{display:none;flex-direction:column;gap:16px}
+  .panel.active{display:flex}
   .card{background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
   .card h2{margin:0 0 12px;font-size:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .hint{font-size:12px;color:var(--fg2);font-weight:400}
+  .card h2 .hint{font-weight:400}
+  .hint{font-size:12px;color:var(--fg2)}
   .btn{border:1px solid var(--line);background:var(--bg3);color:var(--fg);padding:7px 14px;border-radius:8px;cursor:pointer;font-size:13px}
   .btn:hover{border-color:#3d4b5c}
   .btn.primary{background:var(--acc2);border-color:var(--acc2);color:#fff}
@@ -35,140 +43,279 @@
   .btn.mini{padding:3px 9px;font-size:12px}
   .pill{padding:4px 12px;border-radius:999px;font-size:12px;background:var(--bg3);border:1px solid var(--line);color:var(--fg2)}
   .pill.run{background:#12341c;border-color:#1f7a35;color:#7ee787}
-  .pill.err{background:#3d1418;border-color:#8b2b31;color:#ff9a92}
   .bar{height:8px;background:var(--bg3);border-radius:999px;overflow:hidden;margin-top:10px}
   .bar>div{height:100%;width:0;background:linear-gradient(90deg,#238636,#4493f8);transition:width .3s}
   .bar.indet>div{width:35%;animation:slide 1.2s infinite}
   @keyframes slide{0%{margin-left:-35%}100%{margin-left:100%}}
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:12px}
   .stat{background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius);padding:13px 15px}
-  .stat b{display:block;font-size:20px;font-weight:600;margin-top:2px}
+  .stat b{display:block;font-size:20px;font-weight:600;margin-top:2px;word-break:break-all}
   .stat span{font-size:12px;color:var(--fg2)}
+  .notice{border-left:3px solid var(--warn);background:#2b2413;color:#f0d68a;
+    padding:10px 14px;border-radius:8px;font-size:13px;white-space:pre-line}
   .form-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
   input,select{background:var(--bg);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:7px 10px;font-size:13px;min-width:0}
   input:focus,select:focus{outline:none;border-color:var(--blue)}
-  form.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px 14px}
-  form.grid label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--fg2)}
-  form.grid label input,form.grid label select{width:100%}
-  .check{flex-direction:row!important;align-items:center;gap:8px!important}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
   th{color:var(--fg2);font-weight:500;font-size:12px;position:sticky;top:0;background:var(--bg2)}
   tbody tr:hover{background:var(--bg3)}
   .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;background:var(--bg3);border:1px solid var(--line);color:var(--fg2)}
   .ok{color:var(--acc)} .bad{color:var(--err)} .muted{color:var(--fg2)}
-  .scroll{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+  .scroll{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:10px}
   .scroll table th{background:var(--bg2);top:-1px}
-  #logs{background:#010409;border:1px solid var(--line);border-radius:10px;padding:12px;height:240px;overflow:auto;
-    font:12px/1.7 "Cascadia Code",Consolas,monospace;white-space:pre-wrap;margin:0;color:#c9d1d9}
-  .lvl-WARN{color:var(--warn)} .lvl-ERROR{color:var(--err)} .lvl-INFO{color:#7ee787} .lvl-DEBUG{color:var(--fg2)}
   .suburl{font:12px ui-monospace,monospace;color:var(--fg2);word-break:break-all}
   .empty{padding:24px;text-align:center;color:var(--fg2);font-size:13px}
   .toast{position:fixed;right:20px;bottom:20px;background:var(--bg3);border:1px solid var(--line);border-left:3px solid var(--acc);
     padding:11px 16px;border-radius:8px;font-size:13px;max-width:520px;z-index:99;white-space:pre-line;line-height:1.7}
   .toast.err{border-left-color:var(--err)}
+
+  /* 设置项：一项一行 */
+  .setting{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 2px;border-bottom:1px solid var(--line)}
+  .setting:last-of-type{border-bottom:none}
+  .setting-info{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .setting-info strong{font-size:13px;font-weight:500}
+  .setting-info span{font-size:12px;color:var(--fg2)}
+  .setting-control{flex:0 0 auto;display:flex;align-items:center;gap:8px}
+  .setting-control input,.setting-control select{width:300px;max-width:48vw}
+  .group-title{margin:18px 0 2px;font-size:12px;color:var(--fg2);letter-spacing:.5px;text-transform:uppercase}
+  .group-title:first-child{margin-top:0}
+
+  /* 开关 */
+  .switch{position:relative;display:inline-block;width:46px;height:24px;flex:0 0 auto;cursor:pointer}
+  .switch input{opacity:0;width:0;height:0;position:absolute}
+  .switch i{position:absolute;inset:0;background:var(--bg3);border:1px solid var(--line);border-radius:999px;transition:.2s}
+  .switch i::before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;border-radius:50%;
+    background:#8b949e;transition:.2s}
+  .switch input:checked + i{background:var(--acc2);border-color:var(--acc2)}
+  .switch input:checked + i::before{transform:translateX(22px);background:#fff}
+  .switch input:focus-visible + i{outline:2px solid var(--blue);outline-offset:2px}
+
+  #logs{background:#010409;border:1px solid var(--line);border-radius:10px;padding:12px;height:calc(100vh - 300px);min-height:280px;
+    overflow:auto;font:12px/1.7 "Cascadia Code",Consolas,monospace;white-space:pre-wrap;margin:0;color:#c9d1d9}
+  .lvl-WARN{color:var(--warn)} .lvl-ERROR{color:var(--err)} .lvl-INFO{color:#7ee787} .lvl-DEBUG{color:var(--fg2)}
 </style>
 </head>
 <body>
 <header>
-  <div class="brand">
-    <div class="logo">⚡</div>
-    <div>
-      <h1>代理池测速服务器</h1>
-      <p>多订阅合并 · 真实可用性测速 · 输出 Clash 配置</p>
+  <div class="head-row">
+    <div class="brand">
+      <div class="logo">⚡</div>
+      <div>
+        <h1>代理池测速服务器</h1>
+        <p>多订阅合并 · 真实可用性测速 · 输出 Clash 配置</p>
+      </div>
+    </div>
+    <div class="actions">
+      <span id="statusPill" class="pill">空闲</span>
+      <button class="btn primary" id="btnRun">立即测速生成</button>
+      <button class="btn" id="btnRetest">仅重新测速</button>
+      <button class="btn ghost" id="btnReload">重载配置</button>
     </div>
   </div>
-  <div class="actions">
-    <span id="statusPill" class="pill">空闲</span>
-    <button class="btn primary" id="btnRun">立即测速生成</button>
-    <button class="btn" id="btnRetest">仅重新测速</button>
-    <button class="btn ghost" id="btnReload">重载配置</button>
-  </div>
+  <nav class="tabs">
+    <button class="tab active" data-tab="home">首页</button>
+    <button class="tab" data-tab="subs">订阅地址</button>
+    <button class="tab" data-tab="settings">测速设置</button>
+    <button class="tab" data-tab="nodes">节点池</button>
+    <button class="tab" data-tab="logs">运行日志</button>
+  </nav>
 </header>
 
 <main>
-  <section class="card">
-    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
-      <strong id="stageText">空闲</strong>
-      <span class="hint" id="progressText"></span>
+  <!-- ============ 首页 ============ -->
+  <section class="panel active" data-panel="home">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <strong id="stageText">空闲</strong>
+        <span class="hint" id="progressText"></span>
+      </div>
+      <div class="bar" id="barWrap"><div id="barFill"></div></div>
     </div>
-    <div class="bar" id="barWrap"><div id="barFill"></div></div>
-  </section>
 
-  <section class="stats" id="stats"></section>
+    <div id="notice" class="notice" style="display:none"></div>
 
-  <section class="card">
-    <h2>订阅地址 <span class="hint">支持 Clash YAML、Base64 分享链接、明文链接列表；可添加任意多个，自动去重合并</span></h2>
-    <form class="form-row" id="subForm" autocomplete="off">
-      <input name="name" placeholder="名称（例如：机场 A）" style="flex:0 0 170px">
-      <input name="url" placeholder="https://example.com/api/v1/client/subscribe?token=xxxx" required style="flex:1 1 380px">
-      <input name="user_agent" placeholder="User-Agent（可选）" style="flex:0 0 180px">
-      <button class="btn primary" type="submit">添加订阅</button>
-    </form>
-    <div class="scroll">
-      <table>
-        <thead><tr><th style="width:190px">名称</th><th>订阅地址</th><th style="width:90px">状态</th><th style="width:230px">操作</th></tr></thead>
-        <tbody id="subBody"></tbody>
-      </table>
-    </div>
-    <p class="suburl" style="margin:12px 0 0">
-      生成的 Clash 订阅地址（可直接填入 Clash / mihomo 客户端）：
-      <a id="clashLink" href="#" target="_blank"></a>
-    </p>
-  </section>
+    <section class="stats" id="stats"></section>
 
-  <section class="card">
-    <h2>测速与输出设置 <span class="hint">内核模式会真实访问网络，只有能连通外网的节点才会被保留</span></h2>
-    <form class="grid" id="cfgForm" autocomplete="off">
-      <label>测速引擎
-        <select name="mode">
-          <option value="core">core（mihomo 内核，真实测速，推荐）</option>
-          <option value="tcp">tcp（仅端口连通性，无需内核）</option>
-        </select>
-      </label>
-      <label>并发内核实例数 <input name="concurrency" type="number" min="1" max="16"></label>
-      <label>单节点探测超时 <input name="timeout" placeholder="5s"></label>
-      <label>最大可接受延迟 (ms) <input name="max_delay" type="number" min="0"></label>
-      <label>延迟探测地址 <input name="delay_url"></label>
-      <label>节点池上限 <input name="max_nodes" type="number" min="0"></label>
-      <label>输出文件路径 <input name="output_path"></label>
-      <label>Clash 混合端口 <input name="mixed_port" type="number" min="1" max="65535"></label>
-      <label>测速文件地址 <input name="download_url"></label>
-      <label>单节点测速时长 <input name="download_duration" placeholder="6s"></label>
-      <label>下载测速节点数（Top N） <input name="download_top" type="number" min="0"></label>
-      <label>最低速度 (MB/s) <input name="min_speed_mb" type="number" step="0.1" min="0"></label>
-      <label>定时生成间隔 <input name="interval" placeholder="30m"></label>
-      <label class="check"><input name="download_enabled" type="checkbox"> 启用下载测速</label>
-      <label class="check"><input name="scheduler_enabled" type="checkbox"> 启用定时自动生成</label>
-      <label class="check"><input name="run_on_start" type="checkbox"> 启动时自动生成一次</label>
-    </form>
-    <div class="form-row" style="margin-top:12px">
-      <button class="btn primary" id="btnSaveCfg" type="button">保存设置</button>
-      <span class="hint">提示：内核缺失时会自动从 GitHub 下载 mihomo 到 bin 目录，可在配置文件中设置 gh_proxy 加速</span>
+    <div class="card">
+      <h2>生成的订阅地址 <span class="hint">直接填入 Clash / mihomo 客户端即可</span></h2>
+      <div class="form-row" style="margin:0">
+        <input id="clashUrl" readonly style="flex:1 1 420px">
+        <button class="btn" id="btnCopyLink" type="button">复制</button>
+        <a class="btn" id="clashLink" href="#" target="_blank">打开</a>
+      </div>
+      <p class="hint" style="margin:10px 0 0" id="publishHint">
+        配置文件只在整轮任务成功并通过校验后才原子替换，替换前会保留上一版为 <code>clash.yaml.bak</code>。
+      </p>
     </div>
   </section>
 
-  <section class="card">
-    <h2>节点池 <span class="hint" id="nodeHint"></span></h2>
-    <div class="form-row">
-      <input id="nodeSearch" placeholder="搜索节点名 / 地址…" style="flex:1 1 260px">
-      <label class="check"><input type="checkbox" id="showAll"> 显示不可用节点</label>
-      <button class="btn" id="btnRefreshNodes">刷新列表</button>
+  <!-- ============ 订阅地址 ============ -->
+  <section class="panel" data-panel="subs">
+    <div class="card">
+      <h2>添加订阅 <span class="hint">支持 Clash YAML、Base64 分享链接、明文链接列表；可添加任意多个，自动去重合并</span></h2>
+      <form class="form-row" id="subForm" autocomplete="off" style="margin-bottom:0">
+        <input name="name" placeholder="名称（例如：机场 A）" style="flex:0 0 170px">
+        <input name="url" placeholder="https://example.com/api/v1/client/subscribe?token=xxxx" required style="flex:1 1 380px">
+        <input name="user_agent" placeholder="User-Agent（可选）" style="flex:0 0 180px">
+        <button class="btn primary" type="submit">添加订阅</button>
+      </form>
     </div>
-    <div class="scroll">
-      <table>
-        <thead><tr>
-          <th style="width:210px">节点</th><th style="width:70px">地区</th><th style="width:80px">类型</th>
-          <th style="width:80px">延迟</th><th style="width:100px">速度</th><th>来源</th><th style="width:150px">状态</th><th style="width:80px">操作</th>
-        </tr></thead>
-        <tbody id="nodeBody"></tbody>
-      </table>
+
+    <div class="card">
+      <h2>订阅列表 <span class="hint">「测试」可单独确认某个订阅能解析出多少节点</span></h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th style="width:190px">名称</th><th>订阅地址</th><th style="width:80px">启用</th><th style="width:150px">操作</th></tr></thead>
+          <tbody id="subBody"></tbody>
+        </table>
+      </div>
     </div>
   </section>
 
-  <section class="card">
-    <h2>运行日志</h2>
-    <pre id="logs"></pre>
+  <!-- ============ 测速设置 ============ -->
+  <section class="panel" data-panel="settings">
+    <div class="card">
+      <h2>测速设置 <span class="hint">每项一行，保存后立即生效</span></h2>
+      <form id="cfgForm" autocomplete="off">
+        <div class="group-title">测速</div>
+        <div class="setting">
+          <div class="setting-info"><strong>测速引擎</strong><span>core 会真实访问网络，只有能连通外网的节点才会被保留；tcp 仅验证端口可达</span></div>
+          <div class="setting-control">
+            <select name="mode">
+              <option value="core">core（mihomo 内核，推荐）</option>
+              <option value="tcp">tcp（仅端口连通性）</option>
+            </select>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>并发内核实例数</strong><span>越大越快，网络或机器较弱时建议调小</span></div>
+          <div class="setting-control"><input name="concurrency" type="number" min="1" max="16"></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>单节点探测超时</strong><span>例如 5s；线路较差可调大</span></div>
+          <div class="setting-control"><input name="timeout" placeholder="5s"></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>最大可接受延迟</strong><span>毫秒，超过即判为不可用，0 表示不限制</span></div>
+          <div class="setting-control"><input name="max_delay" type="number" min="0"></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>延迟探测地址</strong><span>返回 204 的地址最合适；探测失败时程序会自动尝试其它候选地址</span></div>
+          <div class="setting-control"><input name="delay_url"></div>
+        </div>
+
+        <div class="group-title">下载测速</div>
+        <div class="setting">
+          <div class="setting-info"><strong>启用下载测速</strong><span>测量节点实际下载速度，耗时更长</span></div>
+          <div class="setting-control">
+            <label class="switch"><input name="download_enabled" type="checkbox"><i></i></label>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>测速文件地址</strong><span>建议使用大文件地址</span></div>
+          <div class="setting-control"><input name="download_url"></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>单节点测速时长</strong><span>例如 6s</span></div>
+          <div class="setting-control"><input name="download_duration" placeholder="6s"></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>下载测速节点数</strong><span>只对延迟最优的前 N 个节点测速，0 表示全部</span></div>
+          <div class="setting-control"><input name="download_top" type="number" min="0"></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>最低速度</strong><span>MB/s，低于该值判为不可用，0 表示不限制</span></div>
+          <div class="setting-control"><input name="min_speed_mb" type="number" step="0.1" min="0"></div>
+        </div>
+
+        <div class="group-title">节点池与输出</div>
+        <div class="setting">
+          <div class="setting-info"><strong>节点池上限</strong><span>最终写入配置的节点数量上限，0 表示不限制</span></div>
+          <div class="setting-control"><input name="max_nodes" type="number" min="0"></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>输出文件路径</strong><span>同时作为订阅地址对外提供</span></div>
+          <div class="setting-control"><input name="output_path"></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>Clash 混合端口</strong><span>写入生成配置的 mixed-port</span></div>
+          <div class="setting-control"><input name="mixed_port" type="number" min="1" max="65535"></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>保留上一版备份</strong><span>替换前把旧配置另存为 clash.yaml.bak</span></div>
+          <div class="setting-control">
+            <label class="switch"><input name="keep_backup" type="checkbox"><i></i></label>
+          </div>
+        </div>
+
+        <div class="group-title">定时任务</div>
+        <div class="setting">
+          <div class="setting-info"><strong>启用定时自动生成</strong><span>按下方规则自动执行「拉取 + 测速 + 生成」</span></div>
+          <div class="setting-control">
+            <label class="switch"><input name="scheduler_enabled" type="checkbox"><i></i></label>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>cron 表达式</strong><span>5 字段：分 时 日 月 周，填写后优先于间隔；支持 <code>@every 2h</code>、<code>@daily</code></span></div>
+          <div class="setting-control"><input name="cron" placeholder="0 */6 * * *"></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>时区</strong><span>解释 cron 时使用的时区，留空为本机时区</span></div>
+          <div class="setting-control"><input name="timezone" placeholder="Asia/Shanghai"></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>固定间隔</strong><span>未填写 cron 时生效，例如 30m</span></div>
+          <div class="setting-control"><input name="interval" placeholder="30m"></div>
+        </div>
+        <div class="setting">
+          <div class="setting-info"><strong>启动时自动生成一次</strong><span>服务启动后立即跑一轮</span></div>
+          <div class="setting-control">
+            <label class="switch"><input name="run_on_start" type="checkbox"><i></i></label>
+          </div>
+        </div>
+      </form>
+
+      <div class="form-row" style="margin:16px 0 0">
+        <button class="btn primary" id="btnSaveCfg" type="button">保存设置</button>
+        <button class="btn" id="btnPreviewCron" type="button">预览 cron</button>
+        <span class="hint">提示：内核缺失时会自动从 GitHub 下载 mihomo 到 bin 目录，可在配置文件中设置 gh_proxy 加速</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 节点池 ============ -->
+  <section class="panel" data-panel="nodes">
+    <div class="card">
+      <h2>节点池 <span class="hint" id="nodeHint"></span></h2>
+      <div class="form-row">
+        <input id="nodeSearch" placeholder="搜索节点名 / 地址…" style="flex:1 1 260px">
+        <label class="switch" title="显示不可用节点" style="margin-left:8px">
+          <input type="checkbox" id="showAll"><i></i>
+        </label>
+        <span class="hint">显示不可用节点</span>
+        <button class="btn" id="btnRefreshNodes">刷新列表</button>
+      </div>
+      <div class="scroll">
+        <table>
+          <thead><tr>
+            <th style="width:210px">节点</th><th style="width:70px">地区</th><th style="width:80px">类型</th>
+            <th style="width:80px">延迟</th><th style="width:100px">速度</th><th>来源</th><th style="width:150px">状态</th><th style="width:80px">操作</th>
+          </tr></thead>
+          <tbody id="nodeBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 运行日志 ============ -->
+  <section class="panel" data-panel="logs">
+    <div class="card">
+      <h2>运行日志 <span class="hint">实时刷新；失败节点最多逐条显示 20 条，其余按原因汇总</span>
+        <button class="btn mini" id="btnClearLogs" type="button" style="margin-left:auto">清空显示</button>
+      </h2>
+      <pre id="logs"></pre>
+    </div>
   </section>
 </main>
 
@@ -201,6 +348,26 @@ function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
+/* ---------- 选项卡 ---------- */
+function activateTab(name, remember) {
+  const panels = document.querySelectorAll('.panel');
+  let found = false;
+  panels.forEach((p) => {
+    const on = p.dataset.panel === name;
+    p.classList.toggle('active', on);
+    if (on) found = true;
+  });
+  if (!found) { activateTab('home', remember); return; }
+  document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  if (remember) history.replaceState(null, '', '#' + name);
+  // 仅在切换时按需拉取数据，避免覆盖正在编辑的设置表单
+  if (name === 'nodes') loadNodes();
+  if (name === 'logs') pollLogs();
+}
+document.querySelectorAll('.tab').forEach((btn) => {
+  btn.addEventListener('click', () => activateTab(btn.dataset.tab, true));
+});
+
 /* ---------- 状态 ---------- */
 async function refreshStatus() {
   try {
@@ -231,6 +398,15 @@ async function refreshStatus() {
     $('#btnRun').disabled = running;
     $('#btnRetest').disabled = running;
 
+    const snap = data.snapshot || {};
+    const notice = $('#notice');
+    if (snap.error) {
+      notice.style.display = 'block';
+      notice.textContent = '上一轮任务未成功：' + snap.error;
+    } else {
+      notice.style.display = 'none';
+    }
+
     renderStats(data);
     if (wasRunning && !running) { loadNodes(); }
     wasRunning = running;
@@ -247,6 +423,8 @@ function renderStats(data) {
     ['测速引擎', snap.engine || '-', snap.trigger || ''],
     ['上次生成', snap.at ? snap.at.replace('T', ' ').slice(0, 19) : '-', '耗时 ' + dur],
     ['配置文件', out.exists ? (out.size / 1024).toFixed(1) + ' KB' : '未生成', out.exists ? out.mod_time : out.path],
+    ['下次运行', (data.schedule && data.schedule.next) ? data.schedule.next : '未启用',
+      (data.schedule && data.schedule.describe) || '未启用定时任务'],
     ['运行时长', data.uptime || '-', '启动于 ' + (data.started_at || '-')],
   ];
   $('#stats').innerHTML = cards.map(([t, v, s]) =>
@@ -266,14 +444,37 @@ async function loadSubs() {
     <tr>
       <td>${esc(s.name)}</td>
       <td class="suburl">${esc(s.url)}</td>
-      <td>${s.disabled ? '<span class="tag">已停用</span>' : '<span class="tag ok">启用中</span>'}</td>
       <td>
-        <button class="btn mini" data-act="toggle" data-id="${s.id}">${s.disabled ? '启用' : '停用'}</button>
+        <label class="switch" title="${s.disabled ? '已停用' : '启用中'}">
+          <input type="checkbox" data-toggle="${s.id}" ${s.disabled ? '' : 'checked'}><i></i>
+        </label>
+      </td>
+      <td>
         <button class="btn mini" data-act="check" data-id="${s.id}">测试</button>
         <button class="btn mini" data-act="del" data-id="${s.id}">删除</button>
       </td>
     </tr>`).join('');
 }
+
+// 订阅启用/停用开关
+$('#subBody').addEventListener('change', async (e) => {
+  const box = e.target.closest('input[data-toggle]');
+  if (!box) return;
+  const id = box.dataset.toggle;
+  const disabled = !box.checked;
+  box.disabled = true;
+  try {
+    await api('/api/subscriptions/' + id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disabled }),
+    });
+    toast(disabled ? '已停用该订阅' : '已启用该订阅');
+  } catch (err) {
+    toast(err.message, true);
+    box.checked = !box.checked;
+  }
+  box.disabled = false;
+});
 
 $('#subBody').addEventListener('click', async (e) => {
   const btn = e.target.closest('button[data-act]');
@@ -284,13 +485,6 @@ $('#subBody').addEventListener('click', async (e) => {
       if (!confirm('确定删除该订阅？')) return;
       await api('/api/subscriptions/' + id, { method: 'DELETE' });
       toast('已删除');
-    } else if (act === 'toggle') {
-      const disabled = btn.textContent.trim() === '停用';
-      await api('/api/subscriptions/' + id, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ disabled }),
-      });
-      toast(disabled ? '已停用' : '已启用');
     } else if (act === 'check') {
       btn.disabled = true; btn.textContent = '测试中';
       const res = await api('/api/subscriptions/' + id + '/check', { method: 'POST' });
@@ -332,18 +526,21 @@ async function loadConfig() {
   f.max_nodes.value = c.pool.max_nodes;
   f.output_path.value = c.output.path;
   f.mixed_port.value = c.output.mixed_port;
+  f.keep_backup.checked = !!c.output.keep_backup;
   f.download_url.value = c.speedtest.download.url;
   f.download_duration.value = c.speedtest.download.duration;
   f.download_top.value = c.speedtest.download.top;
   f.min_speed_mb.value = c.speedtest.download.min_speed_mb;
   f.download_enabled.checked = !!c.speedtest.download.enabled;
   f.interval.value = c.scheduler.interval;
+  f.cron.value = c.scheduler.cron || '';
+  f.timezone.value = c.scheduler.timezone || '';
   f.scheduler_enabled.checked = !!c.scheduler.enabled;
   f.run_on_start.checked = !!c.scheduler.run_on_start;
 
   const base = location.origin + '/clash.yaml' + (TOKEN ? '?token=' + TOKEN : '');
+  $('#clashUrl').value = base;
   $('#clashLink').href = base;
-  $('#clashLink').textContent = base;
 }
 
 $('#btnSaveCfg').addEventListener('click', async () => {
@@ -364,9 +561,15 @@ $('#btnSaveCfg').addEventListener('click', async () => {
         min_speed_mb: Number(f.min_speed_mb.value) || 0,
       },
     },
-    output: { path: f.output_path.value, mixed_port: Number(f.mixed_port.value) || 7890 },
+    output: {
+      path: f.output_path.value,
+      mixed_port: Number(f.mixed_port.value) || 7890,
+      keep_backup: f.keep_backup.checked,
+    },
     scheduler: {
       enabled: f.scheduler_enabled.checked,
+      cron: f.cron.value.trim(),
+      timezone: f.timezone.value.trim(),
       interval: f.interval.value,
       run_on_start: f.run_on_start.checked,
     },
@@ -376,7 +579,31 @@ $('#btnSaveCfg').addEventListener('click', async () => {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
     });
     toast('设置已保存');
+    refreshStatus();
   } catch (err) { toast(err.message, true); }
+});
+
+$('#btnPreviewCron').addEventListener('click', async () => {
+  const f = $('#cfgForm');
+  const expr = f.cron.value.trim();
+  if (!expr) { toast('请先填写 cron 表达式', true); return; }
+  try {
+    const data = await api('/api/schedule?cron=' + encodeURIComponent(expr) +
+      '&timezone=' + encodeURIComponent(f.timezone.value.trim()));
+    toast('接下来 5 次运行：\n' + (data.next || []).join('\n'));
+  } catch (e) { toast(e.message, true); }
+});
+
+$('#btnCopyLink').addEventListener('click', async () => {
+  const text = $('#clashUrl').value;
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('订阅地址已复制');
+  } catch (e) {
+    $('#clashUrl').select();
+    document.execCommand('copy');
+    toast('订阅地址已复制');
+  }
 });
 
 /* ---------- 任务 ---------- */
@@ -384,6 +611,7 @@ async function run(cache) {
   try {
     await api('/api/run' + (cache ? '?cache=1' : ''), { method: 'POST' });
     toast('任务已开始');
+    activateTab('logs', true);
   } catch (err) { toast(err.message, true); }
 }
 $('#btnRun').addEventListener('click', () => run(false));
@@ -393,6 +621,7 @@ $('#btnReload').addEventListener('click', async () => {
   catch (err) { toast(err.message, true); }
 });
 $('#btnRefreshNodes').addEventListener('click', loadNodes);
+$('#btnClearLogs').addEventListener('click', () => { $('#logs').innerHTML = ''; });
 
 /* ---------- 节点 ---------- */
 async function loadNodes() {
@@ -495,6 +724,7 @@ async function pollLogs() {
   await loadNodes();
   await refreshStatus();
   await pollLogs();
+  activateTab((location.hash || '#home').slice(1), false);
   setInterval(refreshStatus, 1500);
   setInterval(pollLogs, 2000);
 })();
