@@ -125,6 +125,8 @@ func (r *Runner) logf(level, format string, args ...any) {
 		return
 	}
 	switch level {
+	case "DEBUG":
+		r.log.Debug(format, args...)
 	case "WARN":
 		r.log.Warn(format, args...)
 	case "ERROR":
@@ -227,7 +229,7 @@ func (r *Runner) Run(ctx context.Context, trigger string, opts Options) (*Snapsh
 	// 5) 生成配置
 	snap.Nodes = nodes
 	if len(alive) == 0 {
-		snap.Error = "没有可用节点，已保留上一次生成的配置文件"
+		snap.Error = "没有可用节点，已保留上一次生成的配置文件；请查看日志中的自检结论"
 		r.logf("ERROR", "%s", snap.Error)
 		snap.DurationMS = time.Since(started).Milliseconds()
 		r.finish(snap, cfg)

@@ -50,6 +50,11 @@ speedtest:
   timeout: 5s
   # 延迟探测目标（返回 204 的地址最合适）
   delay_url: http://www.gstatic.com/generate_204
+  # 可选：候选探测地址。若整轮探测全部失败，会先用抽样节点比较这些地址，
+  # 若发现更合适的地址则自动换址重跑一轮，并把结果写进日志。
+  # delay_urls:
+  #   - http://cp.cloudflare.com/generate_204
+  #   - http://connect.rom.miui.com/generate_204
   # 最大可接受延迟（毫秒），超过则判定不可用，0 表示不限制
   max_delay: 1000
   # 可用节点数量低于该值时会给出警告（0 表示不检查）

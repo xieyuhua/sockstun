@@ -159,6 +159,8 @@ type SpeedTestConfig struct {
 	Timeout Duration `yaml:"timeout" json:"timeout"`
 	// DelayURL 延迟探测目标（返回 204 的地址最佳）。
 	DelayURL string `yaml:"delay_url" json:"delay_url"`
+	// DelayURLs 候选探测地址：当整轮探测全部失败时会抽样比较这些地址并自动换用最合适的。
+	DelayURLs []string `yaml:"delay_urls,omitempty" json:"delay_urls,omitempty"`
 	// MaxDelay 最大可接受延迟（毫秒），超过判定不可用，0 表示不限制。
 	MaxDelay int `yaml:"max_delay" json:"max_delay"`
 	// MinAlive 至少保留多少节点，不足时报警但仍输出。
@@ -321,6 +323,15 @@ func (c *Config) Normalize() {
 	}
 	if strings.TrimSpace(st.DelayURL) == "" {
 		st.DelayURL = def.SpeedTest.DelayURL
+	}
+	if len(st.DelayURLs) > 0 {
+		cleaned := make([]string, 0, len(st.DelayURLs))
+		for _, url := range st.DelayURLs {
+			if url = strings.TrimSpace(url); url != "" {
+				cleaned = append(cleaned, url)
+			}
+		}
+		st.DelayURLs = cleaned
 	}
 	if st.MaxDelay < 0 {
 		st.MaxDelay = 0

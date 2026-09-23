@@ -34,11 +34,16 @@ type CoreTester struct {
 	baseDir string
 	rep     Reporter
 	binary  string
+
+	mu        sync.Mutex
+	reasons   map[string]int
+	failCount int
+	coreLogs  []string
 }
 
 // NewCore 创建内核测速器。
 func NewCore(cfg config.SpeedTestConfig, baseDir string, rep Reporter) *CoreTester {
-	return &CoreTester{cfg: cfg, baseDir: baseDir, rep: rep}
+	return &CoreTester{cfg: cfg, baseDir: baseDir, rep: rep, reasons: map[string]int{}}
 }
 
 // Prepare 准备内核可执行文件。
@@ -53,14 +58,29 @@ func (t *CoreTester) Prepare(ctx context.Context) error {
 }
 
 // Test 对全部节点执行测速。
+// 若整轮探测没有任何节点成功，会先做一次自检（TCP 端口可达性 + 探测地址可达性），
+// 并在发现更合适的探测地址时自动换地址重试一轮。
 func (t *CoreTester) Test(ctx context.Context, nodes []*model.Node) error {
 	if t.binary == "" {
 		if err := t.Prepare(ctx); err != nil {
 			return err
 		}
 	}
+	if err := t.testOnce(ctx, nodes, t.cfg.DelayURL); err != nil {
+		return err
+	}
+	if ctx.Err() != nil || countAlive(nodes) > 0 {
+		return nil
+	}
+	t.selfCheck(ctx, nodes)
+	return nil
+}
+
+// testOnce 使用指定探测地址完成一轮「延迟 + 下载」测速。
+func (t *CoreTester) testOnce(ctx context.Context, nodes []*model.Node, delayURL string) error {
+	t.resetStats()
 	batches := splitBatches(nodes, t.cfg.Concurrency)
-	t.rep.Log("INFO", "启动 %d 个内核实例并发测速，共 %d 个节点", len(batches), len(nodes))
+	t.rep.Log("INFO", "启动 %d 个内核实例并发测速，共 %d 个节点，探测地址 %s", len(batches), len(nodes), delayURL)
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(batches))
@@ -68,7 +88,7 @@ func (t *CoreTester) Test(ctx context.Context, nodes []*model.Node) error {
 		wg.Add(1)
 		go func(idx int, batch []*model.Node) {
 			defer wg.Done()
-			if err := t.runBatch(ctx, idx, batch); err != nil {
+			if err := t.runBatch(ctx, idx, batch, delayURL); err != nil {
 				errCh <- fmt.Errorf("实例%d: %w", idx+1, err)
 			}
 		}(i, batch)
@@ -89,7 +109,7 @@ func (t *CoreTester) Test(ctx context.Context, nodes []*model.Node) error {
 	return nil
 }
 
-func (t *CoreTester) runBatch(ctx context.Context, idx int, nodes []*model.Node) error {
+func (t *CoreTester) runBatch(ctx context.Context, idx int, nodes []*model.Node, delayURL string) error {
 	dir, err := os.MkdirTemp("", fmt.Sprintf("proxypool-%d-", idx))
 	if err != nil {
 		return fmt.Errorf("创建临时目录失败: %w", err)
@@ -101,8 +121,9 @@ func (t *CoreTester) runBatch(ctx context.Context, idx int, nodes []*model.Node)
 		return err
 	}
 	defer inst.Stop()
+	defer t.collectCoreLogs(inst)
 
-	t.delayBatch(ctx, inst, nodes)
+	t.delayBatch(ctx, inst, nodes, delayURL)
 	if t.cfg.Download.Enabled {
 		t.speedBatch(ctx, inst, nodes)
 	}
@@ -110,7 +131,7 @@ func (t *CoreTester) runBatch(ctx context.Context, idx int, nodes []*model.Node)
 }
 
 // delayBatch 并发执行 HTTP 延迟探测。
-func (t *CoreTester) delayBatch(ctx context.Context, inst *coreInstance, nodes []*model.Node) {
+func (t *CoreTester) delayBatch(ctx context.Context, inst *coreInstance, nodes []*model.Node, delayURL string) {
 	timeout := t.cfg.Timeout.D()
 	workers := t.cfg.DelayWorkers
 	if workers <= 0 {
@@ -131,12 +152,14 @@ func (t *CoreTester) delayBatch(ctx context.Context, inst *coreInstance, nodes [
 		go func() {
 			defer wg.Done()
 			for n := range jobs {
-				delay, err := inst.Delay(ctx, n.Name(), timeout, t.cfg.DelayURL)
+				delay, err := inst.Delay(ctx, n.Name(), timeout, delayURL)
 				if err != nil {
 					n.Delay = -1
 					n.Alive = false
 					n.Error = shorten(err.Error())
-					t.rep.Log("DEBUG", "节点 %s 探测失败：%s", describeNode(n), n.Error)
+					if t.recordFailure(n.Error) {
+						t.rep.Log("INFO", "节点 %s 探测失败：%s", describeNode(n), n.Error)
+					}
 				} else {
 					n.Delay = delay
 					n.Alive = true
@@ -202,11 +225,12 @@ func (t *CoreTester) speedBatch(ctx context.Context, inst *coreInstance, nodes [
 				speed, err := inst.Speed(ctx, group, n.Name(), t.cfg.Download.URL, t.cfg.Download.Duration.D())
 				n.Speed = speed
 				if err != nil {
+					// 延迟探测已经证明节点可以走通外网，下载测速失败只作为质量信息，
+					// 不判定节点不可用（避免测速文件本身不可达时误杀好节点）。
 					if speed > 0 {
 						n.Error = shorten(fmt.Sprintf("测速中断: %v", err))
 					} else {
-						n.Error = shorten(err.Error())
-						n.Alive = false
+						n.Error = shorten(fmt.Sprintf("下载测速失败: %v", err))
 					}
 				}
 				t.rep.Progress("下载测速", int(atomic.AddInt64(&done, 1)), len(candidates))

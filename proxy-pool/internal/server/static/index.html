@@ -65,7 +65,7 @@
   .suburl{font:12px ui-monospace,monospace;color:var(--fg2);word-break:break-all}
   .empty{padding:24px;text-align:center;color:var(--fg2);font-size:13px}
   .toast{position:fixed;right:20px;bottom:20px;background:var(--bg3);border:1px solid var(--line);border-left:3px solid var(--acc);
-    padding:11px 16px;border-radius:8px;font-size:13px;max-width:420px;z-index:99}
+    padding:11px 16px;border-radius:8px;font-size:13px;max-width:520px;z-index:99;white-space:pre-line;line-height:1.7}
   .toast.err{border-left-color:var(--err)}
 </style>
 </head>
@@ -159,7 +159,7 @@
       <table>
         <thead><tr>
           <th style="width:210px">节点</th><th style="width:70px">地区</th><th style="width:80px">类型</th>
-          <th style="width:80px">延迟</th><th style="width:100px">速度</th><th>来源</th><th style="width:150px">状态</th>
+          <th style="width:80px">延迟</th><th style="width:100px">速度</th><th>来源</th><th style="width:150px">状态</th><th style="width:80px">操作</th>
         </tr></thead>
         <tbody id="nodeBody"></tbody>
       </table>
@@ -411,7 +411,7 @@ function renderNodes() {
     !kw || (n.raw.name || '').toLowerCase().includes(kw) || (n.raw.server || '').toLowerCase().includes(kw));
   const body = $('#nodeBody');
   if (!list.length) {
-    body.innerHTML = '<tr><td colspan="7" class="empty">暂无节点数据，点击「立即测速生成」开始</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="empty">暂无节点数据，点击「立即测速生成」开始</td></tr>';
     return;
   }
   body.innerHTML = list.slice(0, 800).map((n) => {
@@ -428,11 +428,47 @@ function renderNodes() {
       <td>${speed}</td>
       <td class="muted">${esc(n.source)}</td>
       <td>${status}</td>
+      <td><button class="btn mini" data-probe="${esc(n.raw.name)}">测试</button></td>
     </tr>`;
   }).join('');
 }
 $('#nodeSearch').addEventListener('input', renderNodes);
 $('#showAll').addEventListener('change', loadNodes);
+
+// 单节点探测：用内核实测该节点，并给出探测地址 / 本机直连 / 内核日志
+async function probeNode(name, btn) {
+  btn.disabled = true;
+  btn.textContent = '测试中';
+  try {
+    const rep = await api('/api/probe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const lines = [`节点 ${rep.node}（${rep.type} ${rep.endpoint}）`];
+    lines.push(rep.tcp_reachable
+      ? `本机到节点端口 TCP 可达（${rep.tcp_delay_ms} ms）`
+      : `本机到节点端口 TCP 不可达：${rep.tcp_error || '连接失败'}`);
+    (rep.results || []).forEach((r) => {
+      lines.push(r.ok ? `✅ ${r.url} → ${r.delay} ms` : `❌ ${r.url} → ${r.error}`);
+    });
+    (rep.direct || []).forEach((r) => {
+      lines.push(r.ok ? `本机直连可达 ${r.url} → ${r.delay} ms` : `本机直连不可达 ${r.url}`);
+    });
+    (rep.core_logs || []).slice(-3).forEach((l) => lines.push('内核：' + l));
+    const okAny = (rep.results || []).some((r) => r.ok);
+    toast(lines.join('\n'), !okAny);
+  } catch (e) {
+    toast('探测失败：' + e.message, true);
+  }
+  btn.disabled = false;
+  btn.textContent = '测试';
+}
+
+$('#nodeBody').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-probe]');
+  if (!btn) return;
+  probeNode(btn.dataset.probe, btn);
+});
 
 /* ---------- 日志 ---------- */
 async function pollLogs() {

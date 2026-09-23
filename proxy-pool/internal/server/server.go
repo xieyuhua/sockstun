@@ -19,6 +19,7 @@ import (
 	"proxypool/internal/logx"
 	"proxypool/internal/model"
 	"proxypool/internal/runner"
+	"proxypool/internal/speedtest"
 	"proxypool/internal/subscription"
 )
 
@@ -66,6 +67,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/subscriptions/{id}/check", s.guard(s.handleCheckSub))
 
 	mux.HandleFunc("POST /api/run", s.guard(s.handleRun))
+	mux.HandleFunc("POST /api/probe", s.guard(s.handleProbe))
 	mux.HandleFunc("GET /api/nodes", s.guard(s.handleNodes))
 	mux.HandleFunc("GET /api/logs", s.guard(s.handleLogs))
 	mux.HandleFunc("GET /api/output", s.guard(s.handleClash))
@@ -437,6 +439,72 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true, "message": "任务已开始"})
 }
+
+// handleProbe 用内核单独探测某个节点，返回各探测地址的原始结果与内核日志。
+func (s *Server) handleProbe(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		Name string   `json:"name"`
+		URLs []string `json:"urls"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&payload); err != nil {
+		writeErr(w, http.StatusBadRequest, "请求体解析失败: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(payload.Name) == "" {
+		writeErr(w, http.StatusBadRequest, "缺少节点名称")
+		return
+	}
+	snap := s.runner.Last()
+	if snap == nil || len(snap.Nodes) == 0 {
+		writeErr(w, http.StatusBadRequest, "还没有节点数据，请先执行一次生成")
+		return
+	}
+	var target *model.Node
+	for _, n := range snap.Nodes {
+		if n.Name() == payload.Name {
+			target = n
+			break
+		}
+	}
+	if target == nil {
+		writeErr(w, http.StatusNotFound, "节点不存在："+payload.Name)
+		return
+	}
+
+	cfg := s.store.Get()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 3*time.Minute)
+	defer cancel()
+	s.log.Info("开始探测节点 %s", target.Name())
+	report, err := speedtest.ProbeNode(ctx, cfg.SpeedTest, s.store.Dir(), target, payload.URLs, &logReporter{log: s.log})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "探测失败: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
+}
+
+// logReporter 把测速包的日志转发到服务日志。
+type logReporter struct {
+	log *logx.Buffer
+}
+
+func (l *logReporter) Log(level, format string, args ...any) {
+	if l.log == nil {
+		return
+	}
+	switch strings.ToUpper(level) {
+	case "DEBUG":
+		l.log.Debug(format, args...)
+	case "WARN":
+		l.log.Warn(format, args...)
+	case "ERROR":
+		l.log.Error(format, args...)
+	default:
+		l.log.Info(format, args...)
+	}
+}
+
+func (l *logReporter) Progress(string, int, int) {}
 
 // ---------- 工具 ----------
 
