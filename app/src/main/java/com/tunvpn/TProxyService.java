@@ -73,6 +73,8 @@ public class TProxyService extends VpnService {
 	public static final String ACTION_RECONNECT = "tunvpn.RECONNECT";
 	/* 隧道保持运行的情况下切换所选节点。 */
 	public static final String ACTION_SELECT = "tunvpn.SELECT";
+	/* 首页「重置累计」：让 :native 进程把内存计数器归零并重新定基准。 */
+	public static final String ACTION_RESET_TRAFFIC = "tunvpn.RESET_TRAFFIC";
 
 	/* 流量统计 */
 	private static final int NOTIFY_ID = 1;
@@ -283,6 +285,22 @@ public class TProxyService extends VpnService {
 				selectUserAction = true;
 				applySelectedNode(new Preferences(this));
 			}
+			return START_STICKY;
+		}
+		/* 首页「重置累计」。服务跑在 :native 进程，MainActivity 所在的主进程里
+		   sInstance 恒为 null，静态方法摸不到这里的内存计数器 —— 只能走 intent
+		   让 :native 自己归零。归零必须 post 到采样线程，与 sampleStats() 串行
+		   （见 zeroTraffic），否则下一拍就会用旧值把 preferences 再写回去。 */
+		if (intent != null && ACTION_RESET_TRAFFIC.equals(intent.getAction())) {
+			Handler h = statsHandler;
+			if (h != null)
+			  h.post(new Runnable() {
+				@Override public void run() {
+					TProxyService i = sInstance;
+					if (i != null)
+					  i.zeroTraffic();
+				}
+			});
 			return START_STICKY;
 		}
 		startService();
@@ -1273,23 +1291,21 @@ public class TProxyService extends VpnService {
 		}
 		sInstance.flushRecentRequests(android.os.SystemClock.elapsedRealtime());
 	}
-	/* 首页「重置累计」：把**内存里**的流量计数器也一起归零并重新定基准。
-	   必须在**采样线程**上做（post 到 statsHandler）—— 否则下一秒的 sampleStats()
-	   会立刻用旧值把 preferences 再写回去，症状正是"界面上当时清空了、实际没重置"。
-	   服务没在跑时无需处理：下次 startStats() 会从 preferences 重新读基准（已经是 0）。 */
-	static void resetTraffic() {
-		TProxyService inst = sInstance;
-		if (inst == null)
+	/* 首页「重置累计」。服务跑在 :native 进程，Activity 所在的主进程里 sInstance
+	   恒为 null，直接摸内存计数器是够不到的 —— 只能发 intent 让 :native 自己归零
+	   （见 onStartCommand 的 ACTION_RESET_TRAFFIC）。隧道没在跑时不发：发了只会
+	   白白创建一个空服务实例；此时 preferences 已被 Activity 清零，下次
+	   startStats() 会以 0 为基准，不需要额外处理。 */
+	static void resetTraffic(Context context, boolean running) {
+		if (!running)
 		  return;
-		Handler h = inst.statsHandler;
-		if (h != null)
-		  h.post(new Runnable() {
-			@Override public void run() {
-				TProxyService i = sInstance;
-				if (i != null)
-				  i.zeroTraffic();
-			}
-		});
+		Intent i = new Intent(context, TProxyService.class);
+		i.setAction(ACTION_RESET_TRAFFIC);
+		try {
+			context.startService(i);
+		} catch (Exception ignore) {
+			/* 首页在前台时不受后台启动限制，这里理论上到不了；兜住不代表失败。 */
+		}
 	}
 	/* 统计轮询抓到的**最新** /connections 快照；隧道没运行 / 还没轮询过时为 null。
 	   「连接」页面读它，从而不必自己发一次桥调用。 */
@@ -2650,8 +2666,9 @@ public class TProxyService extends VpnService {
 			proxySessionTx, proxySessionRx, proxyRateTx, proxyRateRx);
 	}
 
-	/* 在**采样线程**上把内存计数器归零并重新定基准（只由 resetTraffic() post 过来，
-	   所以与 sampleStats() 天然互斥，不会读到写了一半的状态）。
+	/* 在**采样线程**上把内存计数器归零并重新定基准（只由 onStartCommand 的
+	   ACTION_RESET_TRAFFIC post 过来，所以与 sampleStats() 天然互斥，不会读到
+	   写了一半的状态）。
 
 	   关键在"重新定基准"：内核报的是**开机以来的累计值**，我们算的是相对基准的增量。
 	   所以归零不是把内核计数抹掉（也抹不掉），而是把基准挪到"现在"——之后只有新增的

@@ -15,18 +15,36 @@ if (localPropsFile.exists()) {
     def original = localPropsFile.text
     def kept = new StringBuilder()
     def changed = false
+    def replaced = false
     original.eachLine { line ->
         def matcher = line =~ /^\s*sdk\.dir\s*=\s*(.*)$/
         if (matcher.find()) {
             def path = matcher.group(1).trim()
-            if (path.isEmpty() || !file(path).exists()) {
-                changed = true   // 路径无效（不存在或为空）→ 丢弃这一行
+            // 用普通 java.io.File 而不是 Gradle 的 file()：后者对含 ':' 的字符串
+            // （Windows 盘符，如 D:/Android/Sdk）会当成 URL 去转换，在 Linux 容器里
+            // 直接抛 "Cannot convert URL"，兜底逻辑自己先挂掉。File 对任何字符串
+            // 都安全——Windows 盘符路径在 Linux 上只是"不存在"，走下面的分支。
+            def f = new File(path)
+            if (!f.absolute)
+                f = new File(settingsDir, path)
+            if (path.isEmpty() || !f.exists()) {
+                // 路径在本机不存在 → 别直接丢，优先换成"去空白后的"环境路径：
+                // 有些机器的 ANDROID_SDK_ROOT 自带尾随空白，AGP 原样解析会报
+                // "Trailing char < >"。替换成有效路径后，Windows / Linux 容器
+                // 共用这份文件时可以双向自愈（哪边的行失效就用哪边的环境补）。
+                def env = (System.getenv('ANDROID_HOME') ?: System.getenv('ANDROID_SDK_ROOT'))?.trim()
+                if (!replaced && env && new File(env).exists()) {
+                    kept.append('sdk.dir=').append(env.replace('\\', '/')).append('\n')
+                    replaced = true
+                } else {
+                    changed = true   // 没有可用的环境路径 → 真正丢弃这一行
+                }
                 return
             }
         }
         kept.append(line).append('\n')
     }
-    if (changed) {
+    if (changed || replaced) {
         localPropsFile.text = kept.toString()
     }
 }

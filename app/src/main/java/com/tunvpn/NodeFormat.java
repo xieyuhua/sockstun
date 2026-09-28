@@ -56,9 +56,10 @@ public class NodeFormat {
 		int idx = t.indexOf("proxies:");
 		if (idx >= 0)
 		  t = t.substring(idx + "proxies:".length()).trim();
-		/* 去掉开头的列表短横线。 */
-		if (t.startsWith("-"))
-		  t = t.substring(1).trim();
+		/* 去掉开头的列表短横线。**只对 flow**（- { / - [）这么做：块风格要按 "- "
+		   的列宽折算续行缩进（见 parseBlockNode），这里先剥掉会破坏缩进关系。 */
+		if (t.startsWith("- {") || t.startsWith("- ["))
+		  t = t.substring(2).trim();
 
 		/* 我们的存储格式是 clash flow map（未加引号的键），但也要兼容用户粘贴的 JSON。
 		   flow map 解析器本就能吃带引号的 JSON 写法，所以优先用它；解析出来的
@@ -85,8 +86,159 @@ public class NodeFormat {
 			}
 			return null;
 		}
+		/* 块风格（多行、非 flow）的 clash 节点："- name: x" + 缩进续行。
+		   从订阅里长按收藏的节点保存的就是这种原文。 */
+		if (t.indexOf('\n') >= 0) {
+			try {
+				Map<String, Object> m = parseBlockNode(t);
+				if (m != null && !m.isEmpty())
+				  return m;
+			} catch (Exception ignore) {
+			}
+		}
 		return null;
-	}
+		}
+
+		/* ---------- YAML 块风格节点 -> Map ---------- */
+		/* 解析形如
+		- name: x
+		type: vmess
+		ws-opts:
+		path: /p
+		headers:
+		Host: a.b
+		的块风格节点（也接受没有 "- " 前缀的裸块）。支持嵌套映射、块序列（alpn 等）
+		与行内 flow（{...} / [...]）。解析失败返回 null。 */
+		private static Map<String, Object> parseBlockNode(String text) {
+		String[] rawLines = text.split("\\r?\\n");
+		List<Integer> indents = new ArrayList<Integer>();
+		List<String> texts = new ArrayList<String>();
+		int strip = -1; /* 第一行 "- " 前缀的宽度；后续行的缩进按它折算成相对值 */
+		for (String ln : rawLines) {
+			if (ln.trim().isEmpty())
+			  continue;
+			int ind = 0;
+			while (ind < ln.length() && ln.charAt(ind) == ' ')
+			  ind++;
+			String t2 = ln.trim();
+			if (indents.isEmpty()) {
+				if (t2.startsWith("- ")) {
+					strip = ind + 2;
+					t2 = t2.substring(2).trim();
+					ind = ind + 2;
+				}
+			} else if (strip >= 0) {
+				ind -= strip;
+				if (ind < 0)
+				  ind = 0;
+			}
+			indents.add(ind);
+			texts.add(t2);
+		}
+		if (texts.isEmpty())
+		  return null;
+		int[] pos = new int[] { 0 };
+		Object o = parseBlockEl(indents, texts, pos, indents.get(0));
+		return (o instanceof Map) ? (Map<String, Object>) o : null;
+		}
+
+		/* 递归下降：从 pos[0] 起解析一个缩进层级上的块映射或块序列。
+		节点块里出现过的形态都覆盖：标量值、嵌套映射、块序列（标量项）、
+		行内 flow、以及 | / > 块标量。 */
+		private static Object parseBlockEl(List<Integer> indents, List<String> texts,
+			int[] pos, int indent) {
+		/* 序列：同一缩进上的若干 "- item"。 */
+		if (texts.get(pos[0]).startsWith("- ")) {
+			List<Object> out = new ArrayList<Object>();
+			while (pos[0] < texts.size()
+					&& indents.get(pos[0]) == indent
+					&& texts.get(pos[0]).startsWith("- ")) {
+				String item = texts.get(pos[0]).substring(2).trim();
+				pos[0]++;
+				if (item.isEmpty()) {
+					/* "- " 后跟下一行的嵌套块。 */
+					if (pos[0] < texts.size() && indents.get(pos[0]) > indent)
+					  out.add(parseBlockEl(indents, texts, pos, indents.get(pos[0])));
+					else
+					  out.add("");
+				} else if (item.startsWith("{")) {
+					out.add(parseFlowMap(item));
+				} else if (item.startsWith("[")) {
+					out.add(parseFlowSeq(item));
+				} else if (item.indexOf(':') > 0 && !isQuoted(item)) {
+					/* "- key: value" 形式的行内小映射（订阅里偶尔见到）。 */
+					int c = item.indexOf(':');
+					Map<String, Object> m = new LinkedHashMap<String, Object>();
+					m.put(unquote(item.substring(0, c).trim()),
+						scalarToObj(item.substring(c + 1).trim()));
+					out.add(m);
+				} else {
+					out.add(scalarToObj(item));
+				}
+			}
+			return out;
+		}
+		Map<String, Object> m = new LinkedHashMap<String, Object>();
+		while (pos[0] < texts.size()) {
+			int d = indents.get(pos[0]);
+			String text = texts.get(pos[0]);
+			if (d < indent)
+			  break;
+			if (text.startsWith("- ")) {
+				/* 序列项：要么是外层的（比当前映射浅/同级），交还上层；要么是不认识的
+				   更深层，跳过。 */
+				if (d > indent)
+				  pos[0]++;
+				else
+				  break;
+				continue;
+			}
+			if (d > indent) {
+				pos[0]++;
+				continue;
+			}
+			int c = text.indexOf(':');
+			if (c <= 0) {
+				pos[0]++;
+				continue;
+			}
+			String key = unquote(text.substring(0, c).trim());
+			String val = text.substring(c + 1).trim();
+			pos[0]++;
+			if (val.isEmpty()) {
+				if (pos[0] < texts.size() && indents.get(pos[0]) > indent)
+				  m.put(key, parseBlockEl(indents, texts, pos, indents.get(pos[0])));
+				else
+				  m.put(key, "");
+			} else if (val.startsWith("{")) {
+				m.put(key, parseFlowMap(val));
+			} else if (val.startsWith("[")) {
+				m.put(key, parseFlowSeq(val));
+			} else if (val.equals("|") || val.equals(">") || val.equals("|-")
+					|| val.equals(">-") || val.equals("|+") || val.equals(">+")) {
+				/* 块标量：把后续更深缩进的行拼回一个字符串。 */
+				StringBuilder bs = new StringBuilder();
+				while (pos[0] < texts.size() && indents.get(pos[0]) > indent) {
+					if (bs.length() > 0)
+					  bs.append(val.startsWith("|") ? "\n" : " ");
+					bs.append(texts.get(pos[0]));
+					pos[0]++;
+				}
+				m.put(key, bs.toString());
+			} else {
+				m.put(key, scalarToObj(val));
+			}
+		}
+		return m;
+		}
+
+		/* 字符串以成对引号包住时为 true（用来区分 "- key: value" 行内映射与
+		"- \"a: b\"" 这种带引号的纯标量）。 */
+		private static boolean isQuoted(String s) {
+		return s.length() >= 2
+			&& ((s.charAt(0) == '"' && s.charAt(s.length() - 1) == '"')
+			 || (s.charAt(0) == '\'' && s.charAt(s.length() - 1) == '\''));
+		}
 
 	/* ---------- JSON -> Map ---------- */
 	private static Object parseJson(String s) throws JSONException {

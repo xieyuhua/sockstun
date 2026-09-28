@@ -639,9 +639,24 @@ public class MihomoConfig {
 		   协议却写成 socks5"的节点，那种节点永远连不上。 */
 		String raw = s.raw == null ? "" : s.raw.trim();
 		if (!raw.isEmpty()) {
-			String nodeName = nodeNameFromRaw(raw);
 			StringBuilder sb = new StringBuilder();
-			String proxiesText = emitRawProxy(raw);
+			/* 优先把原始块**归一**成键值全部正确加引号的单行 flow map：订阅原文里的
+			   节点名 / headers 等值可能含有未加引号的 ": "、# 等字符，或者块风格缩进
+			   在搬运动作中被破坏 —— 原样发射时 mihomo 的 YAML 解析器会以
+			   "yaml: line N: mapping values are not allowed in this context" 拒掉
+			   **整份**配置。解析失败时退回原样发射（emitRawProxy），保底不比以前差。 */
+			String proxiesText = normalizedProxies(raw);
+			String nodeName;
+			if (proxiesText != null) {
+				/* 归一成功：节点名取自解析结果，比从原文正则抠更可靠。 */
+				java.util.Map<String, Object> first = NodeFormat.toMap(raw);
+				String n = first == null ? null :
+					(first.get("name") == null ? null : first.get("name").toString());
+				nodeName = (n != null && !n.trim().isEmpty()) ? n.trim() : nodeNameFromRaw(raw);
+			} else {
+				proxiesText = emitRawProxy(raw);
+				nodeName = nodeNameFromRaw(raw);
+			}
 			sb.append(proxiesText);
 			sb.append("proxy-groups:\n");
 			sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [\"")
@@ -691,6 +706,35 @@ public class MihomoConfig {
 			  return n;
 		}
 		return "node";
+	}
+
+	/* 把手动节点块归一成合法的 "proxies:" 段：每个节点解析成键值对后重新发射，
+	   含特殊字符（": "、#、空格…）的值全部自动加引号 —— 这正是"原样发射会被内核
+	   以 mapping values are not allowed 拒掉"的解药。任一节点解析不出（或解析结果
+	   连 type 都没有，说明不是节点）时返回 null，调用方退回原样发射。 */
+	private static String normalizedProxies(String raw) {
+		try {
+			List<String> blocks = new ArrayList<String>();
+			if (raw.startsWith("proxies:")) {
+				/* 用户贴的就是整段列表：逐条取出来各自归一。 */
+				for (ClashParser.ProxyDef p : ClashParser.extractProxies(raw))
+				  blocks.add(p.text);
+			} else {
+				blocks.add(raw);
+			}
+			if (blocks.isEmpty())
+			  return null;
+			StringBuilder sb = new StringBuilder("proxies:\n");
+			for (String b : blocks) {
+				java.util.Map<String, Object> m = NodeFormat.toMap(b);
+				if (m == null || m.isEmpty() || !m.containsKey("type"))
+				  return null;
+				sb.append("  - ").append(NodeFormat.mapToFlow(m)).append('\n');
+			}
+			return sb.toString();
+		} catch (Throwable e) {
+			return null;
+		}
 	}
 
 	/* 把用户粘贴的 clash 节点块包装成合法的 "proxies:" 段。如果用户贴的就是整段
