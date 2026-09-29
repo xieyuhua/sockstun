@@ -136,6 +136,11 @@ public class TProxyService extends VpnService {
 	private static class RecentRequest {
 		long startMs;
 		long endMs;
+		/* startMs/endMs 是 elapsedRealtime（开机毫秒），**跨启动没有意义** —— 重启后
+		   加载回来的旧记录拿它换算墙钟会跑到未来（正是"请求时间是 10.6 号"那个
+		   bug）。wallStart 是落盘时就地换算好的墙钟时刻，UI 优先直接显示它；
+		   0 = 旧格式记录，没有这个值。 */
+		long wallStart;
 		String target;
 		String rule;
 		String chain;
@@ -2570,6 +2575,8 @@ public class TProxyService extends VpnService {
 			snapshot = new ArrayList<RecentRequest>(recentRequests);
 		}
 		JSONArray arr = new JSONArray();
+		long nowWall = System.currentTimeMillis();
+		long nowElapsed = SystemClock.elapsedRealtime();
 		for (RecentRequest rr : snapshot) {
 			JSONObject o = new JSONObject();
 			try {
@@ -2581,6 +2588,10 @@ public class TProxyService extends VpnService {
 				o.put("d", rr.down);
 				o.put("s", rr.startMs);
 				o.put("e", rr.endMs);
+				/* 墙钟时刻**在落盘这一刻**换算（flush 一定发生在同一次开机内，
+				   换算是精确的），UI 直接显示它 —— 跨启动后 elapsed 已失义，
+				   再换算就会跑到未来。旧字段 s/e 保留，兼容旧版 App 的读取。 */
+				o.put("ws", nowWall - (nowElapsed - rr.startMs));
 				arr.put(o);
 			} catch (Exception e) {
 			}
@@ -2616,6 +2627,7 @@ public class TProxyService extends VpnService {
 				rr.down = o.optLong("d", 0);
 				rr.startMs = o.optLong("s", 0);
 				rr.endMs = o.optLong("e", 0);
+				rr.wallStart = o.optLong("ws", 0);
 				recentRequests.add(rr);
 			}
 		} catch (Exception e) {

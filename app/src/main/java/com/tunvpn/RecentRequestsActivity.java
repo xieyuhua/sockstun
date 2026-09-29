@@ -58,6 +58,8 @@ public class RecentRequestsActivity extends BaseActivity {
 		long down;
 		long startMs;
 		long endMs;
+		/* 落盘时就地换算好的墙钟开始时刻（服务端写的 ws 字段）；0 = 旧格式记录。 */
+		long wallStart;
 
 		String route() {
 			StringBuilder rb = new StringBuilder();
@@ -81,7 +83,7 @@ public class RecentRequestsActivity extends BaseActivity {
 				  mb.append(" · ");
 				mb.append("时长 ").append(formatDuration(duration));
 			}
-			String t = formatClock(startMs);
+			String t = formatTime(wallStart, startMs);
 			if (!t.isEmpty()) {
 				if (mb.length() > 0)
 				  mb.append(" · ");
@@ -184,6 +186,7 @@ public class RecentRequestsActivity extends BaseActivity {
 				r.down = o.optLong("d", 0);
 				r.startMs = o.optLong("s", 0);
 				r.endMs = o.optLong("e", 0);
+				r.wallStart = o.optLong("ws", 0);
 				out.add(r);
 			}
 		} catch (Exception e) {
@@ -214,8 +217,10 @@ public class RecentRequestsActivity extends BaseActivity {
 	}
 
 	/* startMs 记录的是 SystemClock.elapsedRealtime()（开机以来的毫秒数），不是墙钟
-	   时间戳。这里换算回真实的本地时间，让用户看到请求**发生在什么时候**，而不是一个
-	   看不懂的开机时长。 */
+	   时间戳。wallStart 是服务在**落盘那一刻**（同一次开机内，换算精确）就换算好的
+	   墙钟时刻 —— 优先直接显示它。跨启动加载回来的旧格式记录（没有 ws）再用 elapsed
+	   换算就会跑到未来（重启后 elapsed 归零，旧记录的开机毫秒比当前值还大，
+	   "请求时间是 10.6 号"正是这个）—— 这类记录的时刻已不可知，宁可显示空。 */
 	/* 这个方法在每行渲染、以及每次输入过滤时都会被逐行调用，
 	   所以格式化器按线程复用一个（SimpleDateFormat 非线程安全）。 */
 	private static final ThreadLocal<java.text.SimpleDateFormat> CLOCK_FMT =
@@ -226,13 +231,17 @@ public class RecentRequestsActivity extends BaseActivity {
 			}
 		};
 
-	private static String formatClock(long elapsedMs) {
+	private static String formatTime(long wallStart, long elapsedMs) {
+		if (wallStart > 0)
+		  return CLOCK_FMT.get().format(new java.util.Date(wallStart));
 		if (elapsedMs <= 0)
 		  return "";
-		long nowWall = System.currentTimeMillis();
 		long nowElapsed = SystemClock.elapsedRealtime();
-		long wallStart = nowWall - (nowElapsed - elapsedMs);
-		return CLOCK_FMT.get().format(new java.util.Date(wallStart));
+		/* 开机毫秒比"现在"还大：这条记录来自上一次开机，墙钟无法还原。 */
+		if (elapsedMs > nowElapsed)
+		  return "";
+		long wall = System.currentTimeMillis() - (nowElapsed - elapsedMs);
+		return CLOCK_FMT.get().format(new java.util.Date(wall));
 	}
 
 	private void updateSummary(boolean available) {
@@ -308,7 +317,7 @@ public class RecentRequestsActivity extends BaseActivity {
 		  addDetailRow(ll, R.string.request_detail_process, r.process);
 		addDetailRow(ll, R.string.request_detail_upload, TProxyService.formatBytes(r.up));
 		addDetailRow(ll, R.string.request_detail_download, TProxyService.formatBytes(r.down));
-		addDetailRow(ll, R.string.request_detail_start, formatClock(r.startMs));
+		addDetailRow(ll, R.string.request_detail_start, formatTime(r.wallStart, r.startMs));
 		long duration = Math.max(0, r.endMs - r.startMs);
 		if (duration > 0)
 		  addDetailRow(ll, R.string.request_detail_duration, formatDuration(duration));

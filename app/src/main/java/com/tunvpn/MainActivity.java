@@ -84,8 +84,6 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 				  intent = new Intent(MainActivity.this, SubscribeActivity.class);
 				else if (id == R.id.nav_server)
 				  intent = new Intent(MainActivity.this, ServerListActivity.class);
-				else if (id == R.id.nav_rules)
-				  intent = new Intent(MainActivity.this, RulesHubActivity.class);
 				else if (id == R.id.nav_settings)
 				  intent = new Intent(MainActivity.this, SettingsActivity.class);
 				if (intent != null) {

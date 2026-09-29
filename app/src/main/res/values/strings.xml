@@ -51,6 +51,9 @@
 	<string name="traffic_reset">Reset totals</string>
 
 	<string name="rules">Routing rules</string>
+	<string name="rules_count">%1$d 条规则</string>
+	<string name="rules_mode_global_proxy">全局代理模式 · 规则不参与分流</string>
+	<string name="rules_mode_global_direct">全局直连模式 · 规则不参与分流</string>
 	<string name="rules_hint">先选「分流策略」，再按需添加规则：域名后缀 / 精确域名 / 关键字 / IP / IP 段 / 国家(GeoIP) / 域名分类(GeoSite) / 进程名 / 进程路径 / 端口 / 网络类型 → 代理或直连；未命中的按底部开关处理。订阅自带规则不参与，修改后重新连接生效。</string>
 	<string name="routing_scope_hint">Two routing layers: (1) Global / per-App decides which apps traffic enters the tunnel (VPN scope, evaluated first); (2) the routing strategy (rules / global-proxy / global-direct) only applies to traffic already inside the tunnel. Excluded apps use the system network directly and ignore the routing rules.</string>
 	<string name="routing_scope_empty_warn">"Per-App" is on but no app is selected: no traffic will enter the tunnel (i.e. nothing is proxied). Tap "Apps" to pick apps, or enable "Global".</string>

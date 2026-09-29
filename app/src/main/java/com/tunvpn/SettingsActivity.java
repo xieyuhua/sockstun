@@ -96,6 +96,10 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			connectionSubtitle(), R.id.settings_connection);
 		addRow(group_connection, R.drawable.ic_apps, R.string.apps,
 			appsSubtitle(), R.id.settings_apps);
+		/* 路由规则：原来占据底部导航一个标签位，现收进设置（分流配置与连接相关，
+		   归入本组）。副标题给出规则条数，一眼看出配没配。 */
+		addRow(group_connection, R.drawable.ic_rules, R.string.rules,
+			rulesSubtitle(), R.id.settings_rules);
 		addRow(group_connection, R.drawable.ic_routing, R.string.settings_connections,
 			getString(R.string.settings_connections_hint), R.id.settings_connections);
 		addRow(group_connection, R.drawable.ic_routing, R.string.settings_recent_requests,
@@ -376,6 +380,17 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		return getString(R.string.apps_selected, count);
 	}
 
+	/* 路由规则入口的副标题：规则条数；全局代理 / 全局直连模式下规则列表不参与
+	   分流，直接说明这一点，免得用户配了规则却发现"没生效"。 */
+	private String rulesSubtitle() {
+		String strategy = prefs.getRulesStrategy();
+		if (Preferences.RULES_STRATEGY_GLOBAL.equals(strategy))
+		  return getString(R.string.rules_mode_global_proxy);
+		if (Preferences.RULES_STRATEGY_DIRECT.equals(strategy))
+		  return getString(R.string.rules_mode_global_direct);
+		return getString(R.string.rules_count, prefs.getRules().size());
+	}
+
 	private String subsSubtitle() {
 		Subscription sub = prefs.getActiveSubscription();
 		if (sub != null)
@@ -441,6 +456,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  showConnectionDialog();
 		else if (id == R.id.settings_apps)
 		  startActivity(new Intent(this, AppListActivity.class));
+		else if (id == R.id.settings_rules)
+		  startActivity(new Intent(this, RulesHubActivity.class));
 		else if (id == R.id.settings_connections)
 		  startActivity(new Intent(this, ConnectionsActivity.class));
 		else if (id == R.id.settings_recent_requests)

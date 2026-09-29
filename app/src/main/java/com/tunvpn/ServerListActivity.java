@@ -27,7 +27,6 @@ import android.widget.Toast;
 import androidx.appcompat.app.AlertDialog;
 
 import com.google.android.material.appbar.MaterialToolbar;
-import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
 import com.google.android.material.color.MaterialColors;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
@@ -81,7 +80,7 @@ public class ServerListActivity extends BaseActivity {
 		listview.setAdapter(adapter);
 		listview.setEmptyView(textview_empty);
 
-		((MaterialButton) findViewById(R.id.server_add)).setOnClickListener(new View.OnClickListener() {
+		((FloatingActionButton) findViewById(R.id.server_add)).setOnClickListener(new View.OnClickListener() {
 			@Override
 			public void onClick(View v) {
 				startActivity(new Intent(ServerListActivity.this, ServerEditActivity.class));

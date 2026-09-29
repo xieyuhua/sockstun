@@ -51,25 +51,27 @@
 			android:paddingRight="16dp"
 			android:paddingBottom="16dp"
 			android:scrollbarStyle="outsideOverlay"/>
-		<com.google.android.material.floatingactionbutton.FloatingActionButton
-			android:id="@+id/server_test_all"
+		<!-- 两个悬浮按钮纵向叠放：主操作「新增服务器」在最下，「测速全部」悬在它上方。 -->
+		<LinearLayout
+			android:orientation="vertical"
 			android:layout_width="wrap_content"
 			android:layout_height="wrap_content"
 			android:layout_gravity="bottom|end"
 			android:layout_margin="16dp"
-			android:contentDescription="@string/server_test_all"
-			android:src="@drawable/ic_speed"/>
+			android:gravity="end">
+			<com.google.android.material.floatingactionbutton.FloatingActionButton
+				android:id="@+id/server_test_all"
+				android:layout_width="wrap_content"
+				android:layout_height="wrap_content"
+				android:layout_marginBottom="12dp"
+				android:contentDescription="@string/server_test_all"
+				android:src="@drawable/ic_speed"/>
+			<com.google.android.material.floatingactionbutton.FloatingActionButton
+				android:id="@+id/server_add"
+				android:layout_width="wrap_content"
+				android:layout_height="wrap_content"
+				android:contentDescription="@string/server_add"
+				android:src="@drawable/ic_add"/>
+		</LinearLayout>
 	</FrameLayout>
-	<com.google.android.material.button.MaterialButton
-		android:id="@+id/server_add"
-		android:layout_width="match_parent"
-		android:layout_height="wrap_content"
-		android:layout_margin="16dp"
-		android:minHeight="52dp"
-		android:text="@string/server_add"
-		android:textSize="15sp"
-		app:cornerRadius="26dp"
-		app:icon="@drawable/ic_add"
-		app:iconGravity="textStart"
-		app:iconPadding="8dp"/>
 </LinearLayout>

@@ -4,6 +4,7 @@
 <resources>
 	<item name="settings_connection" type="id"/>
 	<item name="settings_apps" type="id"/>
+	<item name="settings_rules" type="id"/>
 	<item name="settings_connections" type="id"/>
 	<item name="settings_recent_requests" type="id"/>
 	<item name="settings_subscription" type="id"/>

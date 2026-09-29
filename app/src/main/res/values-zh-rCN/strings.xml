@@ -44,6 +44,9 @@
 	<string name="traffic_reset">重置累计</string>
 
 	<string name="rules">路由规则</string>
+	<string name="rules_count">%1$d 条规则</string>
+	<string name="rules_mode_global_proxy">全局代理模式 · 规则不参与分流</string>
+	<string name="rules_mode_global_direct">全局直连模式 · 规则不参与分流</string>
 	<string name="rules_hint">按域名、IP 或 IP 段匹配。域名规则同时匹配其子域；改动在下次连接时生效。</string>
 	<string name="routing_scope_hint">两层路由：(1)「全局模式 / 部分应用」决定哪些应用的流量进入隧道（VPN 作用域，最前置判断）；(2)「分流策略（规则 / 全局代理 / 全局直连）」只对已进入隧道的流量生效。被排除的应用由系统直接联网，路由规则管不到它。</string>
 	<string name="routing_scope_empty_warn">已选「部分应用」但未勾选任何应用：将没有任何流量进入隧道（等于不代理）。请点「应用」勾选要走代理的程序，或打开「全局模式」。</string>

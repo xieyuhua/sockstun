@@ -23,6 +23,9 @@
 	<string name="traffic">Трафик</string>
 	<string name="traffic_reset">Сбросить итоги</string>
 	<string name="rules">Правила маршрутизации</string>
+	<string name="rules_count">Правил: %1$d</string>
+	<string name="rules_mode_global_proxy">Глобальный прокси · правила не применяются</string>
+	<string name="rules_mode_global_direct">Напрямую · правила не применяются</string>
 	<string name="rules_hint">Совпадение по домену, IP или диапазону IP. Домены разрешаются при запуске туннеля; правила «напрямую» требуют Android 13+.</string>
 	<string name="rules_default_proxy">Несовпавший трафик идёт через прокси</string>
 	<string name="rule_add">Добавить</string>
