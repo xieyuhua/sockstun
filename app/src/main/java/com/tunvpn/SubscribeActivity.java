@@ -1753,7 +1753,7 @@ public class SubscribeActivity extends BaseActivity {
 			   自己的剩余额度，等得更久毫无意义。 */
 			int sockMs = (int) Math.max(1000L, Math.min((long) timeoutMs + 6000L, maxWaitMs));
 			TProxyService.ApiResult r = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
-				MihomoConfig.API_PORT, path, null, prefs.getSecret(), sockMs);
+				prefs.getApiPortActual(), path, null, prefs.getSecret(), sockMs);
 			if (r.code == 200) {
 				JSONObject o = new JSONObject(r.body == null ? "{}" : r.body);
 				if (!o.has("delay")) {
@@ -1823,7 +1823,7 @@ public class SubscribeActivity extends BaseActivity {
 		  return false;
 		try {
 			TProxyService.ApiResult r = TProxyService.bridgeApi("GET", TProxyService.apiBaseHost(),
-				MihomoConfig.API_PORT, "/proxies", null, prefs.getSecret());
+				prefs.getApiPortActual(), "/proxies", null, prefs.getSecret());
 			if (r.code != 200 || r.body == null) {
 				logOnce("proxies-code", "测速: /proxies HTTP " + r.code
 					+ (r.error == null ? "" : (" " + r.error)) + " → 无法建立节点名映射");
@@ -1961,7 +1961,7 @@ public class SubscribeActivity extends BaseActivity {
 	if (TProxyService.isCoreReachable())
 	  return true;
 	TProxyService.ApiResult r = TProxyService.bridgeApi("GET", host,
-		MihomoConfig.API_PORT, "/version", null, prefs.getSecret());
+		prefs.getApiPortActual(), "/version", null, prefs.getSecret());
 	/* 2xx = 健康。401 = 监听起来了但鉴权不对：仍算"可达"，所以就把这个主机定下来，
 	   让真正的那次调用去暴露 401，而不是退回到一个死地址上。 */
 	return (r.code >= 200 && r.code < 300) || r.code == 401;

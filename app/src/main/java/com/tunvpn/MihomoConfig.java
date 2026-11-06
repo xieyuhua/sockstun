@@ -129,18 +129,11 @@ public class MihomoConfig {
 		if (!cfg.toString().endsWith("\n"))
 		  cfg.append('\n');
 
-		/* DNS：没有订阅可以继承 DNS 配置，所以自己搭一个 fake-ip 解析器。 */
+		/* DNS：没有订阅可以继承 DNS 配置，所以自己搭一个解析器。
+		   「规则」页的三个 DNS 设置以前是摆设（永远写死 fake-ip + 223.5.5.5），
+		   导致把 DNS 指向内网 DNS 时也解析不了内网域名。见 dnsSection()。 */
 		if (!sectionExists(cfg, "dns:"))
-			cfg.append("dns:\n")
-				.append("  enable: true\n")
-				.append("  enhanced-mode: fake-ip\n")
-				.append("  fake-ip-range: 198.18.0.1/16\n")
-				/* 不配 DoH 兜底：1.1.1.1 在很多网络里都不可达，而一个不可达的兜底会
-				   让每次解析都等到自己超时。用 fake-ip 时真实域名本来就会交给代理去解，
-				   所以境外域名根本不需要本地解析器。 */
-				.append("  nameserver:\n")
-				.append("    - 223.5.5.5\n")
-				.append("    - 119.29.29.29\n");
+			cfg.append(dnsSection(prefs));
 
 		/* 让 mihomo 自己的日志写进文件。clash-api 的启动/绑定行、以及任何 panic 都在
 		   这里，而不在 App 的标准输出里 —— 少了它，"9090 从没监听"的原因就永远看不见
@@ -305,13 +298,7 @@ public class MihomoConfig {
 		sb.append("log-level: silent\n");
 		sb.append("ipv6: false\n");
 		if (!sectionExists(sb, "dns:"))
-		  sb.append("dns:\n")
-			.append("  enable: true\n")
-			.append("  enhanced-mode: fake-ip\n")
-			.append("  fake-ip-range: 198.18.0.1/16\n")
-			.append("  nameserver:\n")
-			.append("    - 223.5.5.5\n")
-			.append("    - 119.29.29.29\n");
+		  sb.append(dnsSection(prefs));
 		File out = new File(homeDir, "config.yaml");
 		try (FileOutputStream fos = new FileOutputStream(out, false)) {
 			fos.write(sb.toString().getBytes("UTF-8"));
@@ -678,13 +665,21 @@ public class MihomoConfig {
 
 		StringBuilder sb = new StringBuilder();
 		sb.append("proxies:\n");
-		sb.append("  - {name: \"socks5\", type: socks5, server: ").append(addr)
+		/* 一律加引号并转义：地址里带 ":"、"#"、空格，或账号密码里带引号时，
+		   裸值会让 mihomo 以 "yaml: mapping values are not allowed" 拒掉整份配置，
+		   或把密码截断成另一个字段。 */
+		sb.append("  - {name: \"socks5\", type: socks5, server: \"")
+			.append(escapeYaml(addr)).append("\"")
 			.append(", port: ").append(s.port)
-			.append(", udp: true");
+			/* 「UDP relay over TCP」以前是个摆设开关。TCP-only 的 frp/内网穿透
+			   根本不支持 SOCKS5 UDP ASSOCIATE，写死 udp: true 会让内核对 UDP
+			   （含部分 DNS 探测）走一条永远不通的路。勾上该开关时禁用 UDP，
+			   只走 CONNECT；默认 false 保持原行为不变。 */
+			.append(", udp: ").append(prefs.getUdpInTcp() ? "false" : "true");
 		if (s.user != null && !s.user.isEmpty())
-		  sb.append(", username: \"").append(s.user).append("\"");
+		  sb.append(", username: \"").append(escapeYaml(s.user)).append("\"");
 		if (s.pass != null && !s.pass.isEmpty())
-			sb.append(", password: \"").append(s.pass).append("\"");
+			sb.append(", password: \"").append(escapeYaml(s.pass)).append("\"");
 		sb.append("}\n");
 		sb.append("proxy-groups:\n");
 		sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [\"socks5\"]}\n");
@@ -924,6 +919,123 @@ public class MihomoConfig {
 		if (seconds > MAX_INTERVAL)
 		  return MAX_INTERVAL;
 		return seconds;
+	}
+
+	/* ---------- DNS：与「规则」页设置同源 ---------- */
+	/* 以前这里永远写死 fake-ip + 223.5.5.5/119.29.29.29，规则页的「远程 DNS」
+	   「DNS IPv4 / IPv6」三个开关完全没有接进配置 —— 用户把 DNS 指向内网 DNS 也
+	   解析不了内网域名，是"访问不到内网"的一个隐藏原因。
+	   - 远程 DNS 开（默认）：fake-ip。域名以**域名形式**交给代理端（SOCKS5 的域名
+	     CONNECT）解析，内网域名因此能由代理侧的内网 DNS 解析，不需要本地解析成功；
+	   - 远程 DNS 关：redir-host，用用户填的 DNS 拿真实 IP，并加 respect-rules 让
+	     DNS 查询本身按规则走隧道（否则查询从手机物理网卡发出，到不了内网 DNS）。 */
+	static String dnsSection(Preferences prefs) {
+		boolean remote = prefs.getRemoteDns();
+		StringBuilder sb = new StringBuilder("dns:\n");
+		sb.append("  enable: true\n");
+		if (remote) {
+			sb.append("  enhanced-mode: fake-ip\n")
+			  .append("  fake-ip-range: 198.18.0.1/16\n")
+			  /* 本地设备名不该拿到假 IP；**不要**过滤内网业务域名（*.lan 等），
+			     它们恰恰需要 fake-ip 才能把域名原样送到代理端去解析。 */
+			  .append("  fake-ip-filter:\n")
+			  .append("    - \"localhost\"\n")
+			  .append("    - \"*.local\"\n");
+		} else {
+			sb.append("  enhanced-mode: redir-host\n");
+			/* 只有确实配了自定义 DNS 才让查询走规则，避免影响代理节点域名的解析。 */
+			if (hasCustomDns(prefs))
+			  sb.append("  respect-rules: true\n");
+		}
+		/* 不配 DoH 兜底：1.1.1.1 在很多网络里不可达，而不可达的兜底会让每次解析
+		   都等到自己超时。公网兜底同时负责远程模式下解析代理节点自己的域名。 */
+		sb.append("  nameserver:\n");
+		for (String s : dnsServers(prefs))
+		  sb.append("    - ").append(s).append('\n');
+		return sb.toString();
+	}
+
+	private static boolean hasCustomDns(Preferences prefs) {
+		return !safeDns(prefs.getDnsIpv4(), false).isEmpty()
+			|| (prefs.getIpv6() && !safeDns(prefs.getDnsIpv6(), true).isEmpty());
+	}
+
+	/* VPN Builder / TUN 与 dns: 段用**同一组** DNS，避免"系统 DNS 走公网、
+	   内核 DNS 走内网"的割裂。顺序：自定义 IPv4、自定义 IPv6、公网兜底。 */
+	static String[] dnsServers(Preferences prefs) {
+		ArrayList<String> out = new ArrayList<String>();
+		if (!prefs.getRemoteDns()) {
+			String v4 = safeDns(prefs.getDnsIpv4(), false);
+			String v6 = prefs.getIpv6() ? safeDns(prefs.getDnsIpv6(), true) : "";
+			if (!v4.isEmpty())
+			  out.add(v4);
+			if (!v6.isEmpty())
+			  out.add(v6);
+		}
+		out.add("223.5.5.5");
+		out.add("119.29.29.29");
+		/* 不额外塞 IPv6 公网 DNS：配置里 ipv6: false 时它只会给每次解析多一个
+		   必然超时的候选。dnsFirst(prefs, true) 有自己的 IPv6 兜底。 */
+		return out.toArray(new String[0]);
+	}
+
+	/* VpnService.Builder.addDnsServer 只收单个 IP，按地址族挑第一个。 */
+	static String dnsFirst(Preferences prefs, boolean ipv6) {
+		for (String s : dnsServers(prefs)) {
+			if (s.contains(":") == ipv6)
+			  return s;
+		}
+		return ipv6 ? "2400:3200::1" : "223.5.5.5";
+	}
+
+	/* TUN 的 dns 参数是逗号分隔的字符串。 */
+	static String dnsCsv(Preferences prefs) {
+		StringBuilder sb = new StringBuilder();
+		for (String s : dnsServers(prefs)) {
+			if (sb.length() > 0)
+			  sb.append(',');
+			sb.append(s);
+		}
+		return sb.toString();
+	}
+
+	/* 只放行合法 IP：用户可能粘 "https://1.1.1.1/dns-query" 或带端口，直接写进
+	   YAML / 交给 Builder 会让内核整份配置加载失败或 VPN 建立失败。 */
+	private static String safeDns(String s, boolean ipv6) {
+		if (s == null)
+		  return "";
+		String t = s.trim();
+		if (t.isEmpty() || t.length() > 64 || !t.matches("[0-9a-fA-F:.]+"))
+		  return "";
+		boolean colon = t.indexOf(':') >= 0;
+		if (colon != ipv6)
+		  return "";
+		if (!colon) {
+			String[] parts = t.split("\\.", -1);
+			if (parts.length != 4)
+			  return "";
+			for (String p : parts) {
+				try {
+					int n = Integer.parseInt(p);
+					if (n < 0 || n > 255 || !String.valueOf(n).equals(p))
+					  return "";
+				} catch (NumberFormatException e) {
+					return "";
+				}
+			}
+		} else {
+			/* IPv6：至少两个冒号、不含 ":::"，且只允许单个前导/尾随 "::"。
+			   Builder.addDnsServer() 收到畸形地址会抛异常，VPN 直接建不起来。 */
+			int colons = 0;
+			for (int i = 0; i < t.length(); i++)
+			  if (t.charAt(i) == ':')
+				  colons++;
+			if (t.equals("::") || colons < 2 || t.contains(":::")
+					|| (t.startsWith(":") && !t.startsWith("::"))
+					|| (t.endsWith(":") && !t.endsWith("::")))
+			  return "";
+		}
+		return t;
 	}
 
 	/* "key:" 作为**顶层** YAML 键（第 0 列）出现时为 true。 */

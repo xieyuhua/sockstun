@@ -12,6 +12,7 @@ package com.tunvpn;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.AdapterView;
@@ -231,12 +232,14 @@ public class ServerEditActivity extends BaseActivity {
 	}
 
 	private void save() {
-		String addr = edit_addr.getText().toString().trim();
 		int port = 1080;
 		try {
 			port = Integer.parseInt(edit_port.getText().toString().trim());
 		} catch (NumberFormatException e) {
 		}
+		int[] portHolder = new int[] { port };
+		String addr = cleanAddr(edit_addr.getText().toString(), portHolder);
+		port = portHolder[0];
 
 		String name = edit_name.getText().toString().trim();
 		String user = edit_user.getText().toString().trim();
@@ -244,6 +247,10 @@ public class ServerEditActivity extends BaseActivity {
 		String type = TYPES[spinner_type.getSelectedItemPosition()];
 
 		List<SocksServer> list = prefs.getSocksServers();
+		/* 编辑的正是**当前启用中**的服务器时，运行中的内核仍在跑旧 config.yaml，
+		   必须重建隧道才会用上新的地址/端口/账号（与「启用」时的处理一致）。 */
+		SocksServer active = prefs.getActiveSocksServer();
+		boolean activeEdited = !id.isEmpty() && active != null && id.equals(active.id);
 		if ("socks5".equals(type)) {
 			if (addr.isEmpty()) {
 				Toast.makeText(this, R.string.server_addr_required, Toast.LENGTH_SHORT).show();
@@ -264,8 +271,53 @@ public class ServerEditActivity extends BaseActivity {
 		}
 
 		prefs.setSocksServers(list);
+		if (activeEdited && prefs.getEnable())
+		  startService(new Intent(this, TProxyService.class)
+			.setAction(TProxyService.ACTION_RECONNECT));
 		Toast.makeText(this, R.string.server_saved, Toast.LENGTH_SHORT).show();
 		finish();
+	}
+
+	/* 地址栏容忍"整个链接直接粘进来"：socks5://user:pass@host:1080/x、
+	   host:1080、纯 IPv6。不处理的话 host:1080 会被当成 server 写进 YAML，
+	   生成 `server: host:1080` —— 内核要么报 YAML 错，要么连到一个不存在的主机。
+	   内嵌端口优先于表单里的端口（粘贴的完整地址才是用户的真实意图）。 */
+	private static String cleanAddr(String raw, int[] portOut) {
+		String s = raw == null ? "" : raw.trim();
+		int scheme = s.indexOf("://");
+		if (scheme >= 0)
+		  s = s.substring(scheme + 3);
+		int slash = s.indexOf('/');
+		if (slash >= 0)
+		  s = s.substring(0, slash);
+		int at = s.lastIndexOf('@');
+		if (at >= 0)
+		  s = s.substring(at + 1);
+		if (s.startsWith("[")) {
+			int end = s.indexOf(']');
+			if (end > 0) {
+				String host = s.substring(1, end);
+				if (s.length() > end + 1 && s.charAt(end + 1) == ':')
+				  parsePort(s.substring(end + 2), portOut);
+				return host;
+			}
+		}
+		int colon = s.lastIndexOf(':');
+		if (colon > 0 && colon == s.indexOf(':')
+				&& s.substring(colon + 1).matches("\\d+")) {
+			parsePort(s.substring(colon + 1), portOut);
+			s = s.substring(0, colon);
+		}
+		return s;
+	}
+
+	private static void parsePort(String p, int[] portOut) {
+		try {
+			int v = Integer.parseInt(p);
+			if (v > 0 && v <= 65535)
+			  portOut[0] = v;
+		} catch (NumberFormatException ignore) {
+		}
 	}
 
 	/* 按 id 插入或替换，编辑时不会变成新增一条。 */

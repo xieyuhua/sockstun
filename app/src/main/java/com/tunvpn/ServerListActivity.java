@@ -163,8 +163,19 @@ public class ServerListActivity extends BaseActivity {
 
 	private void enable(final SocksServer s) {
 		prefs.setActiveSocksId(s.id);
-		Toast.makeText(this, getString(R.string.server_enabled_msg, s.label()),
-			Toast.LENGTH_LONG).show();
+		/* config.yaml 只在 startService() 启动时生成一次。以前这里只写偏好、不发
+		   重建，于是"已连接时新增/切换服务器"后，内核仍在跑旧配置（订阅节点或旧
+		   上游），新 SOCKS5 根本没生效 —— 表现就是选了代理却访问不到目标地址。
+		   与订阅页「添加并启用」保持一致：运行中立刻重建隧道。 */
+		if (prefs.getEnable())
+		  startService(new Intent(this, TProxyService.class)
+			.setAction(TProxyService.ACTION_RECONNECT));
+		String msg = getString(R.string.server_enabled_msg, s.label());
+		/* 默认作用域是「部分应用」且白名单为空：这种状态下没有任何应用会进入隧道，
+		   「已连接」却访问不到任何内网地址。启用时直接把坑说清楚。 */
+		if (!prefs.getGlobal() && prefs.getApps().isEmpty())
+		  msg += "\n注意：当前「部分应用」未勾选任何应用，流量不会进入隧道；请到「设置 → 连接 → 应用」勾选程序，或开启全局模式。";
+		Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
 		adapter.notifyDataSetChanged();
 	}
 

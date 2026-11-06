@@ -75,6 +75,10 @@ public class TProxyService extends VpnService {
 	public static final String ACTION_SELECT = "tunvpn.SELECT";
 	/* 首页「重置累计」：让 :native 进程把内存计数器归零并重新定基准。 */
 	public static final String ACTION_RESET_TRAFFIC = "tunvpn.RESET_TRAFFIC";
+	/* 「最近请求」清空 / 「连接」页断开全部：权威数据都在 :native 进程内存里，
+	   主进程的静态调用够不到，必须走 intent。 */
+	public static final String ACTION_CLEAR_RECENT = "tunvpn.CLEAR_RECENT";
+	public static final String ACTION_CLOSE_ALL_CONNS = "tunvpn.CLOSE_ALL_CONNS";
 
 	/* 流量统计 */
 	private static final int NOTIFY_ID = 1;
@@ -308,6 +312,30 @@ public class TProxyService extends VpnService {
 			});
 			return START_STICKY;
 		}
+		/* 「最近请求」清空 / 「连接」断开全部：同样必须 post 到**采样线程**，与
+		   sampleStats()/accumulateProxy() 串行 —— 否则下一拍就把旧内存数据重新写回
+		   preferences，界面看起来"清了又回来"。 */
+		if (intent != null && (ACTION_CLEAR_RECENT.equals(intent.getAction())
+				|| ACTION_CLOSE_ALL_CONNS.equals(intent.getAction()))) {
+			final boolean clearRecent = ACTION_CLEAR_RECENT.equals(intent.getAction());
+			Handler h = statsHandler;
+			Runnable task = new Runnable() {
+				@Override public void run() {
+					TProxyService i = sInstance;
+					if (i == null)
+					  return;
+					if (clearRecent)
+					  i.clearRecentInCore();
+					else
+					  i.closeAllConnsInCore();
+				}
+			};
+			if (h != null)
+			  h.post(task);
+			else
+			  task.run();
+			return START_STICKY;
+		}
 		startService();
 		return START_STICKY;
 	}
@@ -363,6 +391,10 @@ public class TProxyService extends VpnService {
 		   （残留隧道、别的代理、adb forward、模拟器）会让 mihomo 绑定控制接口时
 		   **静默失败**，症状就是"已连接，但 /connections 连接被拒、所有计数恒为 0"。 */
 		int apiPort = MihomoConfig.pickApiPort();
+		/* 把实际端口持久化：主进程（订阅页测速、API 探测）读的是自己的静态
+		   MihomoConfig.API_PORT，永远是 9090；端口被占用挑到 9091+ 时那些请求
+		   会全部落空。写进 preferences 才能跨进程对齐。 */
+		prefs.setApiPortActual(apiPort);
 		appendLog("config: clash-api port = " + apiPort);
 
 		/* 配置：要么是用户手工编辑的那份（自定义模式），要么是按当前设置新生成的。 */
@@ -383,7 +415,20 @@ public class TProxyService extends VpnService {
 			/* 只记一行而不是整个文件：这几个键决定节点选择器和流量统计到底能不能够到
 			   内核。 */
 			appendLog("config: " + configKeySummary(configFile));
-		} catch (Throwable e) {
+			/* 排查"选中了代理却访问不到目标地址"时，这一行能一眼区分两种常见情况：
+			   - 运行中的内核还在用旧配置（upstream 不是刚选的那台）；
+			   - 流量被规则判成 DIRECT，从手机物理网卡直出，公网当然到不了内网。 */
+			SocksServer up = prefs.getActiveSocksServer();
+			String fallback = (Preferences.RULES_STRATEGY_GLOBAL.equals(prefs.getRulesStrategy()))
+				? "全局代理" : (Preferences.RULES_STRATEGY_DIRECT.equals(prefs.getRulesStrategy()))
+				? "全局直连" : (prefs.getRulesDefaultProxy() ? "代理" : "直连");
+			appendLog("upstream: " + (up == null
+					? ("订阅节点池 · " + MihomoConfig.describe(prefs))
+					: ("手动 " + (up.type == null ? "socks5" : up.type)
+						+ " " + up.addr + ":" + up.port))
+				+ " · 策略=" + prefs.getRulesStrategy()
+				+ " · 未命中规则走=" + fallback);
+			} catch (Throwable e) {
 			failStartup("生成配置失败：" + e.getMessage());
 			return;
 		}
@@ -393,9 +438,15 @@ public class TProxyService extends VpnService {
 		boolean ipv4 = prefs.getIpv4();
 		boolean ipv6 = prefs.getIpv6();
 		/* 网卡地址要放在 fake-ip 池（198.18.0.0/16）之外，
-		   否则某个域名可能被分配到一个**就是隧道自己**的地址。 */
-		String tunAddr = "172.19.0.1";
-		String tunAddr6 = "fc00::1";
+		   否则某个域名可能被分配到一个**就是隧道自己**的地址。
+		   同时也必须避开**常见内网网段**：旧值 172.19.0.1 落在 172.16.0.0/12
+		   私网里，目标内网恰好也在该段时，TUN 的 /30 直连路由会把去往
+		   172.19.0.x 的流量截给自己，表现为"代理连上了但访问不到内网 IP"。
+		   100.64.0.0/10 是运营商级 NAT 保留段，家用/企业内网基本不会用到；
+		   IPv6 用 RFC 3849 的文档保留段 2001:db8::/32 代替 ULA（fc00::/7），
+		   同样避免与企业内网的 ULA 地址撞车。 */
+		String tunAddr = "100.64.0.1";
+		String tunAddr6 = "2001:db8::1";
 		int tunPrefix = 30;
 
 		VpnService.Builder builder = new VpnService.Builder();
@@ -403,12 +454,14 @@ public class TProxyService extends VpnService {
 		builder.setMtu(prefs.getTunnelMtu());
 		if (ipv4) {
 			builder.addAddress(tunAddr, tunPrefix);
-			builder.addDnsServer("223.5.5.5");
+			/* 与生成的 dns: 段同源：远程 DNS 关闭时，用户在规则页填的（可能是
+			   内网）DNS 才会真正成为系统 DNS，而不是永远写死公网地址。 */
+			builder.addDnsServer(MihomoConfig.dnsFirst(prefs, false));
 			builder.addRoute("0.0.0.0", 0);
 		}
 		if (ipv6) {
 			builder.addAddress(tunAddr6, 64);
-			builder.addDnsServer("2400:3200::1");
+			builder.addDnsServer(MihomoConfig.dnsFirst(prefs, true));
 			builder.addRoute("::", 0);
 		}
 
@@ -523,7 +576,7 @@ public class TProxyService extends VpnService {
 		   VpnService.protect()，这样内核自己的对外流量永远不会绕回 VPN。 */
 		String address = (ipv4 ? tunAddr + "/" + tunPrefix : "") +
 			(ipv6 ? (ipv4 ? "," : "") + tunAddr6 + "/64" : "");
-		String dns = "223.5.5.5,119.29.29.29";
+		String dns = MihomoConfig.dnsCsv(prefs);
 		final TunInterface tunInterface = new TunInterface() {
 			@Override
 			public void protect(int fd) {
@@ -1284,17 +1337,68 @@ public class TProxyService extends VpnService {
 	static boolean protectLocalSocket(java.net.Socket s) {
 		return sInstance != null && sInstance.protect(s);
 	}
-	/* 把记录下来的"最近请求"从内存列表和持久化存储里一起清空。由「最近请求」页的
-	   "清空"操作调用；不清内存的话，后台的下一次落盘就会把列表又写回来。
-	   lastRecentFlush 也一并重置，免得随后那次落盘被 2 秒的节流跳过。 */
-	public static void clearRecentRequests() {
-		if (sInstance == null)
+	/* 「最近请求」页的清空入口（主进程调用）。
+	   权威数据在 :native 进程内存的 recentRequests 列表里，主进程的 sInstance 恒为
+	   null —— 以前直接调静态方法等于空操作，所以界面上"清了"，下一拍采样线程又用
+	   旧内存把 preferences 全量写回。这里先清本进程的持久化副本，再发 intent 让
+	   :native 自己清内存并重新落盘（见 onStartCommand 的 ACTION_CLEAR_RECENT）。 */
+	public static void clearRecentRequests(Context context, boolean running) {
+		new Preferences(context).setRecentRequests("[]");
+		if (!running)
 		  return;
-		synchronized (sInstance.recentRequests) {
-			sInstance.recentRequests.clear();
-			sInstance.lastRecentFlush = 0;
+		sendAction(context, ACTION_CLEAR_RECENT);
+	}
+
+	/* 「连接」页"断开全部"入口（主进程调用）。
+	   以前它走 localApi(DELETE /connections)，但内核桥只在 :native 进程可用，且
+	   MihomoConfig.API_PORT 是**每进程一份的静态值**：:native 里 pickApiPort() 选到
+	   9091+ 时，主进程还在往 9090 发，请求落空、连接自然还在。改成直接让 :native
+	   调用进程内动作桥，同时立刻把连接快照清空。 */
+	public static void clearConnections(Context context, boolean running) {
+		new Preferences(context).setConnSnapshot("[]");
+		if (!running)
+		  return;
+		sendAction(context, ACTION_CLOSE_ALL_CONNS);
+	}
+
+	private static void sendAction(Context context, String action) {
+		Intent i = new Intent(context, TProxyService.class);
+		i.setAction(action);
+		try {
+			context.startService(i);
+		} catch (Exception ignore) {
+			/* 页面在前台，不受后台启动限制；兜住不代表清空失败。 */
 		}
-		sInstance.flushRecentRequests(android.os.SystemClock.elapsedRealtime());
+	}
+
+	/* 在**采样线程**上清空最近请求：内存列表 + 活动连接跟踪 + 持久化副本，
+	   三处一起清，才不会被下一次 sampleStats() 又写回来。connSeen 保留 —— 它只用于
+	   流量增量，清掉会把已传输的字节重新计一遍。 */
+	private void clearRecentInCore() {
+		synchronized (recentRequests) {
+			recentRequests.clear();
+			lastRecentFlush = SystemClock.elapsedRealtime();
+		}
+		connInfo.clear();
+		if (statsPrefs != null)
+		  statsPrefs.setRecentRequests("[]");
+	}
+
+	/* 在**采样线程**上断开全部连接，并立刻把页面读到的数据清空。 */
+	private void closeAllConnsInCore() {
+		try {
+			/* 进程内桥，不依赖 9090 是否监听；底层实现见 libclash.so 的
+			   closeAllConnections 动作（等价于 DELETE /connections）。 */
+			apiAction("closeAllConnections", null);
+		} catch (Throwable ignore) {
+		}
+		/* 去重缓存必须一起复位：否则快照内容没变化时 publishConnSnapshot 不会重写，
+		   而内核里立刻重建的连接又会把旧列表带回来。 */
+		lastConnSnapshotJson = "[]";
+		connSnapshot = "{\"connections\":[]}";
+		connInfo.clear();   /* 一刀切关闭不该在"最近请求"里灌进一批新记录 */
+		if (statsPrefs != null)
+		  statsPrefs.setConnSnapshot("[]");
 	}
 	/* 首页「重置累计」。服务跑在 :native 进程，Activity 所在的主进程里 sInstance
 	   恒为 null，直接摸内存计数器是够不到的 —— 只能发 intent 让 :native 自己归零

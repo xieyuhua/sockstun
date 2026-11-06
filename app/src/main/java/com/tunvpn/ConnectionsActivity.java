@@ -62,9 +62,6 @@ public class ConnectionsActivity extends BaseActivity {
 	/* 上一次取数失败的**真实原因**，直接显示在界面上而不是笼统的"不可用"，这样
 	   "列表莫名空白"才有得排查。上次成功时为空串。 */
 	private String lastError = "";
-	/* clash-api 令牌来源；这里重新读取，保证 /connections 请求里的 Authorization
-	   头与运行中配置里烘焙的 secret 一致。 */
-	private Preferences prefs;
 
 	/* 连接表中的一行，只保留值得展示的字段。 */
 	private static class Row {
@@ -79,7 +76,6 @@ public class ConnectionsActivity extends BaseActivity {
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
-		prefs = new Preferences(this);
 		setContentView(R.layout.activity_connections);
 
 		MaterialToolbar toolbar = (MaterialToolbar) findViewById(R.id.toolbar);
@@ -331,42 +327,25 @@ public class ConnectionsActivity extends BaseActivity {
 	/* DELETE /connections 会断开所有在途连接。因为它是一刀切的，而用户可能只想清掉
 	   其中几条，所以先弹确认。 */
 	private void closeAll() {
-		if (allRows.isEmpty())
-		  return;
 		new AlertDialog.Builder(this)
 			.setTitle(R.string.settings_connections)
 			.setMessage(getString(R.string.connections_close_confirm, allRows.size()))
 			.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
 				@Override
 				public void onClick(DialogInterface d, int which) {
-					/* 这个 DELETE 走的是**会阻塞**的动作桥，所以绝不能放在 UI 线程：
-					   内核慢一点就会触发 ANR。丢到后台线程，下一次轮询自然会刷新。 */
-					new Thread(new Runnable() {
-						@Override
-						public void run() {
-							httpDelete("http://127.0.0.1:" + MihomoConfig.API_PORT + "/connections");
-							ui.post(new Runnable() {
-								@Override
-								public void run() {
-									if (isFinishing() || isDestroyed())
-									  return;
-									reload();
-									Toast.makeText(ConnectionsActivity.this,
-										R.string.connections_close_toast, Toast.LENGTH_SHORT).show();
-								}
-							});
-						}
-					}).start();
+					/* 以前这里走 localApi(DELETE /connections)：主进程既没有内核桥，
+					   又可能用着与 :native 不同的 API_PORT，请求经常落空，于是"断开
+					   全部"后列表还在。现在发 intent 让 :native 在采样线程上直接调
+					   进程内动作桥，并立刻清空快照 —— 不阻塞 UI 线程。 */
+					TProxyService.clearConnections(ConnectionsActivity.this,
+						new Preferences(ConnectionsActivity.this).getEnable());
+					reload();
+					Toast.makeText(ConnectionsActivity.this,
+						R.string.connections_close_toast, Toast.LENGTH_SHORT).show();
 				}
 			})
 			.setNegativeButton(android.R.string.cancel, null)
 			.show();
-	}
-
-	private void httpDelete(String url) {
-		String path = url.indexOf('/', 7) >= 0 ? url.substring(url.indexOf('/', 7)) : "/";
-		TProxyService.bridgeApi("DELETE", TProxyService.apiBaseHost(),
-			MihomoConfig.API_PORT, path, null, prefs.getSecret());
 	}
 
 	private class RowAdapter extends BaseAdapter {

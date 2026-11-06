@@ -67,6 +67,12 @@ public class Preferences
 	public static final String ENABLE = "Enable";
 	public static final String LAST_ERROR = "LastError";
 	public static final String NAME = "Name";
+	/* clash-api 实际监听的端口。由 :native 进程在 pickApiPort() 之后写入：
+	   MihomoConfig.API_PORT 是**每进程一份的静态值**，主进程永远看到默认的 9090，
+	   一旦 :native 因端口占用挑了 9091+，主进程发出的 /delay、/proxies、/version
+	   就会全部落空。这是运行时全局值，刻意不走配置档 key() 前缀。 */
+	public static final String API_PORT_ACTUAL = "ApiPortActual";
+	public static final int DEFAULT_API_PORT = 9090;
 	public static final String PROFILE_COUNT = "ProfileCount";
 	public static final String SELECTED = "Selected";
 	public static final String LOG_ENABLED = "LogEnabled";
@@ -300,7 +306,7 @@ public class Preferences
 		if (prefs.contains(IPV6))
 		  editor.putBoolean(key(0, IPV6), prefs.getBoolean(IPV6, true));
 		if (prefs.contains(GLOBAL))
-		  editor.putBoolean(key(0, GLOBAL), prefs.getBoolean(GLOBAL, false));
+		  editor.putBoolean(key(0, GLOBAL), prefs.getBoolean(GLOBAL, true));
 		if (prefs.contains(UDP_IN_TCP))
 		  editor.putBoolean(key(0, UDP_IN_TCP), prefs.getBoolean(UDP_IN_TCP, false));
 		if (prefs.contains(REMOTE_DNS))
@@ -328,7 +334,7 @@ public class Preferences
 		editor.putString(key(dst, DNS_IPV6), prefs.getString(key(src, DNS_IPV6), "2001:4860:4860::8888"));
 		editor.putBoolean(key(dst, IPV4), prefs.getBoolean(key(src, IPV4), true));
 		editor.putBoolean(key(dst, IPV6), prefs.getBoolean(key(src, IPV6), true));
-		editor.putBoolean(key(dst, GLOBAL), prefs.getBoolean(key(src, GLOBAL), false));
+		editor.putBoolean(key(dst, GLOBAL), prefs.getBoolean(key(src, GLOBAL), true));
 		editor.putBoolean(key(dst, UDP_IN_TCP), prefs.getBoolean(key(src, UDP_IN_TCP), false));
 		editor.putBoolean(key(dst, REMOTE_DNS), prefs.getBoolean(key(src, REMOTE_DNS), true));
 		editor.putStringSet(key(dst, APPS), new HashSet<String>(prefs.getStringSet(key(src, APPS), new HashSet<String>())));
@@ -850,6 +856,18 @@ public class Preferences
 
 
 
+	/* :native 每次选定 clash-api 端口后写入；主进程的测速/探测从这里读，
+	   不再依赖自己那份永远是 9090 的静态 MihomoConfig.API_PORT。
+	   commit() 保证跨进程立即可见（MODE_MULTI_PROCESS）。 */
+	public void setApiPortActual(int port) {
+		prefs.edit().putInt(API_PORT_ACTUAL, port).commit();
+	}
+
+	public int getApiPortActual() {
+		int p = prefs.getInt(API_PORT_ACTUAL, DEFAULT_API_PORT);
+		return (p > 0 && p <= 65535) ? p : DEFAULT_API_PORT;
+	}
+
 	/* clash-api 的 bearer 令牌。只生成一次并持久化，然后既注入到内核配置里，
 	   又由每个控制请求携带（Authorization: Bearer）。配置里一旦设了 `secret:`，
 	   mihomo 就会用 401 拒绝未鉴权的调用，所以客户端和配置必须一致 ——
@@ -1121,7 +1139,10 @@ public class Preferences
 	}
 
 	public boolean getGlobal() {
-		return prefs.getBoolean(key(GLOBAL), false);
+		/* 默认必须是"全局"（与用户手册一致）。以前默认 false = 部分应用且白名单
+		   为空，新装用户"已连接"却没有任何应用进隧道 —— 表现为选中了代理、
+		   一切地址都访问不到。已有用户如果显式关过全局，存的是 false，不受影响。 */
+		return prefs.getBoolean(key(GLOBAL), true);
 	}
 
 	public void setGlobal(boolean enable) {
@@ -1354,7 +1375,10 @@ public class Preferences
 	   "k:v;..." 字符串）可以保留字段名，读起来也简单。 */
 	private static final String RECENT_REQUESTS = "recentRequests";
 	public void setRecentRequests(String json) {
-		statsPrefs.edit().putString(RECENT_REQUESTS, json).apply();
+		/* 必须 commit()：MODE_MULTI_PROCESS 只在已提交的写入上才会让 :native 进程
+		   重新读取。用 apply() 时主进程写空了、服务进程仍拿自己的缓存继续"回填"，
+		   正是「清空后还在」的一个帮凶（与 setConnSnapshot 保持一致）。 */
+		statsPrefs.edit().putString(RECENT_REQUESTS, json).commit();
 	}
 	public String getRecentRequests() {
 		return statsPrefs.getString(RECENT_REQUESTS, "");

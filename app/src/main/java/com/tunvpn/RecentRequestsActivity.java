@@ -280,18 +280,19 @@ public class RecentRequestsActivity extends BaseActivity {
 	/* 清空全部最近请求。既清持久化存储，也要让正在运行的服务丢掉它内存里的列表，
 	   否则后台的定期落盘下一次就会把文件重新填满。 */
 	private void clearAll() {
-		if (allRows.isEmpty()) {
-			Toast.makeText(this, R.string.recent_requests_empty, Toast.LENGTH_SHORT).show();
-			return;
-		}
+		/* 即使当前列表为空也要允许清：解析失败或持久化里留着旧数据时，提前 return
+		   会让"清空"看起来完全没反应。 */
 		new AlertDialog.Builder(this)
 			.setTitle(R.string.settings_recent_requests)
 			.setMessage(R.string.recent_requests_clear_confirm)
 			.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
 				@Override
 				public void onClick(DialogInterface d, int which) {
-					new Preferences(RecentRequestsActivity.this).setRecentRequests("[]");
-					TProxyService.clearRecentRequests();
+					Preferences p = new Preferences(RecentRequestsActivity.this);
+					/* 让 :native 进程的采样线程一起清内存；只写 preferences 会被
+					   下一拍全量写回（"清了又回来"）。 */
+					TProxyService.clearRecentRequests(RecentRequestsActivity.this,
+						p.getEnable());
 					load();
 					Toast.makeText(RecentRequestsActivity.this,
 						R.string.recent_requests_cleared, Toast.LENGTH_SHORT).show();
