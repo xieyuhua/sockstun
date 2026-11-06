@@ -118,6 +118,9 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 			});
 		addRow(group_lan, R.drawable.ic_dns, R.string.settings_lan_port,
 			Integer.toString(prefs.getProxyPort()), R.id.settings_proxy_port);
+		/* 局域网共享的可选鉴权：留空 = 任何同网段设备都能直连（旧行为）。 */
+		addRow(group_lan, R.drawable.ic_rules, R.string.settings_lan_auth,
+			lanAuthSubtitle(), R.id.settings_lan_auth);
 		/* 订阅管理：进入订阅配置页管理地址 / 启用；以及是否在列表里显示不可用节点。 */
 		addRow(group_subscription, R.drawable.ic_subscribe, R.string.subs_config,
 			subsSubtitle(), R.id.settings_subscription);
@@ -478,6 +481,8 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		  showVersionDialog();
 		else if (id == R.id.settings_secret)
 		  showSecretDialog();
+		else if (id == R.id.settings_lan_auth)
+		  showLanAuthDialog();
 		else if (id == R.id.settings_webdav_config)
 		  showWebdavConfig();
 		else if (id == R.id.settings_backup_manager)
@@ -706,6 +711,52 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		return getString(R.string.settings_webdav_on, prefs.getWebdavUrl());
 	}
 
+	/* 「局域网鉴权」那一行的副标题：没设就是"完全开放"，设了显示用户名（不显示密码）。 */
+	private String lanAuthSubtitle() {
+		if (!prefs.lanAuthReady())
+		  return getString(R.string.settings_lan_auth_off);
+		return getString(R.string.settings_lan_auth_on, prefs.getLanAuthUser());
+	}
+
+	/* 局域网鉴权弹窗：用户名 + 密码。两项都填才会写进配置的 `authentication:`；
+	   都留空 = 不鉴权（任何同网段设备可直连，即旧行为）。 */
+	private void showLanAuthDialog() {
+		prefs = new Preferences(this);
+		View v = getLayoutInflater().inflate(R.layout.dialog_lan_auth, null);
+		final EditText user = (EditText) v.findViewById(R.id.lan_auth_user);
+		final EditText pass = (EditText) v.findViewById(R.id.lan_auth_pass);
+		user.setText(prefs.getLanAuthUser());
+		pass.setText(prefs.getLanAuthPass());
+
+		new AlertDialog.Builder(this)
+			.setTitle(R.string.settings_lan_auth)
+			.setView(v)
+			.setPositiveButton(R.string.save, new DialogInterface.OnClickListener() {
+				@Override public void onClick(DialogInterface d, int w) {
+					String u = user.getText().toString().trim();
+					String p = pass.getText().toString();
+					/* mihomo 的 authentication 是 "用户名:密码" 一行，冒号是分隔符：
+					   任何一边带冒号都会把这一行拆错，直接挡掉比让内核报错好。 */
+					if (u.contains(":") || p.contains(":")) {
+						Toast.makeText(SettingsActivity.this, R.string.settings_lan_auth_colon,
+							Toast.LENGTH_LONG).show();
+						return;
+					}
+					/* 只填一半没有意义（内核要求两者都给），而且容易把人锁在外面。 */
+					if (u.isEmpty() != p.isEmpty()) {
+						Toast.makeText(SettingsActivity.this, R.string.settings_lan_auth_partial,
+							Toast.LENGTH_LONG).show();
+						return;
+					}
+					prefs.setLanAuth(u, p);
+					buildList();
+					afterNetworkChange();
+				}
+			})
+			.setNegativeButton(android.R.string.cancel, null)
+			.show();
+	}
+
 	/* clash-api 令牌查看器：只读（可选中手动复制），另有"复制"与"重置"。重置会重新
 	   生成令牌，而运行中的内核要等隧道（重）启动才会采用它，所以用 afterNetworkChange()
 	   给出提示。 */
@@ -720,7 +771,10 @@ public class SettingsActivity extends BaseActivity implements View.OnClickListen
 		edit.setText(secret);
 		edit.setInputType(InputType.TYPE_NULL);
 		edit.setTextIsSelectable(true);
-		helpView.setText(getString(R.string.settings_secret_hint));
+		/* 顺手把**实际**端口写出来：内核启动时可能在 9090..9100 里挑了别的口，
+		   想接面板的人只能猜 9090（主进程里的静态值是永远不更新）。 */
+		helpView.setText(getString(R.string.settings_secret_hint)
+			+ "\n\n" + getString(R.string.settings_secret_endpoint, prefs.getApiPortActual()));
 		helpView.setVisibility(View.VISIBLE);
 
 		new AlertDialog.Builder(this)

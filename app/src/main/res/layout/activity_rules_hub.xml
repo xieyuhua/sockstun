@@ -227,6 +227,19 @@
 						android:layout_height="wrap_content"
 						android:layout_marginTop="8dp"
 						android:text="@string/rules_default_proxy"/>
+					<androidx.appcompat.widget.SwitchCompat
+						android:id="@+id/bypass_lan"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:layout_marginTop="6dp"
+						android:text="@string/rules_bypass_lan"/>
+					<TextView
+						android:id="@+id/rules_bypass_lan_hint"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:layout_marginTop="4dp"
+						android:text="@string/rules_bypass_lan_hint"
+						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 					<LinearLayout
 						android:orientation="horizontal"
 						android:layout_width="match_parent"

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「局域网鉴权」弹窗：给 allow-lan 打开的 mixed 端口加一层 HTTP/SOCKS 基本认证。
+     两项都留空 = 不鉴权（保持旧行为，任何同网段设备都能直连）。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	android:orientation="vertical"
+	android:layout_width="match_parent"
+	android:layout_height="wrap_content"
+	android:paddingLeft="16dp"
+	android:paddingRight="16dp"
+	android:paddingTop="8dp"
+	android:paddingBottom="4dp">
+
+	<com.google.android.material.textfield.TextInputLayout
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:hint="@string/settings_lan_auth_user">
+
+		<com.google.android.material.textfield.TextInputEditText
+			android:id="@+id/lan_auth_user"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:inputType="text"
+			android:singleLine="true"/>
+	</com.google.android.material.textfield.TextInputLayout>
+
+	<com.google.android.material.textfield.TextInputLayout
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:hint="@string/settings_lan_auth_pass">
+
+		<com.google.android.material.textfield.TextInputEditText
+			android:id="@+id/lan_auth_pass"
+			android:layout_width="match_parent"
+			android:layout_height="wrap_content"
+			android:inputType="textPassword"
+			android:singleLine="true"/>
+	</com.google.android.material.textfield.TextInputLayout>
+
+	<TextView
+		android:id="@+id/lan_auth_help"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_marginTop="4dp"
+		android:layout_marginBottom="8dp"
+		android:textSize="12sp"
+		android:textColor="?attr/colorOnSurfaceVariant"
+		android:text="@string/settings_lan_auth_hint"/>
+</LinearLayout>

@@ -1933,7 +1933,7 @@ public class TProxyService extends VpnService {
 			for (int i = 0; i < 40; i++) {
 				if (startupAborted || tunnelStopping)
 				  return;
-				int[] res = proxyTestOnce(port);
+				int[] res = proxyTestOnce(prefs, port);
 				if (res[0] > 0) { // 拿到 HTTP 响应 => 节点管线通
 					int code = res[0], rtt = res[1];
 					if (code >= 200 && code < 400) {
@@ -1966,11 +1966,11 @@ public class TProxyService extends VpnService {
 	/* 逐个候选 URL 经本地 mixed-port 实测。返回首个拿到 2xx 的 {code, rtt}；若所有
 	   URL 都只拿到 5xx，也返回最后一个 5xx（节点已应答，证明隧道通）；仅当连接级
 	   失败（拒绝/超时，代理本身不可达）才返回 {-1,-1}。 */
-	private int[] proxyTestOnce(int port) {
+	private int[] proxyTestOnce(Preferences prefs, int port) {
 		int last5xx = -1, lastRtt = -1;
 		for (String url : PROXY_TEST_URLS) {
 			lastTestUrl = url;
-			ApiResult r = proxyFetch(port, url);
+			ApiResult r = proxyFetch(prefs, port, url);
 			if (r.code == -1) {
 				lastTestError = "transport（代理不可达）";
 				return new int[] { -1, -1 };
@@ -1986,7 +1986,7 @@ public class TProxyService extends VpnService {
 
 	/* 向充当 HTTP 代理的本地 mixed-port 发一个 **absolute-form** 的 GET，走的是绕过
 	   VPN 的 socket（否则 App 自己的 socket 会被隧道抓走）。返回代理的响应码与 rtt。 */
-	static ApiResult proxyFetch(int port, String url) {
+	static ApiResult proxyFetch(Preferences prefs, int port, String url) {
 		ApiResult r = new ApiResult();
 		long t0 = System.currentTimeMillis();
 		java.net.Socket s = null;
@@ -1999,8 +1999,16 @@ public class TProxyService extends VpnService {
 			java.io.OutputStream os = s.getOutputStream();
 			StringBuilder req = new StringBuilder();
 			req.append("GET ").append(url).append(" HTTP/1.1\r\n")
-				.append("Host: ").append(u.getHost()).append("\r\n")
-				.append("Connection: close\r\n\r\n");
+				.append("Host: ").append(u.getHost()).append("\r\n");
+			/* 开了「局域网鉴权」时 mixed-port 会要求 HTTP 代理认证，连自己人也要带。
+			   少了这个头，自检会拿到 407，被误判成"节点可达但目标被拦"。 */
+			if (prefs != null && prefs.lanAuthReady()) {
+				String raw = prefs.getLanAuthUser() + ":" + prefs.getLanAuthPass();
+				String token = android.util.Base64.encodeToString(
+					raw.getBytes(StandardCharsets.UTF_8), android.util.Base64.NO_WRAP);
+				req.append("Proxy-Authorization: Basic ").append(token).append("\r\n");
+			}
+			req.append("Connection: close\r\n\r\n");
 			os.write(req.toString().getBytes(StandardCharsets.UTF_8));
 			os.flush();
 			java.io.InputStream is = s.getInputStream();

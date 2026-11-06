@@ -170,7 +170,10 @@ public class ServerListActivity extends BaseActivity {
 		if (prefs.getEnable())
 		  startService(new Intent(this, TProxyService.class)
 			.setAction(TProxyService.ACTION_RECONNECT));
-		String msg = getString(R.string.server_enabled_msg, s.label());
+		/* 文案要跟着实际行为走：已连接时上面已经发了 ACTION_RECONNECT，别再说
+		   "重启隧道生效"（那会让用户以为没生效而去手动重连）。 */
+		String msg = getString(prefs.getEnable()
+			? R.string.server_enabled_msg_live : R.string.server_enabled_msg, s.label());
 		/* 默认作用域是「部分应用」且白名单为空：这种状态下没有任何应用会进入隧道，
 		   「已连接」却访问不到任何内网地址。启用时直接把坑说清楚。 */
 		if (!prefs.getGlobal() && prefs.getApps().isEmpty())

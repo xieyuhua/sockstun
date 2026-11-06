@@ -34,6 +34,7 @@
 	<string name="status_disconnected">Disconnected</string>
 	<string name="status_failed">连接失败</string>
 	<string name="status_connected_hint">Tunnel is running, traffic goes through the proxy</string>
+	<string name="status_no_apps_warn">部分应用模式未勾选任何应用：没有流量会进入隧道（等于不代理）。请到 设置 → 连接 → 应用 勾选程序，或改用全局模式。</string>
 	<string name="status_disconnected_hint">Tap Enable to start the tunnel</string>
 	<string name="section_server">Server</string>
 	<string name="section_dns">DNS</string>
@@ -58,6 +59,8 @@
 	<string name="routing_scope_hint">Two routing layers: (1) Global / per-App decides which apps traffic enters the tunnel (VPN scope, evaluated first); (2) the routing strategy (rules / global-proxy / global-direct) only applies to traffic already inside the tunnel. Excluded apps use the system network directly and ignore the routing rules.</string>
 	<string name="routing_scope_empty_warn">"Per-App" is on but no app is selected: no traffic will enter the tunnel (i.e. nothing is proxied). Tap "Apps" to pick apps, or enable "Global".</string>
 	<string name="rules_default_proxy">Unmatched traffic uses the proxy</string>
+	<string name="rules_bypass_lan">绕过内网（私有地址直连）</string>
+	<string name="rules_bypass_lan_hint">默认开启。192.168.x.x / 10.x.x.x / 172.16–31.x.x 等私有地址一律直连，不进代理节点——否则被勾进隧道的浏览器访问 NAS / 内网 IP 会被送到远端而失败。它排在你的规则之后、兜底规则之前；要让内网也走代理，关掉本开关。</string>
 	<string name="rule_add">Add</string>
 	<string name="rule_delete">Delete</string>
 	<string name="rule_value_hint">按所选类型填写，如 google.com / 10.0.0.0/8 / 443</string>
@@ -140,6 +143,10 @@
 	<string name="sub_test_all">测速全部</string>
 	<string name="sub_testing">测速中 %1$d/%2$d（%3$d%%）</string>
 	<string name="sub_testing_eta">剩余约 %1$d 秒</string>
+	<string name="sub_testing_phase">正在%1$s</string>
+	<string name="sub_test_phase_core">加载测速内核</string>
+	<string name="sub_test_phase_groups">分组快测（内核并发拨测）</string>
+	<string name="sub_test_phase_tcp">TCP 预筛（剔除连不上端口的节点）</string>
 	<string name="sub_test_stalled">测速已停止：长时间没有新结果。剩余节点按「未测速」处理，原因见「日志」</string>
 	<string name="sub_test">测速</string>
 	<string name="sub_use">使用</string>
@@ -314,6 +321,8 @@
 	<string name="settings_connection">连接信息</string>
 	<string name="settings_secret">控制接口密钥</string>
 	<string name="settings_secret_hint">clash-api 鉴权令牌。App 与内核据此互相验证，重置后需重启隧道生效。</string>
+	<string name="settings_secret_endpoint">控制接口：http://127.0.0.1:%1$d
+（端口由内核启动时选定，被占用会顺延到 9091–9100；重启隧道后可能变化）</string>
 	<string name="settings_secret_copy">复制</string>
 	<string name="settings_secret_reset">重置</string>
 	<string name="settings_secret_reset_done">已生成新密钥，重启隧道后生效</string>
@@ -332,6 +341,14 @@
 	<string name="settings_allow_lan">允许局域网连接</string>
 	<string name="settings_allow_lan_hint">开启后，同一网络下的其他设备可把本机当代理使用（端口见下）</string>
 	<string name="settings_lan_port">代理端口</string>
+	<string name="settings_lan_auth">局域网鉴权</string>
+	<string name="settings_lan_auth_off">未设置（同网段设备可直接连接）</string>
+	<string name="settings_lan_auth_on">已启用 · 用户名 %1$s</string>
+	<string name="settings_lan_auth_user">用户名</string>
+	<string name="settings_lan_auth_pass">密码</string>
+	<string name="settings_lan_auth_hint">两项都填才会开启：其他设备连接本机代理时要带这组用户名和密码（HTTP / SOCKS5 都适用）。留空 = 不鉴权，同网段任何设备都能直连。改完需要重新连接生效。</string>
+	<string name="settings_lan_auth_colon">用户名和密码里不能包含冒号（:），内核用冒号分隔这一行</string>
+	<string name="settings_lan_auth_partial">用户名和密码需要同时填写，或者都留空</string>
 	<string name="settings_connections">活跃连接</string>
 	<string name="settings_connections_hint">查看当前正在使用代理的连接</string>
 	<string name="settings_recent_requests">最近请求</string>
@@ -409,7 +426,8 @@
 	<string name="server_enabled">启用中</string>
 	<string name="server_delete">删除</string>
 	<string name="server_delete_confirm">删除服务器“%s”？</string>
-	<string name="server_enabled_msg">已启用：%s（将忽略订阅，重启隧道生效）</string>
+	<string name="server_enabled_msg">已启用：%s（将忽略订阅）</string>
+	<string name="server_enabled_msg_live">已启用：%s（将忽略订阅），正在重建配置生效…</string>
 	<string name="server_saved">已保存</string>
 	<string name="server_addr_required">请填写服务器地址</string>
 	<string name="server_type_label">协议</string>

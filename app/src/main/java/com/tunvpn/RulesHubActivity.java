@@ -57,6 +57,9 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 	private TextInputLayout til_dns_ipv6;
 
 	private CompoundButton switch_default_proxy;
+	/* 「绕过内网」：私有地址直连，不进代理节点。没有它时，被勾进隧道的浏览器
+	   访问 192.168.x.x 会落进兜底的 MATCH（走代理），必然打不开。 */
+	private CompoundButton switch_bypass_lan;
 	private Spinner spinner_type;
 	private Spinner spinner_action;
 	/* 值输入框的容器，方便让它的 hint 跟着所选规则类型变化。 */
@@ -164,6 +167,18 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 				}
 			});
 
+		/* 「绕过内网」：开关直接写偏好，生成配置时由 MihomoConfig 插在用户规则之后、
+		   兜底之前（见 LAN_DIRECT_RULES）。 */
+		switch_bypass_lan = (CompoundButton) findViewById(R.id.bypass_lan);
+		switch_bypass_lan.setChecked(prefs.getBypassLan());
+		switch_bypass_lan.setOnCheckedChangeListener(
+			new CompoundButton.OnCheckedChangeListener() {
+				@Override
+				public void onCheckedChanged(CompoundButton button, boolean checked) {
+					prefs.setBypassLan(checked);
+				}
+			});
+
 		rules = prefs.getRules();
 		renderRules();
 		loadUI();
@@ -202,6 +217,9 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		checkbox_ipv6.setEnabled(editable);
 		checkbox_udp_in_tcp.setEnabled(editable);
 		checkbox_remote_dns.setEnabled(editable);
+		/* 「绕过内网」会写进生成的配置，所以和上面几个开关一样：运行中只读。
+		   它不受分流策略影响（全局代理下也生效），因此不放进 updateModeUi()。 */
+		switch_bypass_lan.setEnabled(editable);
 
 		/* 已连接时也允许进入应用列表：AppListActivity 现在保存后会重建隧道，新的
 		   作用域可以立即生效。 */

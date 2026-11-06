@@ -26,6 +26,10 @@ class TestProgress {
 	private static volatile long deadlineMs = 0;
 	private static volatile boolean batch = false;
 	private static volatile long startedAtMs = 0;
+	/* 当前阶段的人类可读名字（"加载测速内核" / "分组快测" / "TCP 预筛"）。
+	   这些阶段都是一次性的长任务：期间 DONE 不会增加，如果界面只显示"测速中 0/N"，
+	   用户看到的就是"进度条一动不动"。有了它，进度行能说明**在干什么**。 */
+	private static volatile String phase = "";
 
 	/* 开始一轮。返回该轮的 generation 号；已有轮次在跑时返回 -1（调用方据此拒绝
 	   重复发起）。 */
@@ -38,6 +42,7 @@ class TestProgress {
 		deadlineMs = deadline;
 		batch = isBatch;
 		startedAtMs = System.currentTimeMillis();
+		phase = "";
 		return gen;
 	}
 
@@ -69,7 +74,17 @@ class TestProgress {
 		DONE.set(TOTAL.get());
 		deadlineMs = 0;
 		batch = false;
+		phase = "";
 		RUNNING.set(false);
+	}
+
+	/* 阶段名：只为"说明现在在干什么"，不参与判定。 */
+	static void setPhase(String name) {
+		phase = (name == null) ? "" : name;
+	}
+
+	static String phase() {
+		return phase;
 	}
 
 	static boolean running() {

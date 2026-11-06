@@ -51,6 +51,8 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 	private Runnable statsTask;
 	/* 已经用 Toast 提示过的失败原因，避免每 1.5 秒的刷新又弹一次。 */
 	private String lastShownError = "";
+	/* 「部分应用」却没勾任何应用时只提示一次（每 1.5 秒弹一次没人受得了）。 */
+	private boolean shownNoAppsWarn = false;
 
 	/* 本页可见时，隧道在别处被开关（例如快捷设置磁贴）也要刷新连接状态。 */
 	private final SharedPreferences.OnSharedPreferenceChangeListener prefsListener =
@@ -273,11 +275,24 @@ public class MainActivity extends BaseActivity implements View.OnClickListener {
 
 		if (connected) {
 			textview_status_title.setText(R.string.status_connected);
-			textview_status_subtitle.setText(R.string.status_connected_hint);
+			/* 「部分应用」但白名单是空的：隧道确实连上了，却一字节都抓不到。
+			   以前只在日志里留一行 WARN，用户只看到"已连接"却什么都打不开。
+			   这里把副标题换成警告，并只弹一次 Toast。 */
+			java.util.Set<String> apps = prefs.getApps();
+			final boolean noApps = !prefs.getGlobal()
+				&& (apps == null || apps.isEmpty());
+			textview_status_subtitle.setText(noApps
+				? R.string.status_no_apps_warn : R.string.status_connected_hint);
+			if (noApps && !shownNoAppsWarn) {
+				shownNoAppsWarn = true;
+				Toast.makeText(this, R.string.status_no_apps_warn, Toast.LENGTH_LONG).show();
+			}
 		} else if (failed) {
+			shownNoAppsWarn = false;
 			textview_status_title.setText(R.string.status_failed);
 			textview_status_subtitle.setText(error);
 		} else {
+			shownNoAppsWarn = false;
 			textview_status_title.setText(R.string.status_disconnected);
 			textview_status_subtitle.setText(R.string.status_disconnected_hint);
 		}

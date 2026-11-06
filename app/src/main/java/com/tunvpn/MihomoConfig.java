@@ -201,6 +201,13 @@ public class MihomoConfig {
 		if (prefs.getAllowLan()) {
 			cfg.append("allow-lan: true\n")
 				.append("bind-address: \"*\"\n");
+			/* 可选鉴权：两项都填了才写 `authentication:`，否则与旧行为一致（完全开放）。
+			   它作用于**整个 mixed-port**，所以 App 自己的启动自检也必须带同一组
+			   用户名密码（见 TProxyService.proxyFetch()）。 */
+			if (prefs.lanAuthReady())
+			  cfg.append("authentication:\n")
+				.append("  - \"").append(escapeYaml(prefs.getLanAuthUser()))
+				.append(':').append(escapeYaml(prefs.getLanAuthPass())).append("\"\n");
 		}
 
 		/* GEOIP/GEOSITE 规则需要 mihomo 的 geoip.dat / geosite.dat。文件缺失时 mihomo
@@ -775,28 +782,53 @@ public class MihomoConfig {
 		return sb.toString();
 	}
 
+	/* 「绕过内网」要直连的私有 / 保留网段（见 Preferences.BYPASS_LAN）。
+	   `no-resolve` 是关键：目标是域名时不能让内核为了匹配这条规则先做一次 DNS
+	   解析——fake-ip 模式下内网域名根本解析不出真实地址，反而多一次必然失败的查询。 */
+	private static final String[] LAN_DIRECT_RULES = {
+		"IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",   /* RFC1918：家用 / 办公 */
+		"IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",       /* RFC1918：大内网 */
+		"IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",    /* RFC1918：容器 / 办公 */
+		"IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",    /* 运营商级 NAT（大内网） */
+		"IP-CIDR,169.254.0.0/16,DIRECT,no-resolve",   /* 链路本地 */
+		"IP-CIDR6,fc00::/7,DIRECT,no-resolve",        /* IPv6 ULA */
+		"IP-CIDR6,fe80::/10,DIRECT,no-resolve",       /* IPv6 链路本地 */
+	};
+
 	/* App 的路由规则，后面接兜底项。策略决定用户自己的规则**是否真的会执行**：
-	   两种全局模式把一切都按同一个方向送走，直接跳过规则列表。 */
+	   「全局直连」直接全直连；「全局代理」跳过规则列表，但仍保留内网直连（见下）。 */
 	private static void appendRules(StringBuilder sb, Preferences prefs) {
 		String strategy = prefs.getRulesStrategy();
-		if (Preferences.RULES_STRATEGY_GLOBAL.equals(strategy)) {
-			/* 全部走代理；规则列表被忽略。 */
-			sb.append("  - MATCH,").append(GROUP).append('\n');
-			return;
-		}
 		if (Preferences.RULES_STRATEGY_DIRECT.equals(strategy)) {
-			/* 全部直连；规则列表被忽略。 */
+			/* 全部直连；规则列表被忽略（内网地址本来也是直连）。 */
 			sb.append("  - MATCH,DIRECT\n");
 			return;
 		}
-		/* rule 模式：先用户规则，再兜底项（兜底走代理还是直连，由下面的开关决定）。 */
-		for (Preferences.Rule r : prefs.getRules()) {
-			String line = clashRule(r);
-			if (line != null)
-			  sb.append("  - ").append(line).append('\n');
+		if (Preferences.RULES_STRATEGY_RULES.equals(strategy)) {
+			/* rule 模式：先用户规则。 */
+			for (Preferences.Rule r : prefs.getRules()) {
+				String line = clashRule(r);
+				if (line != null)
+				  sb.append("  - ").append(line).append('\n');
+			}
 		}
+		/* 内网直连：排在用户规则之后、兜底之前 —— 用户显式写的规则仍然优先，
+		   其余私有地址一律直连。**全局代理模式下也要加**：否则"全局代理 + 浏览器"
+		   访问 NAS / 内网 IP 会被下面那条 MATCH 送去远端节点，而那条路必然回不来
+		   （远端没有你家的内网路由）。 */
+		appendLanDirectRules(sb, prefs);
 		sb.append("  - MATCH,")
-			.append(prefs.getRulesDefaultProxy() ? GROUP : "DIRECT").append('\n');
+			.append(Preferences.RULES_STRATEGY_GLOBAL.equals(strategy) || prefs.getRulesDefaultProxy()
+				? GROUP : "DIRECT")
+			.append('\n');
+	}
+
+	/* 把私有网段逐条写成直连规则。开关关掉时一条都不写，等于回到旧行为。 */
+	private static void appendLanDirectRules(StringBuilder sb, Preferences prefs) {
+		if (!prefs.getBypassLan())
+		  return;
+		for (String r : LAN_DIRECT_RULES)
+		  sb.append("  - ").append(r).append('\n');
 	}
 
 	/* 把一条 App 规则转成 clash 规则行，**尊重用户实际选的类型**（早期版本会从值里

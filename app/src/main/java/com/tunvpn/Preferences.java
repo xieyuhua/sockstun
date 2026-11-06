@@ -55,6 +55,13 @@ public class Preferences
 	public static final String GLOBAL = "Global";
 	public static final String UDP_IN_TCP = "UdpInTcp";
 	public static final String REMOTE_DNS = "RemoteDNS";
+	/* 绕过内网：私有 / 保留网段一律直连，不交给代理节点。
+	   没有它为真时，被勾进隧道的 App（例如浏览器）访问 192.168.x.x 会落进
+	   `MATCH,<代理组>` 这条兜底规则 —— 请求被送到远端节点，而远端根本回不到
+	   你家的内网，表现为"内网 IP 打不开 / 一直转圈"。PC 上的 Clash 客户端普遍
+	   有这个"绕过局域网"开关，这里补上，默认开。
+	   注意：它排在你的规则之后、兜底之前，所以你的显式规则仍然优先。 */
+	public static final String BYPASS_LAN = "BypassLan";
 	public static final String APPS = "Apps";
 	public static final String RULES = "Rules";
 	public static final String RULES_DEFAULT_PROXY = "RulesDefaultProxy";
@@ -136,6 +143,10 @@ public class Preferences
 	/* 内核监听的本地代理端口，以及是否把它暴露给局域网。 */
 	public static final String PROXY_PORT = "ProxyPort";
 	public static final String ALLOW_LAN = "AllowLan";
+	/* 局域网共享的可选鉴权（mihomo 的 authentication）：两项都非空时，mixed-port
+	   要求 HTTP / SOCKS5 客户端带用户名密码；留空则和以前一样完全开放。 */
+	public static final String LAN_AUTH_USER = "LanAuthUser";
+	public static final String LAN_AUTH_PASS = "LanAuthPass";
 	/* 测速行为：在 App 进程里常驻一个**无 TUN** 的内核，这样即使 VPN 没连接也能量出
 	   内核的**真实转发**延迟（测一个节点本来就不需要 TUN）。这个测速内核用的是与列表
 	   **同一范围**的节点池：国家筛选就是范围，选「全部」测全部节点，选某个国家就测
@@ -336,6 +347,7 @@ public class Preferences
 		editor.putBoolean(key(dst, IPV6), prefs.getBoolean(key(src, IPV6), true));
 		editor.putBoolean(key(dst, GLOBAL), prefs.getBoolean(key(src, GLOBAL), true));
 		editor.putBoolean(key(dst, UDP_IN_TCP), prefs.getBoolean(key(src, UDP_IN_TCP), false));
+		editor.putBoolean(key(dst, BYPASS_LAN), prefs.getBoolean(key(src, BYPASS_LAN), true));
 		editor.putBoolean(key(dst, REMOTE_DNS), prefs.getBoolean(key(src, REMOTE_DNS), true));
 		editor.putStringSet(key(dst, APPS), new HashSet<String>(prefs.getStringSet(key(src, APPS), new HashSet<String>())));
 		editor.putString(key(dst, RULES), prefs.getString(key(src, RULES), ""));
@@ -350,6 +362,8 @@ public class Preferences
 		editor.putString(key(dst, SUB_ACTIVE), prefs.getString(key(src, SUB_ACTIVE), ""));
 		editor.putString(key(dst, SUB_COUNTRY_FILTER), prefs.getString(key(src, SUB_COUNTRY_FILTER), ""));
 		editor.putString(key(dst, SUB_PROTO_FILTER), prefs.getString(key(src, SUB_PROTO_FILTER), ""));
+		editor.putString(key(dst, LAN_AUTH_USER), prefs.getString(key(src, LAN_AUTH_USER), ""));
+		editor.putString(key(dst, LAN_AUTH_PASS), prefs.getString(key(src, LAN_AUTH_PASS), ""));
 	}
 
 	private void removeProfile(SharedPreferences.Editor editor, int profile) {
@@ -360,6 +374,7 @@ public class Preferences
 		editor.remove(key(profile, IPV6));
 		editor.remove(key(profile, GLOBAL));
 		editor.remove(key(profile, UDP_IN_TCP));
+		editor.remove(key(profile, BYPASS_LAN));
 		editor.remove(key(profile, REMOTE_DNS));
 		editor.remove(key(profile, APPS));
 		editor.remove(key(profile, RULES));
@@ -375,6 +390,8 @@ public class Preferences
 		editor.remove(key(profile, SUB_ACTIVE));
 		editor.remove(key(profile, SUB_COUNTRY_FILTER));
 		editor.remove(key(profile, SUB_PROTO_FILTER));
+		editor.remove(key(profile, LAN_AUTH_USER));
+		editor.remove(key(profile, LAN_AUTH_PASS));
 	}
 
 	public int getProfileCount() {
@@ -1054,6 +1071,28 @@ public class Preferences
 		editor.commit();
 	}
 
+	/* 局域网共享的用户名 / 密码（可选）。两者都非空才会写进配置的
+	   `authentication:`，让 mixed-port 要求 HTTP / SOCKS5 客户端鉴权。 */
+	public String getLanAuthUser() {
+		return prefs.getString(key(LAN_AUTH_USER), "");
+	}
+
+	public String getLanAuthPass() {
+		return prefs.getString(key(LAN_AUTH_PASS), "");
+	}
+
+	public void setLanAuth(String user, String pass) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(LAN_AUTH_USER), user == null ? "" : user);
+		editor.putString(key(LAN_AUTH_PASS), pass == null ? "" : pass);
+		editor.commit();
+	}
+
+	/* 是否真的启用了鉴权。任一项为空都算"没设"，避免只填一半反而把人锁在外面。 */
+	public boolean lanAuthReady() {
+		return !getLanAuthUser().isEmpty() && !getLanAuthPass().isEmpty();
+	}
+
 	/* VPN 没连接时也用内核的**真实转发延迟**测速（在 App 进程里加载一个无 TUN 的内核）。 */
 	public boolean getPreloadCore() {
 		return prefs.getBoolean(key(PRELOAD_CORE), true);
@@ -1105,6 +1144,17 @@ public class Preferences
 	public void setUdpInTcp(boolean enable) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putBoolean(key(UDP_IN_TCP), enable);
+		editor.commit();
+	}
+
+	/* 私有 / 保留网段是否直连（默认开）。见 BYPASS_LAN 的说明。 */
+	public boolean getBypassLan() {
+		return prefs.getBoolean(key(BYPASS_LAN), true);
+	}
+
+	public void setBypassLan(boolean enable) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putBoolean(key(BYPASS_LAN), enable);
 		editor.commit();
 	}
 

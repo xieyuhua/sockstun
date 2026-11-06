@@ -487,6 +487,11 @@ public class SubscribeActivity extends BaseActivity {
 		if (TestProgress.pending() > 0) {
 			sb.append("  ·  ").append(getString(R.string.sub_testing,
 				TestProgress.done(), TestProgress.total(), TestProgress.percent()));
+			/* 准备阶段（加载内核 / 分组快测 / TCP 预筛）不产生"完成数"，进度条会一直
+			   停在原地；把阶段名写出来，用户才知道它不是卡死了。 */
+			String ph = TestProgress.phase();
+			if (ph != null && !ph.isEmpty())
+			  sb.append("  ·  ").append(getString(R.string.sub_testing_phase, ph));
 			/* 桥一次只带一个探测，所以一轮的耗时=各探测之和；把实测出来的速度显示出来，
 			   用户就知道该等多久，而不是盯着一条几乎不动的进度条。 */
 			long eta = TestProgress.etaMs();
@@ -761,9 +766,11 @@ public class SubscribeActivity extends BaseActivity {
 	private long watchdogAt = 0;
 
 	private void armStallWatchdog(final int gen) {
-		/* 下限给到 120s：几千上万个代理时，测速内核加载并应用大配置可能要几十秒，
-		   首个结果出来前别误判成"卡住"。单节点正常探测 ≤ 单次探测超时，不会触发这里。 */
-		final long stallMs = Math.max(30000L, prefs.getProxyTestTimeout() * 1000L + 15000L);
+		/* 容忍时长分两档（见 stallMsFor）：本轮**还没出过任何结果**时给 120s ——
+		   内核加载 + 应用大配置 + 分组快测 + TCP 预筛可能要跑几十秒，几千个节点更久；
+		   已经出过结果后只关心"还动不动"，用 max(30s, 单次探测超时+15s)。
+		   以前这里是固定 max(30s, …)，注释却写着 120s：于是"正常但慢"的首轮会被
+		   判成卡住，整轮提前结束、剩余节点全部标为未测速。 */
 		ui.postDelayed(new Runnable() {
 			@Override
 			public void run() {
@@ -771,6 +778,8 @@ public class SubscribeActivity extends BaseActivity {
 				  return;                     /* 这一轮已经结束 */
 				if (!TestProgress.isCurrent(gen))
 				  return;                     /* 这一轮已被替换 / 已过期 */
+				/* 每拍按当前进度重算：done 为 0 说明还在准备阶段，给更宽的宽限。 */
+				final long stallMs = stallMsFor(TestProgress.done());
 				if (TestProgress.done() != watchdogDone) {
 					watchdogDone = TestProgress.done();
 					watchdogAt = System.currentTimeMillis();
@@ -791,6 +800,13 @@ public class SubscribeActivity extends BaseActivity {
 				armStallWatchdog(gen);
 			}
 		}, 15000);
+	}
+
+	/* 看门狗容忍多久没新结果。准备阶段（done 还是 0）要宽：那时候正常也可能几十秒
+	   没有任何进度变化。 */
+	private long stallMsFor(long done) {
+		long base = Math.max(30000L, prefs.getProxyTestTimeout() * 1000L + 15000L);
+		return (done <= 0) ? Math.max(120000L, base) : base;
 	}
 
 	/* 一轮结束：释放那个进程级标志并恢复正常日志级别。最后一个节点上报后立即调用，
@@ -1036,6 +1052,8 @@ public class SubscribeActivity extends BaseActivity {
 					synchronized (SubscribeActivity.this) {
 						if (!corePrepared) {
 							long t0 = System.currentTimeMillis();
+							/* 这几个阶段都不产生"完成数"，界面只能靠阶段名说明在干什么。 */
+							TestProgress.setPhase(getString(R.string.sub_test_phase_core));
 							boolean coreOk = prepareTestCore();
 							/* 在工作线程池铺开**之前**，由**单线程**把桥的载荷容器、
 							   delay 动作的参数形状和节点名映射定下来。这三者都是共享的
@@ -1046,12 +1064,15 @@ public class SubscribeActivity extends BaseActivity {
 							   （一次调用一组），比逐节点串行探测快一个数量级。它只补充
 							   "可用"结论，失败/未命中的节点照旧走逐个探测。 */
 							if (batch) {
+							  TestProgress.setPhase(getString(R.string.sub_test_phase_groups));
 							  fastGroupPhase(gen, coreOk);
 							  /* 分组快测之后再做一次 TCP 负向预筛：把"端口都连不上"的节点直接
 							     判死，省掉它们在桥上串行的逐一探测（一个死节点 ~超时+6s）。 */
+							  TestProgress.setPhase(getString(R.string.sub_test_phase_tcp));
 							  tcpFastFail(roundScope, gen);
 							}
 							corePrepared = true;
+							TestProgress.setPhase("");
 							/* 要记一行，因为这是用户眼中"什么都没发生"的**死时间**：
 							   加载 + 应用配置（几百个节点）再加上自检探测。 */
 							TProxyService.log("测速: 内核准备耗时 "

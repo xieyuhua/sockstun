@@ -28,6 +28,7 @@
 	<string name="status_connected">已连接</string>
 	<string name="status_disconnected">未连接</string>
 	<string name="status_connected_hint">隧道正在运行，流量已通过代理转发</string>
+	<string name="status_no_apps_warn">部分应用模式未勾选任何应用：没有流量会进入隧道（等于不代理）。请到 设置 → 连接 → 应用 勾选程序，或改用全局模式。</string>
 	<string name="status_disconnected_hint">点击「连接」启动隧道</string>
 	<string name="section_server">服务器</string>
 	<string name="section_dns">DNS</string>
@@ -51,6 +52,8 @@
 	<string name="routing_scope_hint">两层路由：(1)「全局模式 / 部分应用」决定哪些应用的流量进入隧道（VPN 作用域，最前置判断）；(2)「分流策略（规则 / 全局代理 / 全局直连）」只对已进入隧道的流量生效。被排除的应用由系统直接联网，路由规则管不到它。</string>
 	<string name="routing_scope_empty_warn">已选「部分应用」但未勾选任何应用：将没有任何流量进入隧道（等于不代理）。请点「应用」勾选要走代理的程序，或打开「全局模式」。</string>
 	<string name="rules_default_proxy">未命中的流量走代理</string>
+	<string name="rules_bypass_lan">绕过内网（私有地址直连）</string>
+	<string name="rules_bypass_lan_hint">默认开启。192.168.x.x / 10.x.x.x / 172.16–31.x.x 等私有地址一律直连，不进代理节点——否则被勾进隧道的浏览器访问 NAS / 内网 IP 会被送到远端而失败。它排在你的规则之后、兜底规则之前；要让内网也走代理，关掉本开关。</string>
 	<string name="rule_add">添加</string>
 	<string name="rule_delete">删除</string>
 	<string name="rule_value_hint">按所选类型填写，如 google.com / 10.0.0.0/8 / 443</string>

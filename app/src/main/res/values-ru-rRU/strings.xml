@@ -28,6 +28,8 @@
 	<string name="rules_mode_global_direct">Напрямую · правила не применяются</string>
 	<string name="rules_hint">Совпадение по домену, IP или диапазону IP. Домены разрешаются при запуске туннеля; правила «напрямую» требуют Android 13+.</string>
 	<string name="rules_default_proxy">Несовпавший трафик идёт через прокси</string>
+	<string name="rules_bypass_lan">Обход локальной сети (частные адреса напрямую)</string>
+	<string name="rules_bypass_lan_hint">Включено по умолчанию. Частные адреса (192.168.x.x, 10.x.x.x, 172.16–31.x.x и т. п.) идут напрямую, минуя прокси-узел — иначе браузер внутри туннеля не откроет NAS или IP локальной сети. Правило стоит после ваших правил и перед правилом по умолчанию; чтобы локальная сеть тоже шла через прокси, выключите переключатель.</string>
 	<string name="rule_add">Добавить</string>
 	<string name="rule_delete">Удалить</string>
 	<string name="rule_value_hint">Введите значение по типу, напр. google.com / 10.0.0.0/8 / 443</string>
