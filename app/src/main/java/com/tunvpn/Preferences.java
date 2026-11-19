@@ -62,6 +62,12 @@ public class Preferences
 	   有这个"绕过局域网"开关，这里补上，默认开。
 	   注意：它排在你的规则之后、兜底之前，所以你的显式规则仍然优先。 */
 	public static final String BYPASS_LAN = "BypassLan";
+	/* 远端内网：**经代理**访问的目标网段（逗号分隔的 CIDR / 单个 IP）。
+	   「绕过内网」会把全部私网地址判成直连 —— 从手机物理网卡出去，到不了
+	   代理服务器所在的内网。这里列出的网段会生成 `IP-CIDR,...,<代理组>`，
+	   排在用户规则之后、绕过内网之前，所以它们走代理、其余私网仍直连；
+	   而且不受分流策略影响（全局代理下也生效）。 */
+	public static final String REMOTE_LAN = "RemoteLan";
 	public static final String APPS = "Apps";
 	public static final String RULES = "Rules";
 	public static final String RULES_DEFAULT_PROXY = "RulesDefaultProxy";
@@ -348,6 +354,7 @@ public class Preferences
 		editor.putBoolean(key(dst, GLOBAL), prefs.getBoolean(key(src, GLOBAL), true));
 		editor.putBoolean(key(dst, UDP_IN_TCP), prefs.getBoolean(key(src, UDP_IN_TCP), false));
 		editor.putBoolean(key(dst, BYPASS_LAN), prefs.getBoolean(key(src, BYPASS_LAN), true));
+		editor.putString(key(dst, REMOTE_LAN), prefs.getString(key(src, REMOTE_LAN), ""));
 		editor.putBoolean(key(dst, REMOTE_DNS), prefs.getBoolean(key(src, REMOTE_DNS), true));
 		editor.putStringSet(key(dst, APPS), new HashSet<String>(prefs.getStringSet(key(src, APPS), new HashSet<String>())));
 		editor.putString(key(dst, RULES), prefs.getString(key(src, RULES), ""));
@@ -375,6 +382,7 @@ public class Preferences
 		editor.remove(key(profile, GLOBAL));
 		editor.remove(key(profile, UDP_IN_TCP));
 		editor.remove(key(profile, BYPASS_LAN));
+		editor.remove(key(profile, REMOTE_LAN));
 		editor.remove(key(profile, REMOTE_DNS));
 		editor.remove(key(profile, APPS));
 		editor.remove(key(profile, RULES));
@@ -1155,6 +1163,17 @@ public class Preferences
 	public void setBypassLan(boolean enable) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putBoolean(key(BYPASS_LAN), enable);
+		editor.commit();
+	}
+
+	/* 经代理访问的远端内网网段（逗号分隔，CIDR 或单个 IP）。空 = 不添加任何规则。 */
+	public String getRemoteLan() {
+		return prefs.getString(key(REMOTE_LAN), "");
+	}
+
+	public void setRemoteLan(String value) {
+		SharedPreferences.Editor editor = prefs.edit();
+		editor.putString(key(REMOTE_LAN), value == null ? "" : value);
 		editor.commit();
 	}
 

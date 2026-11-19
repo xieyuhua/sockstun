@@ -812,6 +812,10 @@ public class MihomoConfig {
 				  sb.append("  - ").append(line).append('\n');
 			}
 		}
+		/* 远端内网：用户显式声明的"要经代理访问的内网网段"。必须排在下面的
+		   私网直连之前，否则它会被 `192.168.0.0/16,DIRECT` 之类抢走 —— 那正是
+		   "代理服务器所在内网的设备打不开"的原因。 */
+		appendRemoteLanRules(sb, prefs);
 		/* 内网直连：排在用户规则之后、兜底之前 —— 用户显式写的规则仍然优先，
 		   其余私有地址一律直连。**全局代理模式下也要加**：否则"全局代理 + 浏览器"
 		   访问 NAS / 内网 IP 会被下面那条 MATCH 送去远端节点，而那条路必然回不来
@@ -829,6 +833,111 @@ public class MihomoConfig {
 		  return;
 		for (String r : LAN_DIRECT_RULES)
 		  sb.append("  - ").append(r).append('\n');
+	}
+
+	/* 「远端内网」：用户填的网段一律走代理组。逗号（中英文）、空白、换行都能分隔；
+	   单个 IP 自动补 /32（IPv6 补 /128）。非法条目直接跳过，而不是交给内核 ——
+	   一条畸形的 IP-CIDR 会让 mihomo 拒绝**整份**配置（隧道和测速一起趴下）。
+	   这里**不加** no-resolve（与普通用户规则一致）：目标以域名形式出现时，mihomo
+	   会先解析再匹配 —— 远端内网域名因此也能命中这条规则走代理。 */
+	private static void appendRemoteLanRules(StringBuilder sb, Preferences prefs) {
+		for (String value : remoteLanValues(prefs)) {
+			String line = cidrRule(value);
+			if (line == null) {
+				TProxyService.log("配置: 跳过非法的远端内网条目「" + value + "」");
+				continue;
+			}
+			sb.append("  - ").append(line).append(',').append(GROUP).append('\n');
+		}
+	}
+
+	/* 把输入框里的文本拆成去重后的条目列表（保持用户填写顺序）。 */
+	static List<String> remoteLanValues(Preferences prefs) {
+		List<String> out = new ArrayList<String>();
+		String raw = prefs.getRemoteLan();
+		if (raw == null || raw.isEmpty())
+		  return out;
+		for (String part : raw.split("[,，\\s]+")) {
+			String v = part.trim();
+			if (!v.isEmpty() && !out.contains(v))
+			  out.add(v);
+		}
+		return out;
+	}
+
+	/* IPv6 字面量语法（不支持 IPv4 内嵌写法；内网网段也不会用到它）：
+	   只允许十六进制与 ':'，最多一个 "::"，每组 1-4 位且组数不超过 8。 */
+	private static boolean isIpv6Literal(String s) {
+		if (s.isEmpty() || !s.matches("[0-9a-fA-F:]+"))
+		  return false;
+		int dbl = s.indexOf("::");
+		if (dbl >= 0 && s.indexOf("::", dbl + 2) >= 0)
+		  return false;
+		boolean compressed = dbl >= 0;
+		String body = compressed ? s.substring(0, dbl) + ":" + s.substring(dbl + 2) : s;
+		int groups = 0;
+		for (String g : body.split(":", -1)) {
+			if (g.isEmpty())
+			  continue;
+			if (g.length() > 4)
+			  return false;
+			groups++;
+		}
+		if (compressed)
+		  return groups < 8;
+		return groups == 8;
+	}
+
+	/* 单个条目 -> `IP-CIDR,<cidr>` / `IP-CIDR6,<cidr>`（**不带**动作，动作由调用方拼）。
+	   非法地址、非法前缀长度返回 null。地址部分允许 IPv4 / IPv6，前缀可省略。 */
+	static String cidrRule(String value) {
+		if (value == null)
+		  return null;
+		String t = value.trim();
+		if (t.isEmpty() || t.indexOf('|') >= 0 || t.indexOf(';') >= 0)
+		  return null;
+		String addr = t;
+		int prefix = -1;
+		int slash = t.indexOf('/');
+		if (slash >= 0) {
+			addr = t.substring(0, slash);
+			try {
+				prefix = Integer.parseInt(t.substring(slash + 1));
+			} catch (NumberFormatException e) {
+				return null;
+			}
+		}
+		boolean v6 = addr.indexOf(':') >= 0;
+		if (!looksLikeAddress(addr, v6))
+		  return null;
+		if (slash >= 0 && (prefix < 0 || prefix > (v6 ? 128 : 32)))
+		  return null;
+		if (slash < 0)
+		  prefix = v6 ? 128 : 32;
+		return (v6 ? "IP-CIDR6," : "IP-CIDR,") + addr + "/" + prefix;
+	}
+
+	/* 字面量 IPv4（四段 0-255）或 IPv6 的**纯语法**校验。刻意不走
+	   InetAddress.getByName()：它不是字面量时会去查 DNS，配置生成线程会被卡住，
+	   而内核只需要字面量。 */
+	private static boolean looksLikeAddress(String s, boolean v6) {
+		if (v6)
+		  return isIpv6Literal(s);
+		String[] parts = s.split("\\.", -1);
+		if (parts.length != 4)
+		  return false;
+		for (String p : parts) {
+			if (p.isEmpty() || p.length() > 3)
+			  return false;
+			try {
+				int n = Integer.parseInt(p);
+				if (n < 0 || n > 255 || !String.valueOf(n).equals(p))
+				  return false;
+			} catch (NumberFormatException e) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/* 把一条 App 规则转成 clash 规则行，**尊重用户实际选的类型**（早期版本会从值里

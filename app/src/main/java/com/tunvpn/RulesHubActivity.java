@@ -60,6 +60,9 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 	/* 「绕过内网」：私有地址直连，不进代理节点。没有它时，被勾进隧道的浏览器
 	   访问 192.168.x.x 会落进兜底的 MATCH（走代理），必然打不开。 */
 	private CompoundButton switch_bypass_lan;
+	/* 「远端内网」：经代理访问的网段（输入框内容在 onPause 保存）。 */
+	private EditText edittext_remote_lan;
+	private TextInputLayout til_remote_lan;
 	private Spinner spinner_type;
 	private Spinner spinner_action;
 	/* 值输入框的容器，方便让它的 hint 跟着所选规则类型变化。 */
@@ -113,6 +116,8 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		checkbox_remote_dns.setOnClickListener(this);
 
 		/* --- 路由规则 --- */
+		edittext_remote_lan = (EditText) findViewById(R.id.remote_lan);
+		til_remote_lan = (TextInputLayout) findViewById(R.id.til_remote_lan);
 		switch_default_proxy = (CompoundButton) findViewById(R.id.rules_default_proxy);
 		spinner_type = (Spinner) findViewById(R.id.rule_type);
 		spinner_action = (Spinner) findViewById(R.id.rule_action);
@@ -207,6 +212,7 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		checkbox_remote_dns.setChecked(prefs.getRemoteDns());
 		edittext_dns_ipv4.setText(prefs.getDnsIpv4());
 		edittext_dns_ipv6.setText(prefs.getDnsIpv6());
+		edittext_remote_lan.setText(prefs.getRemoteLan());
 
 		boolean editable = !prefs.getEnable();
 		/* 全局/部分应用这个开关在已连接时也必须可切换：只有切到"部分应用"，应用
@@ -220,6 +226,9 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		/* 「绕过内网」会写进生成的配置，所以和上面几个开关一样：运行中只读。
 		   它不受分流策略影响（全局代理下也生效），因此不放进 updateModeUi()。 */
 		switch_bypass_lan.setEnabled(editable);
+		/* 同上：它同样写进生成的配置。 */
+		edittext_remote_lan.setEnabled(editable);
+		til_remote_lan.setEnabled(editable);
 
 		/* 已连接时也允许进入应用列表：AppListActivity 现在保存后会重建隧道，新的
 		   作用域可以立即生效。 */
@@ -302,6 +311,37 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		prefs.setRemoteDns(checkbox_remote_dns.isChecked());
 		prefs.setDnsIpv4(edittext_dns_ipv4.getText().toString());
 		prefs.setDnsIpv6(edittext_dns_ipv6.getText().toString());
+		saveRemoteLan();
+	}
+
+	/* 保存「远端内网」。非法条目**不阻止保存**（其余合法条目仍要生效），
+	   但要把输入框标红并说明哪些被忽略 —— 它们在生成配置时同样会被跳过。 */
+	private void saveRemoteLan() {
+		String text = edittext_remote_lan.getText().toString().trim();
+		prefs.setRemoteLan(text);
+		if (til_remote_lan == null)
+		  return;
+		if (text.isEmpty()) {
+			til_remote_lan.setError(null);
+			return;
+		}
+		StringBuilder bad = new StringBuilder();
+		for (String v : MihomoConfig.remoteLanValues(prefs)) {
+			if (MihomoConfig.cidrRule(v) == null) {
+				if (bad.length() > 0)
+				  bad.append(" / ");
+				bad.append(v);
+			}
+		}
+		if (bad.length() == 0) {
+			til_remote_lan.setError(null);
+		} else if (isFinishing()) {
+			/* 正在退出：此时设置 error 会让已保存的状态看起来"没存进去"。
+			   它在生成配置时会被跳过，非法条目已经记进了日志。 */
+		} else {
+			til_remote_lan.setError(getString(R.string.rules_remote_lan_invalid,
+				bad.toString()));
+		}
 	}
 
 	@Override
@@ -431,8 +471,7 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
 		renderRules();
 	}
 
-	/* 按所选规则类型校验值。'|' 与 ';' 一律拒绝，因为规则持久化时用的就是它们做
-	   字段 / 记录分隔符。 */
+	/* 按所选规则类型校验值。'|' 与 ';' 一律拒绝，因为规则持久化时用的就是它们做字段 / 记录分隔符。 */
 	private boolean checkValue(int type, String value) {
 		if (value.isEmpty() || value.indexOf('|') >= 0 || value.indexOf(';') >= 0)
 		  return false;

@@ -240,6 +240,28 @@
 						android:layout_marginTop="4dp"
 						android:text="@string/rules_bypass_lan_hint"
 						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
+					<!-- 远端内网：经代理访问的网段（优先级高于「绕过内网」） -->
+					<com.google.android.material.textfield.TextInputLayout
+						android:id="@+id/til_remote_lan"
+						style="@style/Widget.TunVPN.TextInputLayout"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:layout_marginTop="10dp"
+						android:hint="@string/rules_remote_lan_hint">
+						<com.google.android.material.textfield.TextInputEditText
+							android:id="@+id/remote_lan"
+							android:layout_width="match_parent"
+							android:layout_height="wrap_content"
+							android:inputType="text"
+							android:maxLines="2"/>
+					</com.google.android.material.textfield.TextInputLayout>
+					<TextView
+						android:id="@+id/rules_remote_lan_help"
+						android:layout_width="match_parent"
+						android:layout_height="wrap_content"
+						android:layout_marginTop="4dp"
+						android:text="@string/rules_remote_lan_help"
+						android:textAppearance="@style/TextAppearance.TunVPN.Hint"/>
 					<LinearLayout
 						android:orientation="horizontal"
 						android:layout_width="match_parent"

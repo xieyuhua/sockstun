@@ -61,6 +61,9 @@
 	<string name="rules_default_proxy">Unmatched traffic uses the proxy</string>
 	<string name="rules_bypass_lan">绕过内网（私有地址直连）</string>
 	<string name="rules_bypass_lan_hint">默认开启。192.168.x.x / 10.x.x.x / 172.16–31.x.x 等私有地址一律直连，不进代理节点——否则被勾进隧道的浏览器访问 NAS / 内网 IP 会被送到远端而失败。它排在你的规则之后、兜底规则之前；要让内网也走代理，关掉本开关。</string>
+	<string name="rules_remote_lan_hint">远端内网走代理（可选）</string>
+	<string name="rules_remote_lan_invalid">已忽略无效条目：%1$s</string>
+	<string name="rules_remote_lan_help">填代理服务器所在内网的网段（CIDR 或单个 IP，逗号分隔），例如 192.168.1.0/24, 10.0.0.5。列出的地址会经代理节点访问——适合「代理服务在内网、从外网经端口转发连上来」的场景。它排在「绕过内网」之前，优先级更高：列出的网段走代理，其余私网仍直连；规则模式与全局代理下都生效。改动需重新连接。</string>
 	<string name="rule_add">Add</string>
 	<string name="rule_delete">Delete</string>
 	<string name="rule_value_hint">按所选类型填写，如 google.com / 10.0.0.0/8 / 443</string>
