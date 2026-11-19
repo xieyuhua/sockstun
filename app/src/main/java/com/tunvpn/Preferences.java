@@ -55,13 +55,9 @@ public class Preferences
 	public static final String GLOBAL = "Global";
 	public static final String UDP_IN_TCP = "UdpInTcp";
 	public static final String REMOTE_DNS = "RemoteDNS";
-	/* 绕过内网：私有 / 保留网段一律直连，不交给代理节点。
-	   没有它为真时，被勾进隧道的 App（例如浏览器）访问 192.168.x.x 会落进
-	   `MATCH,<代理组>` 这条兜底规则 —— 请求被送到远端节点，而远端根本回不到
-	   你家的内网，表现为"内网 IP 打不开 / 一直转圈"。PC 上的 Clash 客户端普遍
-	   有这个"绕过局域网"开关，这里补上，默认开。
-	   注意：它排在你的规则之后、兜底之前，所以你的显式规则仍然优先。 */
-	public static final String BYPASS_LAN = "BypassLan";
+	/* 私有网段直连 / 代理完全由规则页的「IP 段」规则表达，不再有内建开关：
+	   内建的"一律直连"会把代理服务器所在内网的设备也判成直连，而这类目标
+	   恰恰必须走代理才能到。 */
 	public static final String APPS = "Apps";
 	public static final String RULES = "Rules";
 	public static final String RULES_DEFAULT_PROXY = "RulesDefaultProxy";
@@ -347,7 +343,6 @@ public class Preferences
 		editor.putBoolean(key(dst, IPV6), prefs.getBoolean(key(src, IPV6), true));
 		editor.putBoolean(key(dst, GLOBAL), prefs.getBoolean(key(src, GLOBAL), true));
 		editor.putBoolean(key(dst, UDP_IN_TCP), prefs.getBoolean(key(src, UDP_IN_TCP), false));
-		editor.putBoolean(key(dst, BYPASS_LAN), prefs.getBoolean(key(src, BYPASS_LAN), true));
 		editor.putBoolean(key(dst, REMOTE_DNS), prefs.getBoolean(key(src, REMOTE_DNS), true));
 		editor.putStringSet(key(dst, APPS), new HashSet<String>(prefs.getStringSet(key(src, APPS), new HashSet<String>())));
 		editor.putString(key(dst, RULES), prefs.getString(key(src, RULES), ""));
@@ -374,7 +369,6 @@ public class Preferences
 		editor.remove(key(profile, IPV6));
 		editor.remove(key(profile, GLOBAL));
 		editor.remove(key(profile, UDP_IN_TCP));
-		editor.remove(key(profile, BYPASS_LAN));
 		editor.remove(key(profile, REMOTE_DNS));
 		editor.remove(key(profile, APPS));
 		editor.remove(key(profile, RULES));
@@ -1144,17 +1138,6 @@ public class Preferences
 	public void setUdpInTcp(boolean enable) {
 		SharedPreferences.Editor editor = prefs.edit();
 		editor.putBoolean(key(UDP_IN_TCP), enable);
-		editor.commit();
-	}
-
-	/* 私有 / 保留网段是否直连（默认开）。见 BYPASS_LAN 的说明。 */
-	public boolean getBypassLan() {
-		return prefs.getBoolean(key(BYPASS_LAN), true);
-	}
-
-	public void setBypassLan(boolean enable) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putBoolean(key(BYPASS_LAN), enable);
 		editor.commit();
 	}
 

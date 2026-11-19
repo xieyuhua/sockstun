@@ -59,8 +59,6 @@
 	<string name="routing_scope_hint">Two routing layers: (1) Global / per-App decides which apps traffic enters the tunnel (VPN scope, evaluated first); (2) the routing strategy (rules / global-proxy / global-direct) only applies to traffic already inside the tunnel. Excluded apps use the system network directly and ignore the routing rules.</string>
 	<string name="routing_scope_empty_warn">"Per-App" is on but no app is selected: no traffic will enter the tunnel (i.e. nothing is proxied). Tap "Apps" to pick apps, or enable "Global".</string>
 	<string name="rules_default_proxy">Unmatched traffic uses the proxy</string>
-	<string name="rules_bypass_lan">绕过内网（私有地址直连）</string>
-	<string name="rules_bypass_lan_hint">默认开启。192.168.x.x / 10.x.x.x / 172.16–31.x.x 等私有地址一律直连，不进代理节点——否则被勾进隧道的浏览器访问 NAS / 内网 IP 会被送到远端而失败。它排在你的规则之后、兜底规则之前；要让内网也走代理，关掉本开关。</string>
 	<string name="rule_add">Add</string>
 	<string name="rule_delete">Delete</string>
 	<string name="rule_value_hint">按所选类型填写，如 google.com / 10.0.0.0/8 / 443</string>
