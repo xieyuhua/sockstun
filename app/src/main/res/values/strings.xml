@@ -264,22 +264,16 @@
 	<string name="settings_webdav_on">已开启 · %1$s</string>
 	<string name="settings_webdav_off">未开启（备份存到本地订阅）</string>
 	<string name="settings_webdav_url">WebDAV 地址</string>
-	<string name="settings_webdav_url_hint">形如 https://example.com/remote.php/dav/files/你/</string>
 	<string name="settings_webdav_url_invalid">请填 http(s) 开头的地址</string>
 	<string name="settings_webdav_user">WebDAV 用户名</string>
-	<string name="settings_webdav_user_hint">没有鉴权就留空</string>
 	<string name="settings_webdav_pass">WebDAV 密码</string>
-	<string name="settings_webdav_pass_hint">留空表示没有密码</string>
 	<string name="settings_webdav_dir">远程目录</string>
-	<string name="settings_webdav_dir_hint">例如 tunvpn；留空 = 直接放地址根下（目录需要先在网盘里建好）</string>
 	<string name="settings_webdav_test">测试连接</string>
-	<string name="settings_webdav_test_hint">写一个探针文件再读回、删掉，验证读写权限</string>
 	<string name="settings_webdav_testing">正在测试连接…</string>
 	<string name="settings_webdav_ok">连接正常：%1$s</string>
 	<string name="settings_webdav_fail">连接失败：%1$s</string>
 	<string name="settings_webdav_need_url">请先填写 WebDAV 地址</string>
 	<string name="settings_webdav_unset">未填写</string>
-	<string name="settings_webdav_pass_set">已设置（已保存）</string>
 	<string name="backup_uploading">正在上传备份…</string>
 	<string name="backup_upload_done">已上传备份 %1$s（%2$d 个节点）</string>
 	<string name="backup_upload_failed">WebDAV 上传失败：%1$s（可关掉 WebDAV 改用本地备份）</string>

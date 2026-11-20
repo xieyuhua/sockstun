@@ -48,15 +48,12 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.net.URL;
 import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.json.JSONObject;
@@ -2021,22 +2018,6 @@ public class SubscribeActivity extends BaseActivity {
 			return URLEncoder.encode(s, "UTF-8").replace("+", "%20");
 		} catch (Exception e) {
 			return s;
-		}
-	}
-
-	private static String readApiBody(HttpURLConnection c) {
-		try {
-		InputStream in = (c.getResponseCode() >= 400) ? c.getErrorStream() : c.getInputStream();
-			if (in == null)
-			  return "";
-			ByteArrayOutputStream bos = new ByteArrayOutputStream();
-			byte[] buf = new byte[1024];
-			int n;
-			while ((n = in.read(buf)) > 0)
-			  bos.write(buf, 0, n);
-			return new String(bos.toByteArray(), StandardCharsets.UTF_8);
-		} catch (Exception e) {
-			return "";
 		}
 	}
 

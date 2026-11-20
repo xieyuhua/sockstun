@@ -130,9 +130,6 @@ public class Preferences
 	/* clash-api 的 bearer 令牌。只生成一次并持久化，这样"写进生成配置里的 secret"
 	   和"每个客户端请求带的 secret"跨重启始终一致。 */
 	public static final String SECRET = "ApiSecret";
-	/* 仅自动模式用：顶层组默认指向哪个国家组。空 / "GLOBAL" 表示"哪儿最快"。
-	   值是 ISO-3166 两位国家码，与 MihomoConfig 里构造的各国 url-test 组名对应。 */
-	public static final String AUTO_SELECT_COUNTRY = "AutoSelectCountry";
 	/* 持久化的 服务器 -> ISO 国家码 映射，由 GeoIp 解析填充，好让配置生成能**离线**
 	   给节点分组（隧道启动时不依赖网络）。 */
 	public static final String SERVER_COUNTRY_MAP = "ServerCountryMap";
@@ -158,8 +155,6 @@ public class Preferences
 	public static final int DEFAULT_AUTO_INTERVAL = 300;
 	/* url-test 的健康检查地址：204 端点开销极小，而且多数网络不会劫持它。 */
 	public static final String DEFAULT_TEST_URL = "http://www.gstatic.com/generate_204";
-
-	public static final int MAX_PROFILES = 13;
 
 	/* 一条路由规则："值 -> 代理或直连"，并带**显式类型**，好让配置生成器输出的正是
 	   用户选中的那条 clash 规则。 */
@@ -333,116 +328,11 @@ public class Preferences
 		editor.commit();
 	}
 
-	/* 把配置档 src 的所有"每配置档"键复制到 dst。
-	   读取看到的始终是**已提交**的状态，所以同一个 editor 里按升序移动配置档是安全的。 */
-	private void copyProfile(SharedPreferences.Editor editor, int src, int dst) {
-		editor.putString(key(dst, NAME), prefs.getString(key(src, NAME), "Default"));
-		editor.putString(key(dst, DNS_IPV4), prefs.getString(key(src, DNS_IPV4), "8.8.8.8"));
-		editor.putString(key(dst, DNS_IPV6), prefs.getString(key(src, DNS_IPV6), "2001:4860:4860::8888"));
-		editor.putBoolean(key(dst, IPV4), prefs.getBoolean(key(src, IPV4), true));
-		editor.putBoolean(key(dst, IPV6), prefs.getBoolean(key(src, IPV6), true));
-		editor.putBoolean(key(dst, GLOBAL), prefs.getBoolean(key(src, GLOBAL), true));
-		editor.putBoolean(key(dst, UDP_IN_TCP), prefs.getBoolean(key(src, UDP_IN_TCP), false));
-		editor.putBoolean(key(dst, REMOTE_DNS), prefs.getBoolean(key(src, REMOTE_DNS), true));
-		editor.putStringSet(key(dst, APPS), new HashSet<String>(prefs.getStringSet(key(src, APPS), new HashSet<String>())));
-		editor.putString(key(dst, RULES), prefs.getString(key(src, RULES), ""));
-		editor.putBoolean(key(dst, RULES_DEFAULT_PROXY), prefs.getBoolean(key(src, RULES_DEFAULT_PROXY), true));
-		editor.putString(key(dst, SUB_URL), prefs.getString(key(src, SUB_URL), ""));
-		editor.putString(key(dst, SUB_NODES), prefs.getString(key(src, SUB_NODES), ""));
-		editor.putString(key(dst, SUB_RAW), prefs.getString(key(src, SUB_RAW), ""));
-		editor.putString(key(dst, SUB_SELECTED), prefs.getString(key(src, SUB_SELECTED), ""));
-		editor.putString(key(dst, SOCKS_SERVERS), prefs.getString(key(src, SOCKS_SERVERS), ""));
-		editor.putString(key(dst, SOCKS_ACTIVE), prefs.getString(key(src, SOCKS_ACTIVE), ""));
-		editor.putString(key(dst, SUBSCRIPTIONS), prefs.getString(key(src, SUBSCRIPTIONS), ""));
-		editor.putString(key(dst, SUB_ACTIVE), prefs.getString(key(src, SUB_ACTIVE), ""));
-		editor.putString(key(dst, SUB_COUNTRY_FILTER), prefs.getString(key(src, SUB_COUNTRY_FILTER), ""));
-		editor.putString(key(dst, SUB_PROTO_FILTER), prefs.getString(key(src, SUB_PROTO_FILTER), ""));
-		editor.putString(key(dst, LAN_AUTH_USER), prefs.getString(key(src, LAN_AUTH_USER), ""));
-		editor.putString(key(dst, LAN_AUTH_PASS), prefs.getString(key(src, LAN_AUTH_PASS), ""));
-	}
-
-	private void removeProfile(SharedPreferences.Editor editor, int profile) {
-		editor.remove(key(profile, NAME));
-		editor.remove(key(profile, DNS_IPV4));
-		editor.remove(key(profile, DNS_IPV6));
-		editor.remove(key(profile, IPV4));
-		editor.remove(key(profile, IPV6));
-		editor.remove(key(profile, GLOBAL));
-		editor.remove(key(profile, UDP_IN_TCP));
-		editor.remove(key(profile, REMOTE_DNS));
-		editor.remove(key(profile, APPS));
-		editor.remove(key(profile, RULES));
-		editor.remove(key(profile, RULES_DEFAULT_PROXY));
-		editor.remove(key(profile, SUB_URL));
-		editor.remove(key(profile, SUB_NODES));
-		editor.remove(key(profile, SUB_RAW));
-		editor.remove(key(profile, SUB_SELECTED));
-		editor.remove(key(profile, ACTIVE_NODE));
-		editor.remove(key(profile, SOCKS_SERVERS));
-		editor.remove(key(profile, SOCKS_ACTIVE));
-		editor.remove(key(profile, SUBSCRIPTIONS));
-		editor.remove(key(profile, SUB_ACTIVE));
-		editor.remove(key(profile, SUB_COUNTRY_FILTER));
-		editor.remove(key(profile, SUB_PROTO_FILTER));
-		editor.remove(key(profile, LAN_AUTH_USER));
-		editor.remove(key(profile, LAN_AUTH_PASS));
-	}
-
-	public int getProfileCount() {
-		return prefs.getInt(PROFILE_COUNT, 1);
-	}
+	/* 配置档只剩第 0 档：界面没有切换 / 新增入口（见 docs/用户手册.md §4）。
+	   但存储仍按 "P0." 前缀分域 —— 迁移与旧备份都依赖这个布局。 */
 
 	public int getSelected() {
 		return prefs.getInt(SELECTED, 0);
-	}
-
-	public void setSelected(int index) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putInt(SELECTED, index);
-		editor.commit();
-	}
-
-	public String getProfileName() {
-		return prefs.getString(key(NAME), "Default");
-	}
-
-	public void setProfileName(String name) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putString(key(NAME), name);
-		editor.commit();
-	}
-
-	/* 以当前配置档为模板新建一个并切过去。 */
-	public boolean addProfile(String name) {
-		int count = getProfileCount();
-		if (count >= MAX_PROFILES)
-		  return false;
-
-		SharedPreferences.Editor editor = prefs.edit();
-		copyProfile(editor, getSelected(), count);
-		editor.putString(key(count, NAME), name);
-		editor.putInt(PROFILE_COUNT, count + 1);
-		editor.putInt(SELECTED, count);
-		editor.commit();
-		return true;
-	}
-
-	/* 删除当前配置档，并把后面的配置档依次前移。 */
-	public boolean deleteProfile() {
-		int count = getProfileCount();
-		if (count <= 1)
-		  return false;
-
-		int selected = getSelected();
-		SharedPreferences.Editor editor = prefs.edit();
-		for (int i = selected + 1; i < count; i++)
-		  copyProfile(editor, i, i - 1);
-		removeProfile(editor, count - 1);
-		editor.putInt(PROFILE_COUNT, count - 1);
-		if (selected >= count - 1)
-		  editor.putInt(SELECTED, count - 2);
-		editor.commit();
-		return true;
 	}
 
 	/* 已保存的 clash.yml 订阅，以及当前启用的是哪一个。
@@ -920,18 +810,6 @@ public class Preferences
 		return sb.toString();
 	}
 
-	/* 自动模式：顶层组默认指向哪个国家的 url-test 组。
-	   "" 或 "GLOBAL" => 哪儿最快就用哪儿。 */
-	public String getAutoSelectCountry() {
-		return prefs.getString(key(AUTO_SELECT_COUNTRY), "");
-	}
-
-	public void setAutoSelectCountry(String cc) {
-		SharedPreferences.Editor editor = prefs.edit();
-		editor.putString(key(AUTO_SELECT_COUNTRY), cc == null ? "" : cc);
-		editor.commit();
-	}
-
 	public String getSubCountryFilter() {
 		return prefs.getString(key(SUB_COUNTRY_FILTER), "");
 	}
@@ -1300,17 +1178,6 @@ public class Preferences
 		return statsPrefs.getLong(STATS_TOTAL_RX, 0);
 	}
 
-	public void setTotalTraffic(long tx, long rx) {
-		SharedPreferences.Editor editor = statsPrefs.edit();
-		editor.putLong(STATS_TOTAL_TX, tx);
-		editor.putLong(STATS_TOTAL_RX, rx);
-		editor.commit();
-	}
-
-	public void resetTotalTraffic() {
-		setTotalTraffic(0, 0);
-	}
-
 	/* :native 服务那边知道的一切，一次 commit 全部写出。 */
 	public long getSessionTx() {
 		return statsPrefs.getLong(STATS_SESSION_TX, 0);
@@ -1336,22 +1203,6 @@ public class Preferences
 		return statsPrefs.getLong(PROXY_TOTAL_RX, 0);
 	}
 
-	public long getProxySessionTx() {
-		return statsPrefs.getLong(PROXY_SESSION_TX, 0);
-	}
-
-	public long getProxySessionRx() {
-		return statsPrefs.getLong(PROXY_SESSION_RX, 0);
-	}
-
-	public long getProxyRateTx() {
-		return statsPrefs.getLong(PROXY_RATE_TX, 0);
-	}
-
-	public long getProxyRateRx() {
-		return statsPrefs.getLong(PROXY_RATE_RX, 0);
-	}
-
 	public void setProxyStats(long totalTx, long totalRx, long sessionTx, long sessionRx,
 			long rateTx, long rateRx) {
 		SharedPreferences.Editor editor = statsPrefs.edit();
@@ -1366,18 +1217,6 @@ public class Preferences
 
 	public void resetProxyStats() {
 		setProxyStats(0, 0, 0, 0, 0, 0);
-	}
-
-	public void setStats(long totalTx, long totalRx, long sessionTx, long sessionRx,
-			long rateTx, long rateRx) {
-		SharedPreferences.Editor editor = statsPrefs.edit();
-		editor.putLong(STATS_TOTAL_TX, totalTx);
-		editor.putLong(STATS_TOTAL_RX, totalRx);
-		editor.putLong(STATS_SESSION_TX, sessionTx);
-		editor.putLong(STATS_SESSION_RX, sessionRx);
-		editor.putLong(STATS_RATE_TX, rateTx);
-		editor.putLong(STATS_RATE_RX, rateRx);
-		editor.commit();
 	}
 
 	/* 两套计数**在同一个 editor/commit** 里写入。采样器每秒把它们一起发布；

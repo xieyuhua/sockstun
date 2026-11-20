@@ -240,50 +240,6 @@ public class NodeFormat {
 			 || (s.charAt(0) == '\'' && s.charAt(s.length() - 1) == '\''));
 		}
 
-	/* ---------- JSON -> Map ---------- */
-	private static Object parseJson(String s) throws JSONException {
-		s = s.trim();
-		if (s.startsWith("[")) {
-			JSONArray arr = new JSONArray(s);
-			List<Object> list = new ArrayList<Object>();
-			for (int i = 0; i < arr.length(); i++)
-				list.add(jsonToObj(arr.get(i)));
-			return list;
-		}
-		JSONObject obj = new JSONObject(s);
-		return jsonToObj(obj);
-	}
-
-	private static Object jsonToObj(Object v) {
-		if (v instanceof JSONObject)
-		  return jsonToObj((JSONObject) v);
-		if (v instanceof JSONArray) {
-			JSONArray a = (JSONArray) v;
-			List<Object> list = new ArrayList<Object>();
-			for (int i = 0; i < a.length(); i++) {
-				try {
-					list.add(jsonToObj(a.get(i)));
-				} catch (JSONException e) {
-				}
-			}
-			return list;
-		}
-		return v;
-	}
-
-	private static Map<String, Object> jsonToObj(JSONObject o) {
-		Map<String, Object> map = new LinkedHashMap<String, Object>();
-		java.util.Iterator<String> it = o.keys();
-		while (it.hasNext()) {
-			String k = it.next();
-			try {
-				map.put(k, jsonToObj(o.get(k)));
-			} catch (JSONException e) {
-			}
-		}
-		return map;
-	}
-
 	/* ---------- YAML flow map -> Map ---------- */
 	/* 解析以 '{' 开头的 flow map（支持嵌套 {} 与 []、带引号字符串）。 */
 	private static Map<String, Object> parseFlowMap(String s) {

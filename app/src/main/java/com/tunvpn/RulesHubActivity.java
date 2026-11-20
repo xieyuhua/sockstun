@@ -112,8 +112,6 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
         checkbox_remote_dns.setOnClickListener(this);
 
         /* --- 路由规则 --- */
-        edittext_remote_lan = (EditText) findViewById(R.id.remote_lan);
-        til_remote_lan = (TextInputLayout) findViewById(R.id.til_remote_lan);
         switch_default_proxy = (CompoundButton) findViewById(R.id.rules_default_proxy);
         spinner_type = (Spinner) findViewById(R.id.rule_type);
         spinner_action = (Spinner) findViewById(R.id.rule_action);
@@ -201,7 +199,6 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
         checkbox_remote_dns.setChecked(prefs.getRemoteDns());
         edittext_dns_ipv4.setText(prefs.getDnsIpv4());
         edittext_dns_ipv6.setText(prefs.getDnsIpv6());
-        edittext_remote_lan.setText(prefs.getRemoteLan());
 
         boolean editable = !prefs.getEnable();
         /*
@@ -306,42 +303,8 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
         prefs.setRemoteDns(checkbox_remote_dns.isChecked());
         prefs.setDnsIpv4(edittext_dns_ipv4.getText().toString());
         prefs.setDnsIpv6(edittext_dns_ipv6.getText().toString());
-        saveRemoteLan();
     }
 
-    /*
-     * 保存「远端内网」。非法条目**不阻止保存**（其余合法条目仍要生效），
-     * 但要把输入框标红并说明哪些被忽略 —— 它们在生成配置时同样会被跳过。
-     */
-    private void saveRemoteLan() {
-        String text = edittext_remote_lan.getText().toString().trim();
-        prefs.setRemoteLan(text);
-        if (til_remote_lan == null)
-            return;
-        if (text.isEmpty()) {
-            til_remote_lan.setError(null);
-            return;
-        }
-        StringBuilder bad = new StringBuilder();
-        for (String v : MihomoConfig.remoteLanValues(prefs)) {
-            if (MihomoConfig.cidrRule(v) == null) {
-                if (bad.length() > 0)
-                    bad.append(" / ");
-                bad.append(v);
-            }
-        }
-        if (bad.length() == 0) {
-            til_remote_lan.setError(null);
-        } else if (isFinishing()) {
-            /*
-             * 正在退出：此时设置 error 会让已保存的状态看起来"没存进去"。
-             * 它在生成配置时会被跳过，非法条目已经记进了日志。
-             */
-        } else {
-            til_remote_lan.setError(getString(R.string.rules_remote_lan_invalid,
-                    bad.toString()));
-        }
-    }
 
     @Override
     public void onClick(View view) {

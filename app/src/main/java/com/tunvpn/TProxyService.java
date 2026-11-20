@@ -1395,7 +1395,6 @@ public class TProxyService extends VpnService {
 		/* 去重缓存必须一起复位：否则快照内容没变化时 publishConnSnapshot 不会重写，
 		   而内核里立刻重建的连接又会把旧列表带回来。 */
 		lastConnSnapshotJson = "[]";
-		connSnapshot = "{\"connections\":[]}";
 		connInfo.clear();   /* 一刀切关闭不该在"最近请求"里灌进一批新记录 */
 		if (statsPrefs != null)
 		  statsPrefs.setConnSnapshot("[]");
@@ -1415,11 +1414,6 @@ public class TProxyService extends VpnService {
 		} catch (Exception ignore) {
 			/* 首页在前台时不受后台启动限制，这里理论上到不了；兜住不代表失败。 */
 		}
-	}
-	/* 统计轮询抓到的**最新** /connections 快照；隧道没运行 / 还没轮询过时为 null。
-	   「连接」页面读它，从而不必自己发一次桥调用。 */
-	static String lastConnectionsSnapshot() {
-		return sInstance != null ? sInstance.connSnapshot : null;
 	}
 	static final class ApiResult {
 		int code = -1;   /* -1 = 传输失败（够不到 API） */
@@ -1528,9 +1522,6 @@ public class TProxyService extends VpnService {
 	private static volatile int dataAsString = -1;
 	/* 串行化那个"只决定一次"的过程（见 apiActionRaw）。 */
 	private static final Object DETECT_LOCK = new Object();
-	/* accumulateProxy() 在 statsThread 上抓到的**最新** /connections 快照
-	   （留给进程内的调用方用）。 */
-	private volatile String connSnapshot = null;
 	/* 那份快照的**紧凑形式**，发布到 SharedPreferences，好让「连接」页跨进程读到它 ——
 	   那个页面跑在**主进程**，够不到桥，也拿不到 sInstance。有长度上限，
 	   而且只在内容真的变化时才重写。 */
@@ -2080,31 +2071,6 @@ public class TProxyService extends VpnService {
 		return s.replace("\\", "\\\\").replace("\"", "\\\"");
 	}
 
-	private static String readBody(HttpURLConnection c) {
-		BufferedReader r;
-		try {
-			r = new BufferedReader(new InputStreamReader(
-				c.getResponseCode() < 400 ? c.getInputStream() : c.getErrorStream(),
-				StandardCharsets.UTF_8));
-		} catch (IOException e) {
-			return null;
-		}
-		try {
-			StringBuilder sb = new StringBuilder();
-			String line;
-			while ((line = r.readLine()) != null)
-			  sb.append(line);
-			return sb.toString();
-		} catch (IOException e) {
-			return null;
-		} finally {
-			try {
-				r.close();
-			} catch (IOException e) {
-			}
-		}
-	}
-
 	public void stopService() {
 		/* 通知所有长时间运行的辅助线程收工（选择器重试、控制器轮询、连通性探测、
 		   延迟启动 clash-api）：否则它们会在隧道消失之后还继续干活、还占着这个 Service，
@@ -2463,9 +2429,6 @@ public class TProxyService extends VpnService {
 		if (connFailStreak >= 5)
 		  appendLog("流量统计：/connections 已恢复");
 		connFailStreak = 0;
-		/* 把这份快照发布出去，好让「连接」页直接展示，而不必自己再发一次（会互相抢的）
-		   桥调用。 */
-		connSnapshot = body;
 		try {
 			JSONObject root = new JSONObject(body);
 			JSONArray arr = root.optJSONArray("connections");

@@ -13,18 +13,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class Country {
-	/* 存在 Preferences.AUTO_SELECT_COUNTRY 里的哨兵值，表示"按实测延迟自动挑最快的
-	   国家/地区"（AUTO）与"不限国家/全局"（GLOBAL）。 */
-	public static final String GLOBAL = "GLOBAL";
-	public static final String AUTO = "AUTO";
-	/* 无法解析国家的节点（与 GeoIp.UNKNOWN 一致）。 */
-	public static final String UNKNOWN = GeoIp.UNKNOWN;
-
 	private static final Map<String, String> CN = new HashMap<String, String>();
 	static {
-		CN.put(GLOBAL, "全局最快");
-		CN.put(AUTO, "自动最优国家");
-		CN.put(UNKNOWN, "未知地区");
+		CN.put(GeoIp.UNKNOWN, "未知地区");
 		CN.put("HK", "香港");
 		CN.put("TW", "台湾");
 		CN.put("CN", "中国");
@@ -110,13 +101,7 @@ public class Country {
 	/* 两位国家码 → 旗帜 emoji（区域指示符组合）。未知 / 非 ISO 的值给一个中性符号，
 	   保证名字仍然可读。 */
 	public static String flag(String cc) {
-		if (cc == null)
-		  return "\u2753"; /* ❓ */
-		if (GLOBAL.equals(cc))
-		  return "\uD83C\uDF10"; /* 🌐 */
-		if (AUTO.equals(cc))
-		  return "\uD83C\uDFC6"; /* 🏆 */
-		if (UNKNOWN.equals(cc))
+		if (cc == null || GeoIp.UNKNOWN.equals(cc))
 		  return "\u2753"; /* ❓ */
 		if (cc.length() == 2) {
 			int base = 0x1F1E6;
@@ -130,7 +115,7 @@ public class Country {
 	/* 国家码 → 中文名；未知时退回原始代码。 */
 	public static String name(String cc) {
 		if (cc == null || cc.isEmpty())
-		  return CN.get(UNKNOWN);
+		  return CN.get(GeoIp.UNKNOWN);
 		String n = CN.get(cc);
 		return n != null ? n : cc;
 	}
@@ -138,11 +123,6 @@ public class Country {
 	/* "🇺🇸 美国" style label. */
 	public static String display(String cc) {
 		return flag(cc) + " " + name(cc);
-	}
-
-	/* 选择器用：带节点数量的标签。 */
-	public static String displayWithCount(String cc, int count) {
-		return display(cc) + " (" + count + ")";
 	}
 
 	/* 国家小标签用："可用/总数"。可用 = 已测速且可达（latency >= 0）。 */

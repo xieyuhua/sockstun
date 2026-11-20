@@ -19,7 +19,6 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.HttpURLConnection;
 import java.net.ServerSocket;
 import java.util.ArrayList;
 import java.util.List;
@@ -562,51 +561,6 @@ public class MihomoConfig {
 		sb.append("      - DIRECT\n");
 	}
 
-	/* 选了"自动最佳"时，返回"节点实测延迟最低"的那个国家的 ISO 码（延迟来自 App
-	   之前的 TCP 测速，按订阅缓存）。没有任何可用延迟时返回 null，调用方会退回
-	   全局组。UNKNOWN 节点会被跳过 —— 连国家都没认出来的，没法拿来优化。 */
-	private static String bestCountryForAuto(Preferences prefs,
-			java.util.LinkedHashMap<String, List<String>> byCountry,
-			List<ClashParser.ProxyDef> proxys) {
-		/* 代理名 -> 服务器，再由 服务器 -> 各缓存里见过的最好延迟。 */
-		java.util.HashMap<String, String> nameToServer = new java.util.HashMap<String, String>();
-		for (ClashParser.ProxyDef p : proxys)
-		  nameToServer.put(p.name, p.server);
-
-		java.util.HashMap<String, Long> serverLat = new java.util.HashMap<String, Long>();
-		for (Subscription sub : prefs.getSubscriptions()) {
-			if (!sub.enabled)
-			  continue;
-			for (ClashNode n : ClashNode.decode(prefs.getSubNodes(sub.id))) {
-				if (n.latency >= 0) {
-					Long prev = serverLat.get(n.server);
-					if (prev == null || n.latency < prev)
-					  serverLat.put(n.server, n.latency);
-				}
-			}
-		}
-
-		String best = null;
-		long bestLat = Long.MAX_VALUE;
-		for (java.util.Map.Entry<String, List<String>> e : byCountry.entrySet()) {
-			String cc = e.getKey();
-			if (GeoIp.UNKNOWN.equals(cc))
-			  continue;
-			long min = Long.MAX_VALUE;
-			for (String name : e.getValue()) {
-				String srv = nameToServer.get(name);
-				Long lat = srv == null ? null : serverLat.get(srv);
-				if (lat != null && lat < min)
-				  min = lat;
-			}
-			if (min < bestLat) {
-				bestLat = min;
-				best = cc;
-			}
-		}
-		return best;
-	}
-
 	/* 一个 url-test 组：mihomo 会拿测试地址量每个成员的延迟，走最低的那个，并按
 	   `interval` 反复复查。 */
 	private static void appendUrlTestGroup(StringBuilder sb, String name,
@@ -861,15 +815,6 @@ public class MihomoConfig {
 			  return true;
 		}
 		return false;
-	}
-
-	/* 带上 clash-api 的 bearer 令牌：配置里一旦设了 `secret:`，mihomo 就要求带上它，
-	   否则会返回 401 而且响应体是空的。所有控制接口（/proxies、/delay、/rules、
-	   /connections、/configs、/version）都需要这一步。 */
-	public static void applyAuth(HttpURLConnection conn, Preferences prefs) {
-		String s = prefs.getSecret();
-		if (s != null && !s.isEmpty())
-		  conn.setRequestProperty("Authorization", "Bearer " + s);
 	}
 
 	private static boolean isIpv4(String s) {
