@@ -48,6 +48,10 @@
 	<string name="rule_type_network">Тип сети</string>
 	<string name="rule_action_proxy">Прокси</string>
 	<string name="rule_action_direct">Напрямую</string>
+	<string name="rule_action_proxy_target">Прокси · %1$s</string>
+	<string name="rule_target_hint">Указать узел (необязательно)</string>
+	<string name="rule_target_current">Текущий выбранный узел</string>
+	<string name="rule_target_invalid">Имя узла не может содержать | или ;</string>
 	<string-array name="rule_types">
 		<item>@string/rule_type_domain</item>
 		<item>@string/rule_type_ip</item>

@@ -10,6 +10,7 @@ package com.tunvpn;
 
 import java.net.Inet6Address;
 import java.net.InetAddress;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -20,6 +21,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.AutoCompleteTextView;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.ImageButton;
@@ -61,6 +63,13 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
     private CompoundButton switch_default_proxy;
     private Spinner spinner_type;
     private Spinner spinner_action;
+    /* 规则动作 = 代理时可选的节点（空 = 当前选中的节点）。 */
+    private TextInputLayout til_rule_target;
+    private AutoCompleteTextView spinner_target;
+    /* 候选项：第一项表示"当前节点（tunvpn 组）"，其后是节点名。 */
+    private List<String> targetNames;
+    /* 规则编辑区整体是否可编辑（隧道运行中 / 非规则模式时为 false）。 */
+    private boolean targetEditable = true;
     /* 值输入框的容器，方便让它的 hint 跟着所选规则类型变化。 */
     private TextInputLayout til_rule_value;
     private Spinner spinner_strategy;
@@ -117,12 +126,27 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
         spinner_action = (Spinner) findViewById(R.id.rule_action);
         til_rule_value = (TextInputLayout) findViewById(R.id.til_rule_value);
         edit_value = (EditText) findViewById(R.id.rule_value);
+        /* 指定节点：动作选「代理」时可用。列表 = 空（走当前选中的节点）+ 当前配置里
+           的节点名；节点在生成配置时会再校验一次（不存在的回退到 tunvpn 组）。 */
+        til_rule_target = (TextInputLayout) findViewById(R.id.til_rule_target);
+        spinner_target = (AutoCompleteTextView) findViewById(R.id.rule_target);
+        setupTargetPicker();
         rules_list = (LinearLayout) findViewById(R.id.rules_list);
         rules_empty = (TextView) findViewById(R.id.rules_empty);
         ((MaterialButton) findViewById(R.id.rule_add)).setOnClickListener(this);
 
         setupSpinner(spinner_type, R.array.rule_types);
         setupSpinner(spinner_action, R.array.rule_actions);
+        spinner_action.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                updateTargetEnabled();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
         /*
          * 每种规则类型期望的值不一样，所以 hint 跟着选择器走（它会立刻以 position 0
          * 触发一次，正好把初始提示刷成第一种类型）。
@@ -173,6 +197,74 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
         rules = prefs.getRules();
         renderRules();
         loadUI();
+    }
+
+    /* 节点下拉：第 0 项是"当前选中的节点"（存空串），其后是候选节点名。
+       AutoCompleteTextView 允许不选（用户直接输入的名字在生成配置时会被校验）。 */
+    private void setupTargetPicker() {
+        targetNames = new ArrayList<String>();
+        targetNames.add(getString(R.string.rule_target_current));
+        targetNames.addAll(prefs.getRuleTargets());
+        ArrayAdapter<String> a = new ArrayAdapter<String>(this,
+                android.R.layout.simple_list_item_1, targetNames);
+        spinner_target.setAdapter(a);
+        spinner_target.setThreshold(0);
+        /* 点输入框展开、选中即收起。不再"聚焦就弹"：进页面时控件拿到焦点会直接
+           把几百个节点的列表铺满屏幕。 */
+        spinner_target.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (spinner_target.isEnabled() && !spinner_target.isPopupShowing())
+                    spinner_target.showDropDown();
+            }
+        });
+        spinner_target.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                /* 用 parent.getItemAtPosition 而不是 targetNames.get(position)：列表可能
+                   已被文本过滤过，下标与完整候选表并不一一对应。 */
+                Object picked = parent.getItemAtPosition(position);
+                spinner_target.setText(picked == null ? "" : picked.toString());
+                spinner_target.setSelection(spinner_target.getText().length());
+                spinner_target.dismissDropDown();
+            }
+        });
+        spinner_target.setOnKeyListener(new View.OnKeyListener() {
+            @Override
+            public boolean onKey(View v, int keyCode, android.view.KeyEvent event) {
+                /* 返回键：先收起列表，而不是退出页面。 */
+                if (event.getAction() == android.view.KeyEvent.ACTION_UP
+                        && keyCode == android.view.KeyEvent.KEYCODE_BACK
+                        && spinner_target.isPopupShowing()) {
+                    spinner_target.dismissDropDown();
+                    return true;
+                }
+                return false;
+            }
+        });
+        updateTargetEnabled();
+    }
+
+    /* 只有"代理"动作才需要指定节点；直连时清空并禁用，避免旧值被带到直连规则里。 */
+    private void updateTargetEnabled() {
+        if (spinner_target == null)
+            return;
+        boolean canPick = spinner_action.getSelectedItemPosition() == 0;
+        if (!canPick)
+            spinner_target.setText("");
+        spinner_target.setEnabled(canPick && targetEditable);
+        if (til_rule_target != null)
+            til_rule_target.setEnabled(canPick && targetEditable);
+    }
+
+    /* 输入框里的文本 → 要持久化的节点名。第一项（"当前选中的节点"）或空串都表示
+       不指定，走 tunvpn 组；其余按原样保存 —— 不在候选表里的名字也可以，生成配置时
+       会校验（不存在的回退到 tunvpn 组）。 */
+    private String selectedTarget() {
+        String text = spinner_target.getText().toString().trim();
+        if (text.equals(getString(R.string.rule_target_current)))
+            return "";
+        return text;
     }
 
     private void setupSpinner(Spinner spinner, int arrayRes) {
@@ -263,6 +355,10 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
         spinner_action.setEnabled(canEdit);
         edit_value.setEnabled(canEdit);
         findViewById(R.id.rule_add).setEnabled(canEdit);
+        /* 节点选择还额外依赖"动作 = 代理"与"不在运行中"；先记下整体可编辑状态，
+           再交给 updateTargetEnabled() 细分。 */
+        targetEditable = canEdit;
+        updateTargetEnabled();
         if (Preferences.RULES_STRATEGY_GLOBAL.equals(strat))
             textview_mode_hint.setText(R.string.rules_mode_hint_global);
         else if (Preferences.RULES_STRATEGY_DIRECT.equals(strat))
@@ -393,9 +489,12 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
             ((TextView) row.findViewById(R.id.type)).setText(typeLabel(rule.type));
             ((TextView) row.findViewById(R.id.value)).setText(rule.value);
             TextView action = (TextView) row.findViewById(R.id.action);
-            action.setText(rule.proxy
-                    ? R.string.rule_action_proxy
-                    : R.string.rule_action_direct);
+            if (rule.proxy && !rule.target.isEmpty())
+                action.setText(getString(R.string.rule_action_proxy_target, rule.target));
+            else
+                action.setText(rule.proxy
+                        ? R.string.rule_action_proxy
+                        : R.string.rule_action_direct);
             action.setTextColor(rule.proxy ? ruleProxyColor : ruleDirectColor);
             ImageButton delete = (ImageButton) row.findViewById(R.id.delete);
             delete.setEnabled(!prefs.getEnable());
@@ -418,9 +517,15 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
         String value = edit_value.getText().toString().trim();
         int type = spinner_type.getSelectedItemPosition();
         boolean proxy = spinner_action.getSelectedItemPosition() == 0;
+        String target = proxy ? selectedTarget() : "";
 
         if (!checkValue(type, value)) {
             Toast.makeText(this, R.string.rule_invalid, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        /* '|' 与 ';' 是规则的持久化分隔符，节点名里出现会让整条记录解析错位。 */
+        if (target.indexOf('|') >= 0 || target.indexOf(';') >= 0) {
+            Toast.makeText(this, R.string.rule_target_invalid, Toast.LENGTH_SHORT).show();
             return;
         }
         for (Preferences.Rule rule : rules) {
@@ -430,7 +535,7 @@ public class RulesHubActivity extends BaseActivity implements View.OnClickListen
             }
         }
 
-        rules.add(new Preferences.Rule(type, value, proxy));
+        rules.add(new Preferences.Rule(type, value, proxy, target));
         prefs.setRules(rules);
         edit_value.setText("");
         renderRules();

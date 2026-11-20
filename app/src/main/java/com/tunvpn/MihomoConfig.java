@@ -123,8 +123,9 @@ public class MihomoConfig {
 			java.util.Set<String> skip) throws IOException {
 		/* 已启用的手动服务器优先；否则把所有订阅合并成一个节点池。 */
 		SocksServer server = prefs.getActiveSocksServer();
-		StringBuilder cfg = new StringBuilder(
-			server != null ? manualSocksConfig(prefs, server) : mergedConfig(prefs, skip));
+		StringBuilder cfg = new StringBuilder(server != null
+			? manualSocksConfig(prefs, server, skip)
+			: mergedConfig(prefs, skip));
 		if (!cfg.toString().endsWith("\n"))
 		  cfg.append('\n');
 
@@ -457,6 +458,12 @@ public class MihomoConfig {
 			  ? ("no upstream in country " + cc)
 			  : "no upstream: add a subscription or enable a SOCKS5 server");
 
+		/* 「服务器」页的手动条目也一并写进节点池（不改变"启用即忽略订阅"的语义：
+		   它们**不加入** tunvpn 组的成员，只是让规则可以按名字直接指定）。
+		   名字与订阅节点重复时同样加 " (2)" 后缀。 */
+		for (SocksServer s : prefs.getSocksServers())
+		  appendServerProxies(proxies, prefs, s, taken, skip);
+
 		/* 代理组要按 `proxies:` 段**实际包含**的内容来构造，而不是按我们"打算"用的
 		   名字。去重改名或引号写法差异都可能留下一个根本没被写出去的名字，而只要组里
 		   引用了一个不存在的成员，mihomo 就会以 "proxy group[0] ... not found"
@@ -576,10 +583,92 @@ public class MihomoConfig {
 		  sb.append("      - \"").append(escapeYaml(m)).append("\"\n");
 	}
 
-	/* 手动配置的服务器所需的最小上游。**有原始节点块就用它**（整块原样输出，协议交给
-	   内嵌的 mihomo 处理，select 组指向块里的 name）；只有 SOCKS5 那种"仅地址+端口"
-	   的条目才用表单拼。 */
-	private static String manualSocksConfig(Preferences prefs, SocksServer s) throws IOException {
+	/* 手动服务器模式下生成的配置。**服务器列表里的每一条都会写进 `proxies:`**，
+	   这样规则页的「指定节点」才能把某条规则交给列表里的任意一台；只有**启用中的**
+	   那台进入顶层 `tunvpn` 组（未命中规则的流量仍按"启用即上游"的语义走它）。 */
+	private static String manualSocksConfig(Preferences prefs, SocksServer active,
+			java.util.Set<String> skip) throws IOException {
+		StringBuilder proxies = new StringBuilder();
+		List<String> names = new ArrayList<String>();
+		java.util.Set<String> taken = new java.util.HashSet<String>();
+
+		for (SocksServer s : prefs.getSocksServers()) {
+			boolean isActive = active != null && s.id != null && s.id.equals(active.id);
+			List<String> emitted = appendServerProxies(proxies, prefs, s, taken, skip);
+			if (emitted.isEmpty() && isActive)
+			  throw new IOException(serverMissingReason(s));
+			if (isActive)
+			  names.addAll(emitted);
+		}
+		/* 启用中的服务器刚被删掉（或数据损坏）时，上面的 active 仍来自偏好，
+		   但列表里已经没有它 —— 回退为直接单发这一台，否则配置里一个节点都没有。 */
+		if (names.isEmpty())
+		  names.addAll(appendServerProxies(proxies, prefs, active, taken, skip));
+		if (names.isEmpty())
+		  throw new IOException(serverMissingReason(active));
+
+		StringBuilder sb = new StringBuilder("proxies:\n").append(proxies);
+		sb.append("proxy-groups:\n");
+		sb.append("  - name: \"").append(GROUP).append("\"\n");
+		sb.append("    type: select\n");
+		sb.append("    proxies:\n");
+		for (String n : names)
+		  sb.append("      - \"").append(escapeYaml(n)).append("\"\n");
+		sb.append("rules:\n");
+		appendRules(sb, prefs);
+		lastBuiltNodes = ClashParser.extractProxies(sb.toString()).size();
+		return sb.toString();
+	}
+
+	/* 把一台手动服务器写成 `proxies:` 条目，返回它**实际发射**的节点名（粘贴式节点
+	   可能是多个）。名字含 '|' / ';' 时与规则持久化冲突，直接跳过 —— 这类节点可以
+	   正常作为上游，只是不能写进规则。
+	   同一条目被写两次时（启用中的那台既在列表里、又在兜底分支里）由 taken 去重。 */
+	private static List<String> appendServerProxies(StringBuilder sb, Preferences prefs,
+			SocksServer s, java.util.Set<String> taken, java.util.Set<String> skip) {
+		List<String> names = new ArrayList<String>();
+		if (s == null)
+		  return names;
+		for (String rawName : manualNodeNames(s)) {
+			if (rawName == null || rawName.isEmpty())
+			  continue;
+			/* 内核已经拒绝过的节点（见 TProxyService.rejectedNodes）：再写一次只会让
+			   整份配置被拒，所以直接略过。 */
+			if (skip != null && skip.contains(rawName)) {
+				TProxyService.log("配置: 跳过内核已拒绝的节点「" + rawName + "」");
+				continue;
+			}
+			/* 同名的两台服务器 / 重复粘贴的节点：后出现的加 " (2)" 后缀，与订阅
+			   节点池的去重规则一致。SOCKS5 表单把最终名字直接拼进去；粘贴式节点要
+			   改写原文里的 name，否则组引用的是一个配置中不存在的名字。 */
+			String name = uniqueName(taken, rawName);
+			String text = serverProxyText(prefs, s, name);
+			if (text == null)
+			  continue;
+			if (!name.equals(rawName))
+			  text = renameProxy(text, rawName, name);
+			taken.add(name);
+			sb.append(text);
+			names.add(name);
+		}
+		return names;
+	}
+
+	/* 启用中的服务器无法写成合法节点时的原因（用于启动失败的提示）。 */
+	private static String serverMissingReason(SocksServer s) {
+		if (s == null)
+		  return "no upstream: add a subscription or enable a server";
+		if (s.raw == null || s.raw.trim().isEmpty()) {
+			if (!s.isSocks())
+			  return "节点配置为空，请填写 clash 格式的节点定义";
+			return "SOCKS5 server address is empty";
+		}
+		return "服务器「" + s.label() + "」的节点定义无法解析";
+	}
+
+	/* 单台服务器对应的 `proxies:` 文本。有原始节点块就整块归一后发射（协议交给内核），
+	   否则只可能是 SOCKS5 表单。返回 null 表示该条无法表达。 */
+	private static String serverProxyText(Preferences prefs, SocksServer s, String nodeName) {
 		/* 分支看的是**有没有原始节点块**，而不是协议名：协议名只是列表上显示的标签，
 		   可能是空的、写法也可能与订阅里不同。以前按 `type == "socks5"` 判断，而
 		   `SocksServer` 的构造函数会把空的 type 补成 "socks5" —— 于是从订阅里长按加入
@@ -587,50 +676,22 @@ public class MihomoConfig {
 		   协议却写成 socks5"的节点，那种节点永远连不上。 */
 		String raw = s.raw == null ? "" : s.raw.trim();
 		if (!raw.isEmpty()) {
-			StringBuilder sb = new StringBuilder();
 			/* 优先把原始块**归一**成键值全部正确加引号的单行 flow map：订阅原文里的
 			   节点名 / headers 等值可能含有未加引号的 ": "、# 等字符，或者块风格缩进
 			   在搬运动作中被破坏 —— 原样发射时 mihomo 的 YAML 解析器会以
 			   "yaml: line N: mapping values are not allowed in this context" 拒掉
 			   **整份**配置。解析失败时退回原样发射（emitRawProxy），保底不比以前差。 */
-			String proxiesText = normalizedProxies(raw);
-			String nodeName;
-			if (proxiesText != null) {
-				/* 归一成功：节点名取自解析结果，比从原文正则抠更可靠。 */
-				java.util.Map<String, Object> first = NodeFormat.toMap(raw);
-				String n = first == null ? null :
-					(first.get("name") == null ? null : first.get("name").toString());
-				nodeName = (n != null && !n.trim().isEmpty()) ? n.trim() : nodeNameFromRaw(raw);
-			} else {
-				proxiesText = emitRawProxy(raw);
-				nodeName = nodeNameFromRaw(raw);
-			}
-			sb.append(proxiesText);
-			sb.append("proxy-groups:\n");
-			sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [\"")
-				.append(escapeYaml(nodeName)).append("\"]}\n");
-			sb.append("rules:\n");
-			appendRules(sb, prefs);
-			/* 用户可能贴的就是**整段** `proxies:` 列表，所以节点数要数一下 —— 不过这里只
-			   数这一小段节点文本（不含分组与规则），而非整份配置。 */
-			lastBuiltNodes = ClashParser.extractProxies(proxiesText).size();
-			return sb.toString();
+			String text = normalizedProxies(raw);
+			return text != null ? text : emitRawProxy(raw);
 		}
-
-		/* 没有原始块：只有 SOCKS5 拼得出来，其它协议在这里就是"配置缺失"。 */
-		if (!s.isSocks())
-		  throw new IOException("节点配置为空，请填写 clash 格式的节点定义");
-		String addr = s.addr == null ? "" : s.addr.trim();
-		if (addr.isEmpty())
-		  throw new IOException("SOCKS5 server address is empty");
-
-		StringBuilder sb = new StringBuilder();
-		sb.append("proxies:\n");
+		if (!s.isSocks() || s.addr == null || s.addr.trim().isEmpty())
+		  return null;
 		/* 一律加引号并转义：地址里带 ":"、"#"、空格，或账号密码里带引号时，
 		   裸值会让 mihomo 以 "yaml: mapping values are not allowed" 拒掉整份配置，
 		   或把密码截断成另一个字段。 */
-		sb.append("  - {name: \"socks5\", type: socks5, server: \"")
-			.append(escapeYaml(addr)).append("\"")
+		StringBuilder out = new StringBuilder("  - {name: \"")
+			.append(escapeYaml(nodeName)).append("\", type: socks5, server: \"")
+			.append(escapeYaml(s.addr.trim())).append("\"")
 			.append(", port: ").append(s.port)
 			/* 「UDP relay over TCP」以前是个摆设开关。TCP-only 的 frp/内网穿透
 			   根本不支持 SOCKS5 UDP ASSOCIATE，写死 udp: true 会让内核对 UDP
@@ -638,16 +699,38 @@ public class MihomoConfig {
 			   只走 CONNECT；默认 false 保持原行为不变。 */
 			.append(", udp: ").append(prefs.getUdpInTcp() ? "false" : "true");
 		if (s.user != null && !s.user.isEmpty())
-		  sb.append(", username: \"").append(escapeYaml(s.user)).append("\"");
+		  out.append(", username: \"").append(escapeYaml(s.user)).append("\"");
 		if (s.pass != null && !s.pass.isEmpty())
-			sb.append(", password: \"").append(escapeYaml(s.pass)).append("\"");
-		sb.append("}\n");
-		sb.append("proxy-groups:\n");
-		sb.append("  - {name: \"").append(GROUP).append("\", type: select, proxies: [\"socks5\"]}\n");
-		sb.append("rules:\n");
-		appendRules(sb, prefs);
-		lastBuiltNodes = 1;   /* 这一段只产出一个节点（见 lastBuiltNodes） */
-		return sb.toString();
+		  out.append(", password: \"").append(escapeYaml(s.pass)).append("\"");
+		out.append("}\n");
+		return out.toString();
+	}
+
+	/* 手动服务器在生成的配置里**实际**使用的节点名。与 serverProxyText 的发射逻辑
+	   同源：SOCKS5 表单用服务器自己的名字（`label()`，没有名字时才回退 "socks5"）——
+	   不能用固定的 "socks5"，否则列表里第二台就会撞名；粘贴式节点取原文里的 name
+	   （整段 proxies: 时可能有多个）。重名时的 " (2)" 后缀由 appendServerProxies 统一
+	   处理，所以这里返回的是**原始**名字。 */
+	public static List<String> manualNodeNames(SocksServer s) {
+		List<String> out = new ArrayList<String>();
+		if (s == null)
+		  return out;
+		String raw = s.raw == null ? "" : s.raw.trim();
+		if (!raw.isEmpty()) {
+			String text = normalizedProxies(raw);
+			if (text == null)
+			  text = emitRawProxy(raw);
+			for (ClashParser.ProxyDef p : ClashParser.extractProxies(text)) {
+				if (!p.name.isEmpty())
+				  out.add(p.name);
+			}
+			if (out.isEmpty())
+			  out.add(nodeNameFromRaw(raw));
+		} else if (s.isSocks()) {
+			String label = s.label();
+			out.add(label == null || label.trim().isEmpty() ? "socks5" : label.trim());
+		}
+		return out;
 	}
 
 	/* 从原始 clash 节点块里抠出 "name:"，好让 select 组能引用它。
@@ -746,9 +829,12 @@ public class MihomoConfig {
 			return;
 		}
 		if (Preferences.RULES_STRATEGY_RULES.equals(strategy)) {
-			/* rule 模式：先用户规则。 */
+			/* rule 模式：先用户规则。targets 是这份配置里**真实存在**的节点名 ——
+			   规则里指定的节点若已不在池中（换了订阅 / 删了节点），就退回 tunvpn 组，
+			   否则 mihomo 会因为"规则引用了不存在的代理"拒掉整份配置。 */
+			java.util.Set<String> targets = proxyTargets(sb, prefs);
 			for (Preferences.Rule r : prefs.getRules()) {
-				String line = clashRule(r);
+				String line = clashRule(r, targets);
 				if (line != null)
 				  sb.append("  - ").append(line).append('\n');
 			}
@@ -759,10 +845,45 @@ public class MihomoConfig {
 			.append('\n');
 	}
 
+	/* 规则可以指向的代理名集合 = 这份配置里实际存在的**节点名 + 组名**。
+	   节点名用 ClashParser 解析已产出的 `proxies:` 段（与 mergedConfig 的校验同源，
+	   块式 / flow / 加不加引号都能读出）；组名由我们自己生成，直接列出来。
+	   规则引用一个不存在的名字会让 mihomo 拒绝整份配置，所以这一步是必需的。 */
+	private static java.util.Set<String> proxyTargets(StringBuilder sb, Preferences prefs) {
+		java.util.Set<String> out = new java.util.HashSet<String>();
+		out.add(GROUP);
+		for (ClashParser.ProxyDef p : ClashParser.extractProxies(sb.toString())) {
+			if (p.name == null || p.name.isEmpty())
+			  continue;
+			out.add(p.name);
+			/* 自动模式下每个国家还有一个 url-test 组，组名同样可以被规则直接引用。
+			   国家码的取法与 appendAutoGroups 一致（持久化的 服务器 -> 国家 映射）。 */
+			if (prefs.getAutoSelect()) {
+				String cc = prefs.getServerCountry(p.server);
+				if (cc == null || cc.isEmpty())
+				  cc = GeoIp.UNKNOWN;
+				out.add(countryGroup(cc));
+			}
+		}
+		if (prefs.getAutoSelect())
+		  out.add(GLOBAL_GROUP);
+		return out;
+	}
+
 	/* 把一条 App 规则转成 clash 规则行，**尊重用户实际选的类型**（早期版本会从值里
-	   反推类型、忽略用户的选择）。无法表达时返回 null。 */
-	private static String clashRule(Preferences.Rule r) {
+	   反推类型、忽略用户的选择）。无法表达时返回 null。
+	   规则指定的节点（`r.target`）不在 targets 里时回退到 tunvpn 组：节点可能已被
+	   删除，或者当前启用的是另一份订阅。 */
+	private static String clashRule(Preferences.Rule r, java.util.Set<String> targets) {
 		String target = r.proxy ? GROUP : "DIRECT";
+		String chosen = r.proxyTarget();
+		if (!chosen.isEmpty()) {
+			if (targets == null || targets.contains(chosen))
+			  target = chosen;
+			else
+			  TProxyService.log("配置: 规则「" + r.value + "」指定的节点「" + chosen
+				+ "」不在当前配置里，回退到 " + GROUP);
+		}
 		String value = r.value == null ? "" : r.value.trim();
 		if (value.isEmpty())
 		  return null;

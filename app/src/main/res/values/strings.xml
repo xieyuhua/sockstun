@@ -79,6 +79,10 @@
 	<string name="rule_type_network">网络类型</string>
 	<string name="rule_action_proxy">Proxy</string>
 	<string name="rule_action_direct">Direct</string>
+	<string name="rule_action_proxy_target">Proxy · %1$s</string>
+	<string name="rule_target_hint">指定节点（可选）</string>
+	<string name="rule_target_current">当前选中的节点</string>
+	<string name="rule_target_invalid">节点名不能包含 | 或 ;</string>
 	<string name="rule_strategy_label">分流策略</string>
 	<string name="rule_strategy_rules">规则模式</string>
 	<string name="rule_strategy_global">全局代理</string>

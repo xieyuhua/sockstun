@@ -177,27 +177,90 @@ public class Preferences
 		public int type;
 		public String value;
 		public boolean proxy;
+		/* 动作 = 代理时可选的目标节点名（空 = 走顶层 tunvpn 组，即"当前选中的节点"）。
+		   非空时这条规则直接指向该节点；节点在当前配置里不存在时退回 tunvpn 组
+		   （见 MihomoConfig.clashRule），所以删节点 / 切订阅不会毒掉整份配置。
+		   持久化格式追加第 4 个字段，旧的三字段记录仍然可读。 */
+		public String target = "";
 
 		public Rule(int type, String value, boolean proxy) {
+			this(type, value, proxy, "");
+		}
+
+		public Rule(int type, String value, boolean proxy, String target) {
 			this.type = type;
 			this.value = value;
 			this.proxy = proxy;
+			this.target = target == null ? "" : target;
+		}
+
+		/* 规则里指定的节点名。仅在动作为代理且填了目标时有意义。 */
+		public String proxyTarget() {
+			return proxy ? target : "";
 		}
 
 		public String encode() {
-			return type + "|" + value + "|" + (proxy ? "1" : "0");
+			String head = type + "|" + value + "|" + (proxy ? "1" : "0");
+			return target.isEmpty() ? head : head + "|" + target;
 		}
 
 		public static Rule decode(String text) {
-			String[] f = text.split("\\|");
-			if (f.length != 3 || f[1].isEmpty())
+			String[] f = text.split("\\|", -1);
+			if (f.length < 3 || f[1].isEmpty())
 			  return null;
 			try {
-				return new Rule(Integer.parseInt(f[0]), f[1], "1".equals(f[2]));
+				return new Rule(Integer.parseInt(f[0]), f[1], "1".equals(f[2]),
+					f.length > 3 ? f[3] : "");
 			} catch (NumberFormatException e) {
 				return null;
 			}
 		}
+	}
+
+	/* 规则里可以指定的候选节点 —— 与**当前会生成的配置**保持一致（重名去重的
+	   " (2)" 后缀也一并复现，否则规则引用的名字在配置里并不存在）：
+	   - 启用了手动服务器时，配置里只有那一台，所以只列它；
+	   - 否则列出启用订阅的节点。
+	   名字里含 '|' 或 ';' 的会被跳过：规则持久化正是用它们做字段 / 记录分隔符
+	   （与 RulesHubActivity.checkValue 对值的限制同源）。 */
+	public List<String> getRuleTargets() {
+		List<String> out = new ArrayList<String>();
+		java.util.Set<String> taken = new java.util.HashSet<String>();
+		SocksServer active = getActiveSocksServer();
+		if (active == null) {
+			for (Subscription sub : getSubscriptions()) {
+				if (!sub.enabled)
+				  continue;
+				for (ClashNode n : ClashNode.decode(getSubNodes(sub.id)))
+				  addTarget(out, taken, n.name);
+			}
+		} else {
+			for (String name : MihomoConfig.manualNodeNames(active))
+			  addTarget(out, taken, name);
+		}
+		/* 服务器列表里的每一条（含未启用的）都会写进配置，所以都可以被规则指定；
+		   与订阅模式下的"启用即忽略订阅"不冲突 —— 它们只是不进 tunvpn 组。 */
+		for (SocksServer s : getSocksServers()) {
+			for (String name : MihomoConfig.manualNodeNames(s))
+			  addTarget(out, taken, name);
+		}
+		return out;
+	}
+
+	/* 与 MihomoConfig.uniqueName 同一套去重规则：第一个用原名，之后 "name (2)"…
+	   这样列出来的名字与生成配置里的节点名逐字一致。 */
+	private static void addTarget(List<String> out, java.util.Set<String> taken, String name) {
+		if (name == null || name.isEmpty())
+		  return;
+		String candidate = name;
+		for (int i = 2; taken.contains(candidate); i++)
+		  candidate = name + " (" + i + ")";
+		taken.add(candidate);
+		/* '|' / ';' 是规则的持久化分隔符：这类节点在配置里存在，但无法安全地写进规则，
+		   所以不列出来（生成时若被手工填入，规则会回退到 tunvpn 组）。 */
+		if (candidate.indexOf('|') >= 0 || candidate.indexOf(';') >= 0)
+		  return;
+		out.add(candidate);
 	}
 
 	private SharedPreferences prefs;

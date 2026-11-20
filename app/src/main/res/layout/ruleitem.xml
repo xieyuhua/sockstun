@@ -29,12 +29,15 @@
 		android:ellipsize="middle"
 		android:maxLines="1"
 		android:textAppearance="?attr/textAppearanceBodyMedium"/>
+	<!-- 动作：直连 / 代理；指定了节点时显示「代理 · 节点名」 -->
 	<TextView
 		android:id="@+id/action"
 		android:layout_width="wrap_content"
 		android:layout_height="wrap_content"
 		android:layout_marginStart="8dp"
+		android:ellipsize="end"
 		android:maxLines="1"
+		android:maxWidth="140dp"
 		android:textAppearance="?attr/textAppearanceLabelMedium"
 		android:textStyle="bold"/>
 	<ImageButton

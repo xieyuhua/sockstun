@@ -72,6 +72,10 @@
 	<string name="rule_type_network">网络类型</string>
 	<string name="rule_action_proxy">代理</string>
 	<string name="rule_action_direct">直连</string>
+	<string name="rule_action_proxy_target">代理 · %1$s</string>
+	<string name="rule_target_hint">指定节点（可选）</string>
+	<string name="rule_target_current">当前选中的节点</string>
+	<string name="rule_target_invalid">节点名不能包含 | 或 ;</string>
 	<!-- 顺序必须与 Preferences.Rule.TYPE_* 一致，新项只能追加 -->
 	<string-array name="rule_types">
 		<item>@string/rule_type_domain</item>
